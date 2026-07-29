@@ -1,3 +1,5 @@
+import type { Env } from './env.js';
+
 export type Platform = 'youtube' | 'linkedin' | 'instagram' | 'facebook' | 'pinterest' | 'tiktok';
 
 export type ErrorClass = 'retryable' | 'auth' | 'quota' | 'permanent' | 'ambiguous';
@@ -65,11 +67,11 @@ export interface PlatformAdapter {
   platform: Platform;
   /** Plain timestamp check — no network call. */
   needsRefresh(account: Account): boolean;
-  ensureFreshToken(account: Account): Promise<Account>;
+  ensureFreshToken(account: Account, env: Env): Promise<Account>;
   /** Throws before spending an API call. */
   validate(target: PostTarget, media: MediaAsset[]): void;
-  publish(target: PostTarget, media: MediaAsset[], account: Account): Promise<PublishResult>;
+  publish(target: PostTarget, media: MediaAsset[], account: Account, env: Env): Promise<PublishResult>;
   /** For async platforms; reads/writes adapter_state. */
-  checkStatus(target: PostTarget, account: Account): Promise<PublishResult>;
+  checkStatus(target: PostTarget, account: Account, env: Env): Promise<PublishResult>;
   classifyError(err: unknown): ErrorClass;
 }

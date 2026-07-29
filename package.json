@@ -7,6 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "enqueue": "tsx src/cli/enqueue.ts",
+    "youtube-auth": "tsx src/cli/youtube-auth.ts",
+    "linkedin-auth-url": "tsx src/cli/linkedin-auth-url.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

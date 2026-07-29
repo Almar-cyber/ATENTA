@@ -1,5 +1,7 @@
 import { adapters } from './adapters/index.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
+import { encryptJSON } from './lib/crypto.js';
+import { fetchWithRetry } from './lib/http.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
 
@@ -44,7 +46,7 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
     const adapter = adapters[account.platform];
     if (!adapter.needsRefresh(account)) continue;
     try {
-      await adapter.ensureFreshToken(account);
+      await adapter.ensureFreshToken(account, env);
     } catch (err) {
       console.error(`[token-refresh] ${account.platform}/${account.display_name} failed:`, err);
       await env.DB.prepare(`update accounts set status = 'needs_reauth', updated_at = ? where id = ?`)
@@ -80,7 +82,7 @@ async function stepClaimAndPublishDue(env: Env): Promise<void> {
     const adapter = adapters[target.platform];
     try {
       adapter.validate(target, media);
-      const result = await adapter.publish(target, media, account);
+      const result = await adapter.publish(target, media, account, env);
       await applyPublishResult(env, target, result);
     } catch (err) {
       await handlePublishError(env, target, adapter, err);
@@ -107,7 +109,7 @@ async function stepRecheckProcessing(env: Env): Promise<void> {
     if (!account) continue;
     const adapter = adapters[target.platform];
     try {
-      const result = await adapter.checkStatus(target, account);
+      const result = await adapter.checkStatus(target, account, env);
       await applyPublishResult(env, target, result);
     } catch (err) {
       await handlePublishError(env, target, adapter, err);
@@ -231,14 +233,86 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
 
 // OAuth callback — LinkedIn, Meta, Pinterest, TikTok only (their dev consoles require a
 // registered HTTPS redirect_uri with no loopback exception). YouTube uses the local loopback
-// flow instead (see adapters/youtube.ts), so it never hits this Worker.
-// Phase 1-4 fill in the real code-for-token exchange per platform; this is the routing shell.
-async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url: URL, _env: Env): Promise<Response> {
+// flow instead (see adapters/youtube.ts + cli/youtube-auth.ts), so it never hits this Worker.
+async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url: URL, env: Env): Promise<Response> {
   const code = url.searchParams.get('code');
   if (!code) {
     return new Response('missing ?code=', { status: 400 });
   }
-  // TODO: exchange `code` for tokens against the platform's token endpoint, then
+
+  if (platform === 'linkedin') {
+    return handleLinkedinCallback(code, url, env);
+  }
+
+  // TODO (Phase 2-4): exchange `code` for tokens against each platform's token endpoint, then
   // setAccountTokens(env.DB, accountId, tokenPayload, env.TOKEN_ENCRYPTION_KEY).
   return new Response(`${platform} OAuth callback not implemented yet — see phased roadmap`, { status: 501 });
+}
+
+// state carries {displayName}, base64url-encoded by cli/linkedin-auth-url.ts — the Worker has no
+// other way to know which account a given redirect belongs to.
+async function handleLinkedinCallback(code: string, url: URL, env: Env): Promise<Response> {
+  const state = url.searchParams.get('state');
+  if (!state) return new Response('missing ?state=', { status: 400 });
+
+  let displayName: string;
+  try {
+    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
+    if (!displayName) throw new Error('empty displayName');
+  } catch {
+    return new Response('invalid ?state=', { status: 400 });
+  }
+
+  // Must match the redirect_uri used to request `code` exactly (LinkedIn requires an exact match).
+  const redirectUri = `${url.origin}${url.pathname}`;
+
+  const tokenRes = await fetchWithRetry('https://www.linkedin.com/oauth/v2/accessToken', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: env.LINKEDIN_CLIENT_ID,
+      client_secret: env.LINKEDIN_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+    }),
+  });
+  if (!tokenRes.ok) {
+    return new Response(`linkedin token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
+  }
+  const tokenJson = (await tokenRes.json()) as { access_token: string; expires_in: number };
+
+  const userinfoRes = await fetchWithRetry('https://api.linkedin.com/v2/userinfo', {
+    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+  });
+  if (!userinfoRes.ok) return new Response(`linkedin userinfo failed: ${userinfoRes.status}`, { status: 502 });
+  const userinfo = (await userinfoRes.json()) as { sub: string };
+  const memberUrn = `urn:li:person:${userinfo.sub}`;
+
+  const { ciphertext, iv } = await encryptJSON(
+    { access_token: tokenJson.access_token, member_urn: memberUrn },
+    env.TOKEN_ENCRYPTION_KEY
+  );
+  const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
+  const ts = nowIso();
+
+  const existing = await env.DB.prepare(`select id from accounts where platform = 'linkedin' and display_name = ?`)
+    .bind(displayName)
+    .first<{ id: string }>();
+
+  if (existing) {
+    await env.DB.prepare(
+      `update accounts set token_ciphertext = ?, token_iv = ?, access_token_expires_at = ?, external_account_id = ?, status = 'active', updated_at = ? where id = ?`
+    )
+      .bind(ciphertext, iv, expiresAt, memberUrn, ts, existing.id)
+      .run();
+  } else {
+    await env.DB.prepare(
+      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, access_token_expires_at) values (?, 'linkedin', ?, ?, 'active', ?, ?, ?)`
+    )
+      .bind(crypto.randomUUID(), displayName, memberUrn, ciphertext, iv, expiresAt)
+      .run();
+  }
+
+  return new Response(`Conta "${displayName}" autenticada no LinkedIn. Pode fechar esta aba.`);
 }
