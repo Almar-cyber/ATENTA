@@ -1,6 +1,6 @@
-// Read-only visibility into what's scheduled/queued/published — a companion to enqueue.ts,
-// not a dashboard. Deliberately just a table on stdout (see architecture doc: "no custom admin
-// UI for MVP" — this is the CLI equivalent of eyeballing the D1 Table Editor).
+// Read-only visibility into what's scheduled/queued/published — a fast stdout companion to
+// enqueue.ts for quick checks from a terminal. The dashboard (GET /) covers the same data with
+// filtering, media previews, and a cancel action; this stays useful for scripting/piping.
 import { d1Query } from './d1-client.js';
 
 interface Row {

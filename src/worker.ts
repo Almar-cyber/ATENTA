@@ -1,5 +1,8 @@
 import { adapters } from './adapters/index.js';
+import { handleApiRequest } from './api.js';
+import { DASHBOARD_HTML } from './dashboard.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
+import { checkDashboardAuth } from './lib/auth.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
 import type { Env } from './lib/env.js';
@@ -11,6 +14,31 @@ const PUBLISHING_STALE_MINUTES = 30;
 const PROCESSING_TIMEOUT_HOURS = 6;
 const MAX_ATTEMPTS = 5;
 
+// Required by Pinterest/TikTok app review — this is a single-user personal tool, not a service
+// with outside users, so this states plainly what it actually does rather than boilerplate legalese.
+const PRIVACY_POLICY_TEXT = `ALMAR Social Scheduler — Politica de Privacidade
+
+Esta ferramenta (ALMAR Social Scheduler) e uma ferramenta pessoal de agendamento de posts,
+operada e usada por ALMAR para publicar nas suas proprias contas do YouTube, LinkedIn, Facebook,
+Instagram, Pinterest e TikTok. Nao e um servico oferecido a terceiros nem a outros usuarios.
+
+Dados coletados:
+- Tokens de acesso/atualizacao (OAuth) das contas conectadas pelo proprio proprietario.
+- Metadados dos posts agendados (legenda, horario, plataforma de destino).
+
+Como os dados sao armazenados:
+- Os tokens sao criptografados (AES-256-GCM) antes de serem salvos num banco de dados privado
+  (Cloudflare D1), acessivel apenas pelo proprietario da ferramenta.
+
+O que NAO fazemos:
+- Nao compartilhamos, vendemos ou usamos esses dados para publicidade.
+- Nao coletamos dados de nenhum outro usuario ou visitante.
+
+Retencao: os tokens ficam armazenados ate o proprietario revogar o acesso do app ou remover a
+conta da ferramenta.
+
+Contato: alexia01native@gmail.com`;
+
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runPoller(env));
@@ -18,10 +46,32 @@ export default {
 
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const match = /^\/oauth\/callback\/(linkedin|meta|pinterest|tiktok)$/.exec(url.pathname);
-    if (match) {
-      return handleOAuthCallback(match[1] as 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url, env);
+
+    // Unauthenticated: these are cross-site redirects landing here straight from each platform's
+    // consent screen, not a browser tab that's already presented dashboard credentials.
+    const oauthMatch = /^\/oauth\/callback\/(linkedin|meta|pinterest|tiktok)$/.exec(url.pathname);
+    if (oauthMatch) {
+      return handleOAuthCallback(oauthMatch[1] as 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url, env);
     }
+
+    // Unauthenticated: platform app-review processes (Pinterest, TikTok, ...) fetch this
+    // directly, with no way to present dashboard credentials. Accepts an optional trailing
+    // segment (e.g. /privacy/almar) — some app-review forms require the company/app name to
+    // literally appear in the URL to prove ownership; the suffix is otherwise ignored.
+    if (/^\/privacy(\/.*)?$/.test(url.pathname)) {
+      return new Response(PRIVACY_POLICY_TEXT, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    }
+
+    const authError = checkDashboardAuth(request, env);
+    if (authError) return authError;
+
+    if (url.pathname.startsWith('/api/')) {
+      return handleApiRequest(request, url, env);
+    }
+    if (url.pathname === '/' || url.pathname === '/dashboard') {
+      return new Response(DASHBOARD_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+
     return new Response('not found', { status: 404 });
   },
 };

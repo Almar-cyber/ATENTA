@@ -28,6 +28,7 @@ wrangler d1 create social-scheduler          # database_id já no wrangler.toml
 wrangler d1 execute social-scheduler --remote --file=migrations/0001_init.sql
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
+wrangler secret put DASHBOARD_PASSWORD       # protege o dashboard e a API (ver seção Dashboard)
 wrangler deploy
 ```
 
@@ -74,13 +75,73 @@ Para os CLIs locais (`enqueue`, `youtube-auth`, `*-auth-url`), copiar `.env.exam
 4. `npm run tiktok-auth-url -- --account="Minha Conta" --redirect-base=https://social-scheduler.zona21.workers.dev`.
 5. **Enquanto a auditoria não passa**: posts saem forçados `SELF_ONLY` numa conta de sandbox, não públicos de verdade. `src/adapters/tiktok.ts` está com confiança menor que os outros — os nomes exatos de campos vieram de padrões documentados, não de um teste real contra a API; testar com um post real antes de confiar 100% nele.
 
-## Enfileirando um post
+## Dashboard
+
+`https://social-scheduler.zona21.workers.dev/` (também em `/dashboard`) serve um dashboard de
+uma página só (HTML/CSS/JS inline no próprio Worker, sem build step) pra:
+
+- **Criar posts** — formulário com legenda, título opcional (YouTube), data/hora, contas de
+  destino (uma ou várias, uma checkbox por conta autenticada), upload de mídia (um arquivo ou
+  vários pra carrossel, reordenáveis com ↑/↓) e os campos específicos mais comuns
+  (`privacyStatus` do YouTube, `board_id` do Pinterest, Story do Instagram).
+- **Rascunhos** — "Salvar como rascunho" grava com status `draft` (sem passar pela validação de
+  mídia, já que a ideia é capturar antes de estar pronto); "Mover p/ fila" promove pra `queued`.
+- **Duplicar** — copia um post existente pro formulário reaproveitando a mídia já no R2 (sem
+  re-upload), pra republicar em outra data ou outra conta.
+- **Consultar** — duas visões, alternáveis por aba (inspirado no calendário editorial de
+  ferramentas como mLabs/Buffer/Later): **lista** agrupada por dia, com thumbnail real da mídia, e
+  um **calendário mensal** com um chip por post em cada dia (cor da borda = plataforma). O status
+  aparece na própria peça, não só na coluna de badge: borda tracejada = rascunho, ⚠ + fundo
+  vermelho = falhou. Clicar num chip abre o detalhe; clicar num dia vazio já pré-preenche a data no
+  formulário. Filtros por status, plataforma e conta. Atualiza sozinho a cada 30s.
+- **Alerta no topo** — barra vermelha quando algum post falhou ou alguma conta precisa
+  reautenticar; clicar nela filtra a lista pelas falhas. Compensa em parte a falta de e-mail
+  automático dos Cron Triggers (ver Pendências), mas só enquanto o dashboard estiver aberto.
+- **Cancelar** — enquanto o post ainda está `draft`/`queued` (antes do poller pegar pra publicar),
+  tanto na lista quanto no modal de detalhe do calendário.
+
+Protegido por HTTP Basic Auth contra um único secret (`DASHBOARD_PASSWORD` — qualquer usuário
+serve, só a senha é validada) já que é uma ferramenta pessoal exposta num Worker público. As rotas
+`/oauth/callback/*` continuam sem autenticação (são redirects que vêm direto de cada plataforma).
+
+A validação de mídia por plataforma (ex: YouTube/TikTok exigem vídeo, Pinterest/Instagram exigem
+`public_url`) reaproveita o `validate()` de cada adapter — um post que vai falhar na hora de
+publicar já é recusado na criação, com a mesma mensagem de erro que apareceria no poller.
+
+Upload de mídia grava no R2 e monta o `public_url` a partir de `MEDIA_PUBLIC_BASE_URL`
+(`wrangler.toml [vars]`, já apontando pro domínio custom documentado abaixo). Pra rodar o
+dashboard localmente (`npm run dev`), crie um `.dev.vars` (gitignored) com pelo menos
+`DASHBOARD_PASSWORD=qualquercoisa` e `TOKEN_ENCRYPTION_KEY=...` — o Wrangler carrega esse arquivo
+sozinho como secrets locais, sem precisar de `wrangler secret put`.
+
+## Carrossel e Stories
+
+Anexar 2+ arquivos no dashboard cria um carrossel. Cada plataforma tem regras diferentes, e o
+`validate()` de cada adapter recusa a combinação inválida na hora de criar o post (não na hora de
+publicar) — o dashboard também avisa antes de enviar:
+
+| Plataforma | Máx. de arquivos | Vídeo no carrossel | Como é feito |
+| --- | --- | --- | --- |
+| Instagram | 10 | ✅ (pode misturar com imagem) | containers-filho `is_carousel_item=true` → container-pai `media_type=CAROUSEL` |
+| Facebook | 10 (limite auto-imposto; a Meta não documenta um número) | ❌ só imagens | `/photos` com `published=false` → `/feed` com `attached_media[N]` |
+| LinkedIn | 20 | ❌ só imagens | um `initializeUpload` por imagem → `content.multiImage.images[]` |
+| Pinterest | 5 | ❌ só imagens | `media_source.source_type=multiple_image_urls` |
+| YouTube / TikTok | 1 vídeo | — | não têm carrossel |
+
+Vídeo sozinho continua funcionando em todas. A ordem dos arquivos na fila do dashboard (setas ↑/↓)
+é a ordem em que aparecem no carrossel — ela é gravada em `post_target_media.position`.
+
+**Stories (Instagram)** — checkbox no formulário. Aceita exatamente um arquivo (imagem ou vídeo);
+a API da Meta não publica Stories em carrossel nem elementos interativos (stickers, links, música),
+só a imagem/vídeo base.
+
+## Enfileirando um post (via CLI, alternativa ao dashboard)
 
 ```bash
 npm run enqueue -- --platform=youtube --account="Meu Canal" --scheduled_for=2026-08-01T12:00:00Z --caption="..."
 ```
 
-Isso só cria as linhas em `scheduled_posts`/`post_targets` — falta anexar mídia via `post_target_media` (ainda não tem CLI pra isso). Pra fazer manualmente:
+Isso só cria as linhas em `scheduled_posts`/`post_targets` — falta anexar mídia via `post_target_media` (ainda não tem CLI pra isso, mas o dashboard cobre esse caso). Pra fazer manualmente:
 
 ```bash
 wrangler r2 object put social-scheduler-media/meu-video.mp4 --file=./meu-video.mp4
@@ -103,15 +164,17 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 3. **Fase 2** ✅ (código) — Instagram + Facebook via Meta Graph API. Falta você gerar o app Meta e rodar o CLI de auth; Instagram também depende do domínio customizado do R2 (ver Pendências).
 4. **Fase 3** ✅ (código) — Pinterest. Falta gerar o app e, principalmente, conseguir o Standard access.
 5. **Fase 4** ✅ (código, confiança menor) — TikTok. Falta gerar o app e submeter a auditoria — comece esse passo primeiro, é o que demora mais.
+6. **Fase 5** ✅ — Dashboard web (`GET /`) pra criar e consultar posts agendados sem precisar dos CLIs ou do D1 Table Editor. Falta só você rodar `wrangler secret put DASHBOARD_PASSWORD` (passo já incluído no Setup acima).
+7. **Fase 6** ✅ (código, não testado contra as APIs reais) — Carrossel/multi-mídia nas quatro plataformas que suportam, + toggle de Stories do Instagram no dashboard. Ver seção Carrossel e a ressalva em Pendências.
 
 Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que falta em todos os casos é você gerar as credenciais OAuth de cada plataforma (não posso criar essas contas/apps por você) e rodar o CLI de auth correspondente.
 
 ## Pendências
 
-- **Domínio customizado pro R2** — falta configurar (precisa de um dos seus domínios na Cloudflare). Bloqueia Instagram, posts com mídia do Facebook e imagens/vídeos do Pinterest (todos buscam a mídia por URL pública; YouTube/LinkedIn/TikTok recebem os bytes direto, não precisam disso).
+- ~~**Domínio customizado pro R2**~~ ✅ resolvido — `https://scheduler-media.omangue.co` está de pé e servindo objetos do bucket (verificado com um PUT + GET + delete). É de lá que sai o `public_url` que Instagram, Facebook (posts com mídia) e Pinterest precisam pra buscar o arquivo; YouTube/LinkedIn/TikTok recebem os bytes direto e não dependem disso.
 - **Alerta de falha** — Cron Triggers não têm o e-mail automático que o GitHub Actions teria. Falhas só aparecem em `wrangler tail` / dashboard. TODO em `src/worker.ts` (`runPoller`).
 - **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker.
 - **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
-- **Sem carrossel/multi-mídia** — `instagram.ts`, `linkedin.ts` e `pinterest.ts` cobrem só um arquivo de mídia por post.
+- **Carrossel: nenhum foi testado contra a API real ainda** — o código dos quatro caminhos (ver seção Carrossel) foi escrito a partir da documentação oficial de cada plataforma, não de uma publicação real. O caminho do Instagram em particular cria os containers-filho e o container-pai numa tacada só, sem esperar o processamento de cada filho: pra carrossel de imagens isso é o que a doc da Meta mostra, mas carrossel com vídeo pode falhar na criação do pai e cair no retry do poller (que recria os filhos — os antigos expiram sozinhos). Testar com um post real de cada tipo antes de confiar.
 - **TikTok tem confiança menor** — nomes de campos vieram de padrões documentados, não de teste real contra a API (não dá pra testar de verdade até a auditoria da Content Posting API aprovar). Verificar contra a doc atual antes de confiar em produção.
 - **Pinterest: upload de vídeo é a parte menos certa** — o formato exato de `upload_url`/`upload_parameters` do endpoint `/v5/media` pode variar; imagem (via `image_url`) é o caminho mais testado/documentado.

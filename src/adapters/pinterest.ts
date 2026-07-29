@@ -7,6 +7,9 @@ import { nowIso } from '../lib/db.js';
 
 const API_BASE = 'https://api.pinterest.com/v5';
 
+// media_source.items is minItems 2 / maxItems 5 in Pinterest's own v5 OpenAPI spec.
+const CAROUSEL_MAX_ITEMS = 5;
+
 interface PinterestTokens {
   access_token: string;
   refresh_token: string;
@@ -54,8 +57,18 @@ export const pinterestAdapter: PlatformAdapter = {
   },
 
   validate(target, media) {
-    if (media.length !== 1) throw new Error('pinterest: exactly one image or video is required');
-    if (!media[0].public_url) throw new Error('pinterest: media needs a public_url (custom R2 domain)');
+    if (media.length === 0) throw new Error('pinterest: at least one image or video is required');
+    if (media.length > CAROUSEL_MAX_ITEMS) {
+      throw new Error(`pinterest: carousel supports at most ${CAROUSEL_MAX_ITEMS} images (got ${media.length})`);
+    }
+    // multiple_image_urls is the only multi-slide source_type the v5 create API exposes — mixed
+    // image/video multi-slide Pins exist in Pinterest's read model but can't be authored.
+    if (media.length > 1 && media.some((m) => m.mime_type.startsWith('video/'))) {
+      throw new Error('pinterest: carrossel aceita apenas imagens (vídeo apenas sozinho)');
+    }
+    for (const asset of media) {
+      if (!asset.public_url) throw new Error('pinterest: media needs a public_url (custom R2 domain)');
+    }
     const options = target.options as { board_id?: string };
     if (!options.board_id) throw new Error('pinterest: no board_id in options and no default board resolved at auth time');
   },
@@ -68,6 +81,27 @@ export const pinterestAdapter: PlatformAdapter = {
     const options = target.options as { board_id?: string };
     const boardId = options.board_id ?? (account.extra as { default_board_id?: string }).default_board_id;
     if (!boardId) throw new Error('pinterest: no board_id resolved');
+
+    // Carousel Pin — same synchronous /v5/pins call as a single image, just a different
+    // media_source variant. No register/poll step (that's video-only).
+    if (media.length > 1) {
+      const res = await fetchWithRetry(`${API_BASE}/pins`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          board_id: boardId,
+          description: target.caption_override ?? '',
+          media_source: {
+            source_type: 'multiple_image_urls',
+            items: media.map((m) => ({ url: m.public_url })),
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(`pinterest: carousel pin create failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { id: string };
+
+      return { state: 'published', externalId: json.id, externalUrl: `https://www.pinterest.com/pin/${json.id}/` };
+    }
 
     if (asset.mime_type.startsWith('video/')) {
       const registerRes = await fetchWithRetry(`${API_BASE}/media`, {

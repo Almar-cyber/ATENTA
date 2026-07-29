@@ -1,9 +1,13 @@
-import type { PlatformAdapter } from '../lib/types.js';
+import type { PublishResult, PlatformAdapter } from '../lib/types.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
 
 const GRAPH_VERSION = 'v21.0';
+
+// Meta documents no numeric cap for attached_media on a Page /feed post; 10 is a conservative
+// self-imposed limit matching what the Facebook composer itself allows.
+const CAROUSEL_MAX_ITEMS = 10;
 
 interface MetaTokens {
   access_token: string; // Page access token, shared with instagram.ts's own copy on the linked IG account row
@@ -28,9 +32,19 @@ export const facebookAdapter: PlatformAdapter = {
   },
 
   validate(_target, media) {
-    if (media.length > 1) throw new Error('facebook: only a single image or video is supported in Phase 2');
-    if (media.length === 1 && !media[0].public_url) {
-      throw new Error('facebook: media needs a public_url (custom R2 domain) — see README Pendências');
+    if (media.length > CAROUSEL_MAX_ITEMS) {
+      throw new Error(`facebook: at most ${CAROUSEL_MAX_ITEMS} photos per post (got ${media.length})`);
+    }
+    // Page /feed carousels are photos-only: there's no documented way to put a video's media_fbid
+    // in attached_media, and Meta's own dev forum confirms mixed photo+video posts aren't possible
+    // this way. A single video still publishes fine via /videos below.
+    if (media.length > 1 && media.some((m) => m.mime_type.startsWith('video/'))) {
+      throw new Error('facebook: multi-media posts support images only (vídeo apenas sozinho)');
+    }
+    for (const asset of media) {
+      if (!asset.public_url) {
+        throw new Error('facebook: media needs a public_url (custom R2 domain) — see README Pendências');
+      }
     }
   },
 
@@ -41,6 +55,33 @@ export const facebookAdapter: PlatformAdapter = {
 
     const pageId = account.external_account_id;
     const message = target.caption_override ?? '';
+
+    // Multi-photo carousel: upload each photo unpublished (published=false) to collect its
+    // media_fbid, then attach them all to one /feed post. Unpublished photos are dropped by Meta
+    // after ~24h if never attached, so the second call has to follow promptly — it does, both
+    // happen in this one invocation.
+    if (media.length > 1) {
+      const mediaFbids: string[] = [];
+      for (const asset of media) {
+        const photoRes = await fetchWithRetry(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/photos`, {
+          method: 'POST',
+          body: new URLSearchParams({
+            access_token: tokens.access_token,
+            url: asset.public_url!,
+            published: 'false',
+          }),
+        });
+        if (!photoRes.ok) throw new Error(`facebook: unpublished photo upload failed: ${photoRes.status} ${await photoRes.text()}`);
+        mediaFbids.push(((await photoRes.json()) as { id: string }).id);
+      }
+
+      const feedBody = new URLSearchParams({ access_token: tokens.access_token, message });
+      // Indexed bracket keys, each value a JSON object — the only form Meta documents for this.
+      mediaFbids.forEach((fbid, i) => feedBody.set(`attached_media[${i}]`, JSON.stringify({ media_fbid: fbid })));
+
+      return publishTo(`${pageId}/feed`, feedBody);
+    }
+
     const body = new URLSearchParams({ access_token: tokens.access_token });
 
     let endpoint: string;
@@ -60,12 +101,7 @@ export const facebookAdapter: PlatformAdapter = {
       }
     }
 
-    const res = await fetchWithRetry(`https://graph.facebook.com/${GRAPH_VERSION}/${endpoint}`, { method: 'POST', body });
-    if (!res.ok) throw new Error(`facebook: publish failed: ${res.status} ${await res.text()}`);
-    const json = (await res.json()) as { id: string; post_id?: string };
-    const externalId = json.post_id ?? json.id;
-
-    return { state: 'published', externalId, externalUrl: `https://www.facebook.com/${externalId}` };
+    return publishTo(endpoint, body);
   },
 
   async checkStatus() {
@@ -76,3 +112,12 @@ export const facebookAdapter: PlatformAdapter = {
     return classifyByKnownCodes(err, { OAuthException: 'auth', '190': 'auth' });
   },
 };
+
+async function publishTo(endpoint: string, body: URLSearchParams): Promise<PublishResult> {
+  const res = await fetchWithRetry(`https://graph.facebook.com/${GRAPH_VERSION}/${endpoint}`, { method: 'POST', body });
+  if (!res.ok) throw new Error(`facebook: publish failed: ${res.status} ${await res.text()}`);
+  const json = (await res.json()) as { id: string; post_id?: string };
+  const externalId = json.post_id ?? json.id;
+
+  return { state: 'published', externalId, externalUrl: `https://www.facebook.com/${externalId}` };
+}

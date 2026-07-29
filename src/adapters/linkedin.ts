@@ -6,6 +6,9 @@ import { getAccountTokens } from '../lib/tokens.js';
 
 export const LINKEDIN_VERSION = '202607';
 
+// content.multiImage.images accepts 2-20 images (LinkedIn MultiImage API schema).
+const MULTI_IMAGE_MAX = 20;
+
 interface LinkedinTokens {
   access_token: string;
   member_urn: string; // urn:li:person:{sub} — resolved once at auth time (see worker.ts callback)
@@ -20,7 +23,8 @@ function authHeaders(accessToken: string): Record<string, string> {
   };
 }
 
-// Phase 1 scope: single image or single video per post (no multi-image carousel yet).
+// Single image, single video, or a 2-20 image multiImage post. Organic posts have no multi-video
+// or mixed image+video shape — content.carousel is sponsored-only, so it isn't used here.
 export const linkedinAdapter: PlatformAdapter = {
   platform: 'linkedin',
 
@@ -38,7 +42,14 @@ export const linkedinAdapter: PlatformAdapter = {
   },
 
   validate(_target, media) {
-    if (media.length > 1) throw new Error('linkedin: only a single image or video is supported in Phase 1');
+    if (media.length > MULTI_IMAGE_MAX) {
+      throw new Error(`linkedin: at most ${MULTI_IMAGE_MAX} images per post (got ${media.length})`);
+    }
+    // content.multiImage.images[] only accepts urn:li:image URNs — LinkedIn has no organic
+    // multi-video or mixed image+video post type (carousel cards are ads-only).
+    if (media.length > 1 && media.some((m) => m.mime_type.startsWith('video/'))) {
+      throw new Error('linkedin: multi-media posts support images only (vídeo apenas sozinho)');
+    }
   },
 
   async publish(target, media, account, env) {
@@ -46,7 +57,15 @@ export const linkedinAdapter: PlatformAdapter = {
     if (!tokens?.access_token || !tokens.member_urn) throw new Error('linkedin: missing access_token/member_urn');
 
     let content: Record<string, unknown> | undefined;
-    if (media.length === 1) {
+    if (media.length > 1) {
+      // Each image needs its own initializeUpload + PUT — there's no batch upload endpoint, so
+      // this is just the single-image helper run once per asset, collecting the URNs in order.
+      const images: Array<{ id: string }> = [];
+      for (const asset of media) {
+        images.push({ id: await uploadImage(env, tokens, asset) });
+      }
+      content = { multiImage: { images } };
+    } else if (media.length === 1) {
       const asset = media[0];
       const mediaUrn = asset.mime_type.startsWith('video/')
         ? await uploadVideo(env, tokens, asset)

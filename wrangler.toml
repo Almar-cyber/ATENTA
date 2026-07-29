@@ -15,8 +15,14 @@ bucket_name = "social-scheduler-media"
 [triggers]
 crons = ["*/10 * * * *"]
 
+[vars]
+# Custom R2 domain (see README) — used to build media_assets.public_url when a file is uploaded
+# through the dashboard. Not secret, just config; leave empty to skip public_url resolution.
+MEDIA_PUBLIC_BASE_URL = "https://scheduler-media.omangue.co"
+
 # Secrets — set with `wrangler secret put NAME`, never committed here:
 #   TOKEN_ENCRYPTION_KEY   (openssl rand -base64 32)
+#   DASHBOARD_PASSWORD     (gates "/", "/dashboard" and "/api/*" via HTTP Basic Auth)
 #   YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET
 #   LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET
 #   META_APP_ID / META_APP_SECRET
