@@ -22,9 +22,13 @@ interface D1QueryResponse<T> {
 }
 
 export async function d1Query<T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> {
-  const accountId = requireEnv('CF_ACCOUNT_ID');
-  const databaseId = requireEnv('CF_D1_DATABASE_ID');
-  const token = requireEnv('CF_API_TOKEN');
+  // Deliberately NOT named CF_ACCOUNT_ID/CF_API_TOKEN: Wrangler itself auto-loads this same
+  // .env file and treats those exact names as legacy auth env vars, silently overriding the
+  // `wrangler login` session with this D1-only-scoped token and breaking every other wrangler
+  // command (secret put, deploy, ...) run from this directory.
+  const accountId = requireEnv('D1_ACCOUNT_ID');
+  const databaseId = requireEnv('D1_DATABASE_ID');
+  const token = requireEnv('D1_API_TOKEN');
 
   const res = await fetch(`${CF_API_BASE}/accounts/${accountId}/d1/database/${databaseId}/query`, {
     method: 'POST',

@@ -31,7 +31,7 @@ wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
 wrangler deploy
 ```
 
-Para os CLIs locais (`enqueue`, `youtube-auth`), copiar `.env.example` para `.env` e preencher `CF_ACCOUNT_ID` / `CF_D1_DATABASE_ID` / `CF_API_TOKEN` (um API token com permissão de D1 Edit, criado no dashboard da Cloudflare).
+Para os CLIs locais (`enqueue`, `youtube-auth`, `*-auth-url`), copiar `.env.example` para `.env` e preencher `D1_ACCOUNT_ID` / `D1_DATABASE_ID` / `D1_API_TOKEN` (um API token com permissão de D1 Edit, criado no dashboard da Cloudflare). **Importante**: não nomeie essas variáveis `CF_ACCOUNT_ID`/`CF_API_TOKEN` — o Wrangler carrega esse mesmo `.env` sozinho e trata esses dois nomes como credenciais de autenticação da Cloudflare, o que quebra silenciosamente todo comando `wrangler` (secret put, deploy, ...) rodado nessa pasta.
 
 ## Fase 1 — YouTube
 
