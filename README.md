@@ -58,6 +58,22 @@ Para os CLIs locais (`enqueue`, `youtube-auth`), copiar `.env.example` para `.en
 5. **Token de Page praticamente não expira** (só morre com troca de senha, revogação, ou ~90 dias sem uso) — por isso não tem refresh automático implementado; se `needs_reauth` aparecer, repetir o passo 4.
 6. **Instagram exige o domínio customizado do R2** (ver Pendências) — o container de mídia é criado com uma URL pública que a Meta busca sozinha. Facebook só precisa disso pra posts com foto/vídeo (post só-texto funciona sem).
 
+## Fase 3 — Pinterest
+
+1. No [Pinterest Developers](https://developers.pinterest.com/apps/): criar app → em Redirect URIs, registrar `https://social-scheduler.zona21.workers.dev/oauth/callback/pinterest` → pedir acesso Trial (automático) e, quando for usar de verdade, solicitar **Standard access** (exige um vídeo curto demonstrando o fluxo de publicação — sem isso os Pins só ficam visíveis em modo Sandbox, só pra você).
+2. `wrangler secret put PINTEREST_CLIENT_ID` e `wrangler secret put PINTEREST_CLIENT_SECRET` (Worker).
+3. Preencher `PINTEREST_CLIENT_ID` no `.env` local.
+4. `npm run pinterest-auth-url -- --account="Meu Perfil" --redirect-base=https://social-scheduler.zona21.workers.dev` — o Worker troca o código por token, busca seus boards e usa o primeiro como padrão (`accounts.extra.default_board_id`; dá pra sobrescrever por post com `options.board_id`).
+5. Pinterest não tem agendamento nativo — timing é 100% o poller, igual LinkedIn/Instagram/TikTok. Imagem publica direto; vídeo passa por registro + poll (igual o Instagram).
+
+## Fase 4 — TikTok
+
+1. No [TikTok Developers](https://developers.tiktok.com/apps/): criar app → adicionar o produto "Content Posting API" e submeter a auditoria (vídeo de demonstração do fluxo + política de privacidade — **submeta isso o quanto antes**, é o maior gargalo de tempo do projeto todo, de dias a semanas) → registrar o redirect URI: `https://social-scheduler.zona21.workers.dev/oauth/callback/tiktok`.
+2. `wrangler secret put TIKTOK_CLIENT_KEY` e `wrangler secret put TIKTOK_CLIENT_SECRET` (Worker).
+3. Preencher `TIKTOK_CLIENT_KEY` no `.env` local.
+4. `npm run tiktok-auth-url -- --account="Minha Conta" --redirect-base=https://social-scheduler.zona21.workers.dev`.
+5. **Enquanto a auditoria não passa**: posts saem forçados `SELF_ONLY` numa conta de sandbox, não públicos de verdade. `src/adapters/tiktok.ts` está com confiança menor que os outros — os nomes exatos de campos vieram de padrões documentados, não de um teste real contra a API; testar com um post real antes de confiar 100% nele.
+
 ## Enfileirando um post
 
 ```bash
@@ -78,15 +94,17 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 1. **Fase 0** ✅ — fundação: schema D1, Worker com a lógica real do poller (claim, sweeps, refresh), callback OAuth como shell de rota.
 2. **Fase 1** ✅ (código) — YouTube + LinkedIn com integração real. Falta só você gerar as credenciais (passos acima) e rodar os CLIs de auth.
 3. **Fase 2** ✅ (código) — Instagram + Facebook via Meta Graph API. Falta você gerar o app Meta e rodar o CLI de auth; Instagram também depende do domínio customizado do R2 (ver Pendências).
-4. **Fase 3** — Pinterest (submeter Standard access o quanto antes).
-5. **Fase 4** — TikTok (submeter auditoria da Content Posting API o quanto antes — é o maior gargalo de tempo).
+4. **Fase 3** ✅ (código) — Pinterest. Falta gerar o app e, principalmente, conseguir o Standard access.
+5. **Fase 4** ✅ (código, confiança menor) — TikTok. Falta gerar o app e submeter a auditoria — comece esse passo primeiro, é o que demora mais.
 
-`src/adapters/{pinterest,tiktok}.ts` ainda lançam `Error('not implemented yet — Phase N')`; a fase correspondente troca isso pela integração real, seguindo o mesmo padrão dos adapters já prontos (usar `src/lib/tokens.ts` pra ler/gravar tokens, `env.MEDIA.get()`/`asset.public_url` pra mídia do R2).
+Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que falta em todos os casos é você gerar as credenciais OAuth de cada plataforma (não posso criar essas contas/apps por você) e rodar o CLI de auth correspondente.
 
 ## Pendências
 
-- **Domínio customizado pro R2** — falta configurar (precisa de um dos seus domínios na Cloudflare). Bloqueia o Instagram inteiro e os posts com mídia do Facebook (ambos buscam a mídia por URL pública; YouTube/LinkedIn recebem os bytes direto, não precisam disso).
+- **Domínio customizado pro R2** — falta configurar (precisa de um dos seus domínios na Cloudflare). Bloqueia Instagram, posts com mídia do Facebook e imagens/vídeos do Pinterest (todos buscam a mídia por URL pública; YouTube/LinkedIn/TikTok recebem os bytes direto, não precisam disso).
 - **Alerta de falha** — Cron Triggers não têm o e-mail automático que o GitHub Actions teria. Falhas só aparecem em `wrangler tail` / dashboard. TODO em `src/worker.ts` (`runPoller`).
 - **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker.
 - **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
-- **Instagram Reels/imagem único, sem carrossel** — `instagram.ts` e `linkedin.ts` (Fase 1) cobrem só um arquivo de mídia por post.
+- **Sem carrossel/multi-mídia** — `instagram.ts`, `linkedin.ts` e `pinterest.ts` cobrem só um arquivo de mídia por post.
+- **TikTok tem confiança menor** — nomes de campos vieram de padrões documentados, não de teste real contra a API (não dá pra testar de verdade até a auditoria da Content Posting API aprovar). Verificar contra a doc atual antes de confiar em produção.
+- **Pinterest: upload de vídeo é a parte menos certa** — o formato exato de `upload_url`/`upload_parameters` do endpoint `/v5/media` pode variar; imagem (via `image_url`) é o caminho mais testado/documentado.

@@ -253,8 +253,14 @@ async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' |
   if (platform === 'meta') {
     return handleMetaCallback(code, url, env);
   }
+  if (platform === 'pinterest') {
+    return handlePinterestCallback(code, url, env);
+  }
+  if (platform === 'tiktok') {
+    return handleTiktokCallback(code, url, env);
+  }
 
-  // TODO (Phase 3-4): exchange `code` for tokens against each platform's token endpoint, then
+  // TODO: exchange `code` for tokens against each platform's token endpoint, then
   // setAccountTokens(env.DB, accountId, tokenPayload, env.TOKEN_ENCRYPTION_KEY).
   return new Response(`${platform} OAuth callback not implemented yet — see phased roadmap`, { status: 501 });
 }
@@ -414,20 +420,126 @@ async function upsertAccount(
   externalAccountId: string,
   ciphertext: string,
   iv: string,
-  ts: string
+  ts: string,
+  extra: Record<string, unknown> = {}
 ): Promise<void> {
   const existing = await env.DB.prepare(`select id from accounts where platform = ?`).bind(platform).first<{ id: string }>();
+  const extraJson = JSON.stringify(extra);
   if (existing) {
     await env.DB.prepare(
-      `update accounts set display_name = ?, external_account_id = ?, token_ciphertext = ?, token_iv = ?, status = 'active', updated_at = ? where id = ?`
+      `update accounts set display_name = ?, external_account_id = ?, token_ciphertext = ?, token_iv = ?, extra = ?, status = 'active', updated_at = ? where id = ?`
     )
-      .bind(displayName, externalAccountId, ciphertext, iv, ts, existing.id)
+      .bind(displayName, externalAccountId, ciphertext, iv, extraJson, ts, existing.id)
       .run();
   } else {
     await env.DB.prepare(
-      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv) values (?, ?, ?, ?, 'active', ?, ?)`
+      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, extra) values (?, ?, ?, ?, 'active', ?, ?, ?)`
     )
-      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv)
+      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv, extraJson)
       .run();
   }
+}
+
+// state carries {displayName}, base64url-encoded by cli/pinterest-auth-url.ts. Auto-selects the
+// first board returned by /v5/boards into accounts.extra.default_board_id (personal-tool
+// simplification — a post can still override with options.board_id).
+async function handlePinterestCallback(code: string, url: URL, env: Env): Promise<Response> {
+  const state = url.searchParams.get('state');
+  if (!state) return new Response('missing ?state=', { status: 400 });
+
+  let displayName: string;
+  try {
+    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
+    if (!displayName) throw new Error('empty displayName');
+  } catch {
+    return new Response('invalid ?state=', { status: 400 });
+  }
+
+  const redirectUri = `${url.origin}${url.pathname}`;
+  const basicAuth = `Basic ${Buffer.from(`${env.PINTEREST_CLIENT_ID}:${env.PINTEREST_CLIENT_SECRET}`).toString('base64')}`;
+
+  const tokenRes = await fetchWithRetry('https://api.pinterest.com/v5/oauth/token', {
+    method: 'POST',
+    headers: { Authorization: basicAuth, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+  });
+  if (!tokenRes.ok) return new Response(`pinterest token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
+  const tokenJson = (await tokenRes.json()) as { access_token: string; refresh_token: string; expires_in: number };
+
+  const boardsRes = await fetchWithRetry('https://api.pinterest.com/v5/boards', {
+    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+  });
+  const boardsJson = boardsRes.ok ? ((await boardsRes.json()) as { items: Array<{ id: string; name: string }> }) : { items: [] };
+  const defaultBoard = boardsJson.items[0];
+
+  const { ciphertext, iv } = await encryptJSON(
+    { access_token: tokenJson.access_token, refresh_token: tokenJson.refresh_token },
+    env.TOKEN_ENCRYPTION_KEY
+  );
+  const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
+  const ts = nowIso();
+
+  await upsertAccount(
+    env,
+    'pinterest',
+    displayName,
+    '', // Pinterest has no single "external account id" equivalent at this stage
+    ciphertext,
+    iv,
+    ts,
+    defaultBoard ? { default_board_id: defaultBoard.id } : {}
+  );
+  await env.DB.prepare(`update accounts set access_token_expires_at = ? where platform = 'pinterest'`).bind(expiresAt).run();
+
+  const summary = defaultBoard
+    ? `Pinterest autenticado como "${displayName}", board padrão "${defaultBoard.name}".`
+    : `Pinterest autenticado como "${displayName}" (nenhum board encontrado — crie um antes de postar).`;
+  return new Response(`${summary} Pode fechar esta aba.`);
+}
+
+// state carries {displayName}, base64url-encoded by cli/tiktok-auth-url.ts.
+async function handleTiktokCallback(code: string, url: URL, env: Env): Promise<Response> {
+  const state = url.searchParams.get('state');
+  if (!state) return new Response('missing ?state=', { status: 400 });
+
+  let displayName: string;
+  try {
+    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
+    if (!displayName) throw new Error('empty displayName');
+  } catch {
+    return new Response('invalid ?state=', { status: 400 });
+  }
+
+  const redirectUri = `${url.origin}${url.pathname}`;
+
+  const tokenRes = await fetchWithRetry('https://open.tiktokapis.com/v2/oauth/token/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_key: env.TIKTOK_CLIENT_KEY,
+      client_secret: env.TIKTOK_CLIENT_SECRET,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+    }),
+  });
+  if (!tokenRes.ok) return new Response(`tiktok token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
+  const tokenJson = (await tokenRes.json()) as {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+    open_id: string;
+  };
+
+  const { ciphertext, iv } = await encryptJSON(
+    { access_token: tokenJson.access_token, refresh_token: tokenJson.refresh_token },
+    env.TOKEN_ENCRYPTION_KEY
+  );
+  const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
+  const ts = nowIso();
+
+  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, ts);
+  await env.DB.prepare(`update accounts set access_token_expires_at = ? where platform = 'tiktok'`).bind(expiresAt).run();
+
+  return new Response(`Conta "${displayName}" autenticada no TikTok. Pode fechar esta aba.`);
 }
