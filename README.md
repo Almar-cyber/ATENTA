@@ -12,7 +12,7 @@ Repo: https://github.com/Almar-cyber/social-scheduler
   - `scheduled()` — o poller, disparado por um **Cron Trigger** nativo (substitui GitHub Actions inteiro, sem limite de minutos e sem precisar de repo público)
   - `fetch()` — callback OAuth para LinkedIn, Meta, Pinterest e TikTok (YouTube usa loopback local, não passa por aqui)
 - **Cloudflare D1** (SQLite) — banco `social-scheduler`, via binding `DB`
-- **Cloudflare R2** — bucket `social-scheduler-media`, via binding `MEDIA` (falta domínio customizado — ver "Pendências")
+- **Cloudflare R2** — bucket `social-scheduler-media`, via binding `MEDIA`. Domínio público: `https://scheduler-media.omangue.co` (subdomínio novo — não toca no site que já roda em omangue.co)
 - **Web Crypto (AES-GCM)** (`src/lib/crypto.ts`) — criptografia dos tokens OAuth, chave só existe como secret do Worker
 
 ## Por que migrou de Supabase
@@ -80,7 +80,14 @@ Para os CLIs locais (`enqueue`, `youtube-auth`), copiar `.env.example` para `.en
 npm run enqueue -- --platform=youtube --account="Meu Canal" --scheduled_for=2026-08-01T12:00:00Z --caption="..."
 ```
 
-Isso só cria as linhas em `scheduled_posts`/`post_targets` — falta anexar mídia via `post_target_media` (ainda não tem CLI pra isso; inserir direto no D1 por enquanto: `wrangler d1 execute social-scheduler --remote --command "insert into media_assets (...) values (...)"` depois de subir o arquivo pro bucket R2 com `wrangler r2 object put`).
+Isso só cria as linhas em `scheduled_posts`/`post_targets` — falta anexar mídia via `post_target_media` (ainda não tem CLI pra isso). Pra fazer manualmente:
+
+```bash
+wrangler r2 object put social-scheduler-media/meu-video.mp4 --file=./meu-video.mp4
+# public_url = https://scheduler-media.omangue.co/meu-video.mp4
+wrangler d1 execute social-scheduler --remote --command "insert into media_assets (id, storage_key, public_url, mime_type, size_bytes) values ('...', 'meu-video.mp4', 'https://scheduler-media.omangue.co/meu-video.mp4', 'video/mp4', 12345)"
+wrangler d1 execute social-scheduler --remote --command "insert into post_target_media (post_target_id, media_asset_id) values ('...', '...')"
+```
 
 ## Rodando localmente
 

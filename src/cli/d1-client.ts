@@ -1,6 +1,11 @@
-// Shared by local CLI scripts (enqueue, youtube-auth) that need D1 access outside the deployed
-// Worker — talks to Cloudflare's D1 REST API rather than the env.DB binding, which only exists
-// inside the Worker itself.
+// Shared by local CLI scripts (enqueue, youtube-auth, *-auth-url) that need D1/env access
+// outside the deployed Worker. Loads .env here since nothing else does — npm/tsx don't source
+// it automatically, unlike Wrangler which reads secrets a different way.
+try {
+  process.loadEnvFile();
+} catch {
+  // no .env file present — requireEnv() below throws a clear error for whichever var is missing
+}
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
 
