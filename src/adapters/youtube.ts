@@ -63,7 +63,13 @@ export const youtubeAdapter: PlatformAdapter = {
     if (!object) throw new Error(`youtube: media object not found in R2: ${video.storage_key}`);
     const bytes = await object.arrayBuffer();
 
-    const options = target.options as { categoryId?: string; publishAt?: string; title?: string; madeForKids?: boolean };
+    // NOT using YouTube's native privacyStatus:'private' + publishAt scheduling: the poller
+    // (worker.ts) only calls publish() once scheduled_for is already due, so by the time we'd
+    // send publishAt it could already be in the past — YouTube rejects that with 400
+    // invalidPublishAt. Publishing straight to 'public' here keeps one uniform timing model
+    // (the poller's ~10-15min cadence) across all six platforms instead of a second,
+    // finer-grained native-scheduling path — see README "Pendências".
+    const options = target.options as { categoryId?: string; title?: string; madeForKids?: boolean };
     const metadata = {
       snippet: {
         title: options.title ?? target.caption_override?.slice(0, 100) ?? 'Untitled',
@@ -71,8 +77,7 @@ export const youtubeAdapter: PlatformAdapter = {
         categoryId: options.categoryId ?? '22',
       },
       status: {
-        privacyStatus: 'private', // required for publishAt to take effect — flips automatically at that time
-        publishAt: options.publishAt,
+        privacyStatus: 'public',
         selfDeclaredMadeForKids: options.madeForKids ?? false,
       },
     };

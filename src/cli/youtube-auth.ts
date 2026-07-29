@@ -99,15 +99,15 @@ async function main(): Promise<void> {
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
   const nowIso = new Date().toISOString();
 
-  const existing = await d1Query<{ id: string }>(
-    `select id from accounts where platform = 'youtube' and display_name = ?`,
-    [displayName]
-  );
+  // platform is UNIQUE on accounts (one row per platform, ever) — look up by platform alone so
+  // re-running this with a changed --account name updates display_name instead of hitting a
+  // unique-constraint violation on insert.
+  const existing = await d1Query<{ id: string }>(`select id from accounts where platform = 'youtube'`);
 
   if (existing.length > 0) {
     await d1Query(
-      `update accounts set token_ciphertext = ?, token_iv = ?, access_token_expires_at = ?, status = 'active', updated_at = ? where id = ?`,
-      [ciphertext, iv, expiresAt, nowIso, existing[0].id]
+      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, access_token_expires_at = ?, status = 'active', updated_at = ? where id = ?`,
+      [displayName, ciphertext, iv, expiresAt, nowIso, existing[0].id]
     );
   } else {
     const id = crypto.randomUUID();

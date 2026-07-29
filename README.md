@@ -49,6 +49,15 @@ Para os CLIs locais (`enqueue`, `youtube-auth`), copiar `.env.example` para `.en
 4. `npm run linkedin-auth-url -- --account="Meu Perfil" --redirect-base=https://social-scheduler.zona21.workers.dev` — abre a URL impressa, loga, e o Worker cria/atualiza a conta no D1 automaticamente ao receber o redirect.
 5. **Sem refresh token nessa camada self-serve**: o acesso expira em 60 dias; passado esse prazo (ou quando o poller marcar `needs_reauth`), repetir o passo 4.
 
+## Fase 2 — Instagram + Facebook (Meta Graph API)
+
+1. No [Meta for Developers](https://developers.facebook.com/apps/): criar app tipo "Business" → adicionar os produtos "Facebook Login" (dá acesso ao fluxo OAuth) → em Configurações → Básico, anotar App ID/Secret → em Facebook Login → Configurações, registrar o redirect URI exato: `https://social-scheduler.zona21.workers.dev/oauth/callback/meta`.
+2. `wrangler secret put META_APP_ID` e `wrangler secret put META_APP_SECRET` (Worker).
+3. Preencher `META_APP_ID` no `.env` local.
+4. `npm run meta-auth-url -- --account="Minha Marca" --redirect-base=https://social-scheduler.zona21.workers.dev` — abre a URL, você loga e concede acesso a **uma** Page (o fluxo assume só uma; se aparecer seletor com várias, desmarque as outras). O Worker troca o código por um token de usuário, estende pra long-lived, busca a Page e, se ela tiver uma conta Instagram Business vinculada, cria as duas linhas (`facebook` e `instagram`) no D1 de uma vez.
+5. **Token de Page praticamente não expira** (só morre com troca de senha, revogação, ou ~90 dias sem uso) — por isso não tem refresh automático implementado; se `needs_reauth` aparecer, repetir o passo 4.
+6. **Instagram exige o domínio customizado do R2** (ver Pendências) — o container de mídia é criado com uma URL pública que a Meta busca sozinha. Facebook só precisa disso pra posts com foto/vídeo (post só-texto funciona sem).
+
 ## Enfileirando um post
 
 ```bash
@@ -68,14 +77,16 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 
 1. **Fase 0** ✅ — fundação: schema D1, Worker com a lógica real do poller (claim, sweeps, refresh), callback OAuth como shell de rota.
 2. **Fase 1** ✅ (código) — YouTube + LinkedIn com integração real. Falta só você gerar as credenciais (passos acima) e rodar os CLIs de auth.
-3. **Fase 2** — Instagram + Facebook.
+3. **Fase 2** ✅ (código) — Instagram + Facebook via Meta Graph API. Falta você gerar o app Meta e rodar o CLI de auth; Instagram também depende do domínio customizado do R2 (ver Pendências).
 4. **Fase 3** — Pinterest (submeter Standard access o quanto antes).
 5. **Fase 4** — TikTok (submeter auditoria da Content Posting API o quanto antes — é o maior gargalo de tempo).
 
-`src/adapters/{instagram,facebook,pinterest,tiktok}.ts` ainda lançam `Error('not implemented yet — Phase N')`; a fase correspondente troca isso pela integração real, seguindo o mesmo padrão de `youtube.ts`/`linkedin.ts` (usar `src/lib/tokens.ts` pra ler/gravar tokens, `env.MEDIA.get()` pra ler mídia do R2).
+`src/adapters/{pinterest,tiktok}.ts` ainda lançam `Error('not implemented yet — Phase N')`; a fase correspondente troca isso pela integração real, seguindo o mesmo padrão dos adapters já prontos (usar `src/lib/tokens.ts` pra ler/gravar tokens, `env.MEDIA.get()`/`asset.public_url` pra mídia do R2).
 
 ## Pendências
 
-- **Domínio customizado pro R2** — falta configurar (precisa de um dos seus domínios na Cloudflare). Só bloqueia a Fase 2 (Instagram busca mídia por URL pública; YouTube/LinkedIn/TikTok recebem os bytes direto, não precisam disso).
+- **Domínio customizado pro R2** — falta configurar (precisa de um dos seus domínios na Cloudflare). Bloqueia o Instagram inteiro e os posts com mídia do Facebook (ambos buscam a mídia por URL pública; YouTube/LinkedIn recebem os bytes direto, não precisam disso).
 - **Alerta de falha** — Cron Triggers não têm o e-mail automático que o GitHub Actions teria. Falhas só aparecem em `wrangler tail` / dashboard. TODO em `src/worker.ts` (`runPoller`).
 - **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker.
+- **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
+- **Instagram Reels/imagem único, sem carrossel** — `instagram.ts` e `linkedin.ts` (Fase 1) cobrem só um arquivo de mídia por post.

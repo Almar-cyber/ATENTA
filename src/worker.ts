@@ -192,7 +192,14 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
   const ts = nowIso();
 
   if (errorClass === 'auth') {
-    // don't increment attempt_count — the token-health scan (Step 0) drives reauth next run
+    // Flip the account directly rather than relying on Step 0 to catch it next run: some
+    // adapters (e.g. Meta page tokens, which don't track an expiry) never trip needsRefresh()
+    // on their own, so a publish-time auth error is the only signal that ever arrives. Without
+    // this, the target would requeue forever against a token that's already dead (auth errors
+    // don't increment attempt_count, by design, since they aren't the target's fault).
+    await env.DB.prepare(`update accounts set status = 'needs_reauth', updated_at = ? where id = ?`)
+      .bind(ts, target.account_id)
+      .run();
     await env.DB.prepare(`update post_targets set status = 'queued', last_error = ?, updated_at = ? where id = ?`)
       .bind(message, ts, target.id)
       .run();
@@ -243,8 +250,11 @@ async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' |
   if (platform === 'linkedin') {
     return handleLinkedinCallback(code, url, env);
   }
+  if (platform === 'meta') {
+    return handleMetaCallback(code, url, env);
+  }
 
-  // TODO (Phase 2-4): exchange `code` for tokens against each platform's token endpoint, then
+  // TODO (Phase 3-4): exchange `code` for tokens against each platform's token endpoint, then
   // setAccountTokens(env.DB, accountId, tokenPayload, env.TOKEN_ENCRYPTION_KEY).
   return new Response(`${platform} OAuth callback not implemented yet — see phased roadmap`, { status: 501 });
 }
@@ -296,15 +306,16 @@ async function handleLinkedinCallback(code: string, url: URL, env: Env): Promise
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
   const ts = nowIso();
 
-  const existing = await env.DB.prepare(`select id from accounts where platform = 'linkedin' and display_name = ?`)
-    .bind(displayName)
-    .first<{ id: string }>();
+  // platform is UNIQUE on accounts (one row per platform, ever) — look up by platform alone so
+  // re-running this with a changed display_name updates the row instead of hitting a
+  // unique-constraint violation on insert.
+  const existing = await env.DB.prepare(`select id from accounts where platform = 'linkedin'`).first<{ id: string }>();
 
   if (existing) {
     await env.DB.prepare(
-      `update accounts set token_ciphertext = ?, token_iv = ?, access_token_expires_at = ?, external_account_id = ?, status = 'active', updated_at = ? where id = ?`
+      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, access_token_expires_at = ?, external_account_id = ?, status = 'active', updated_at = ? where id = ?`
     )
-      .bind(ciphertext, iv, expiresAt, memberUrn, ts, existing.id)
+      .bind(displayName, ciphertext, iv, expiresAt, memberUrn, ts, existing.id)
       .run();
   } else {
     await env.DB.prepare(
@@ -315,4 +326,108 @@ async function handleLinkedinCallback(code: string, url: URL, env: Env): Promise
   }
 
   return new Response(`Conta "${displayName}" autenticada no LinkedIn. Pode fechar esta aba.`);
+}
+
+const GRAPH_VERSION = 'v21.0';
+
+// state carries {displayName}, base64url-encoded by cli/meta-auth-url.ts. Assumes exactly one
+// Page was granted (personal-tool scope, not a Page picker) — if /me/accounts ever returns more
+// than one, only the first is used; see README Pendências. One Page's access_token is reused for
+// both the 'facebook' row and (if the Page has a linked Instagram Business account) the
+// 'instagram' row, since Meta authenticates both platforms with the same Page token.
+async function handleMetaCallback(code: string, url: URL, env: Env): Promise<Response> {
+  const state = url.searchParams.get('state');
+  if (!state) return new Response('missing ?state=', { status: 400 });
+
+  let displayName: string;
+  try {
+    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
+    if (!displayName) throw new Error('empty displayName');
+  } catch {
+    return new Response('invalid ?state=', { status: 400 });
+  }
+
+  const redirectUri = `${url.origin}${url.pathname}`;
+
+  const shortLivedRes = await fetchWithRetry(
+    `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?` +
+      new URLSearchParams({
+        client_id: env.META_APP_ID,
+        client_secret: env.META_APP_SECRET,
+        redirect_uri: redirectUri,
+        code,
+      })
+  );
+  if (!shortLivedRes.ok) {
+    return new Response(`meta token exchange failed: ${shortLivedRes.status} ${await shortLivedRes.text()}`, { status: 502 });
+  }
+  const shortLived = (await shortLivedRes.json()) as { access_token: string };
+
+  const longLivedRes = await fetchWithRetry(
+    `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?` +
+      new URLSearchParams({
+        grant_type: 'fb_exchange_token',
+        client_id: env.META_APP_ID,
+        client_secret: env.META_APP_SECRET,
+        fb_exchange_token: shortLived.access_token,
+      })
+  );
+  if (!longLivedRes.ok) {
+    return new Response(`meta long-lived exchange failed: ${longLivedRes.status} ${await longLivedRes.text()}`, { status: 502 });
+  }
+  const longLived = (await longLivedRes.json()) as { access_token: string };
+
+  const pagesRes = await fetchWithRetry(
+    `https://graph.facebook.com/${GRAPH_VERSION}/me/accounts?access_token=${encodeURIComponent(longLived.access_token)}`
+  );
+  if (!pagesRes.ok) return new Response(`meta /me/accounts failed: ${pagesRes.status} ${await pagesRes.text()}`, { status: 502 });
+  const pagesJson = (await pagesRes.json()) as { data: Array<{ id: string; name: string; access_token: string }> };
+  if (pagesJson.data.length === 0) {
+    return new Response('nenhuma Page encontrada — confirme que você é admin de uma Page do Facebook', { status: 400 });
+  }
+  const page = pagesJson.data[0];
+
+  const igRes = await fetchWithRetry(
+    `https://graph.facebook.com/${GRAPH_VERSION}/${page.id}?fields=instagram_business_account&access_token=${encodeURIComponent(page.access_token)}`
+  );
+  const igJson = igRes.ok ? ((await igRes.json()) as { instagram_business_account?: { id: string } }) : {};
+  const igUserId = igJson.instagram_business_account?.id;
+
+  const { ciphertext, iv } = await encryptJSON({ access_token: page.access_token }, env.TOKEN_ENCRYPTION_KEY);
+  const ts = nowIso();
+
+  await upsertAccount(env, 'facebook', displayName, page.id, ciphertext, iv, ts);
+  if (igUserId) {
+    await upsertAccount(env, 'instagram', displayName, igUserId, ciphertext, iv, ts);
+  }
+
+  const summary = igUserId
+    ? `Facebook Page "${page.name}" e Instagram vinculado autenticados como "${displayName}".`
+    : `Facebook Page "${page.name}" autenticado como "${displayName}" (sem conta Instagram Business vinculada).`;
+  return new Response(`${summary} Pode fechar esta aba.`);
+}
+
+async function upsertAccount(
+  env: Env,
+  platform: Platform,
+  displayName: string,
+  externalAccountId: string,
+  ciphertext: string,
+  iv: string,
+  ts: string
+): Promise<void> {
+  const existing = await env.DB.prepare(`select id from accounts where platform = ?`).bind(platform).first<{ id: string }>();
+  if (existing) {
+    await env.DB.prepare(
+      `update accounts set display_name = ?, external_account_id = ?, token_ciphertext = ?, token_iv = ?, status = 'active', updated_at = ? where id = ?`
+    )
+      .bind(displayName, externalAccountId, ciphertext, iv, ts, existing.id)
+      .run();
+  } else {
+    await env.DB.prepare(
+      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv) values (?, ?, ?, ?, 'active', ?, ?)`
+    )
+      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv)
+      .run();
+  }
 }
