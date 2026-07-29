@@ -43,7 +43,7 @@ Para os CLIs locais (`enqueue`, `youtube-auth`), copiar `.env.example` para `.en
 
 ## Fase 1 — LinkedIn
 
-1. No [LinkedIn Developer Portal](https://www.linkedin.com/developers/apps): criar app → produto "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn" (ambos self-serve, sem aprovação de parceiro) → em Auth, registrar o redirect URI exato: `https://social-scheduler.zona21.workers.dev/oauth/callback/linkedin`.
+1. Acesse [developer.linkedin.com](https://developer.linkedin.com) → **My apps** (canto superior direito) → **Create app**. Pede uma LinkedIn Page associada — dá pra criar uma ali mesmo se não tiver. Depois, adicionar os produtos "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn" (ambos self-serve, sem aprovação de parceiro) → em Auth, registrar o redirect URI exato: `https://social-scheduler.zona21.workers.dev/oauth/callback/linkedin`.
 2. `wrangler secret put LINKEDIN_CLIENT_ID` e `wrangler secret put LINKEDIN_CLIENT_SECRET` (Worker).
 3. Preencher `LINKEDIN_CLIENT_ID` no `.env` local (o secret fica só no Worker, que faz a troca de código por token).
 4. `npm run linkedin-auth-url -- --account="Meu Perfil" --redirect-base=https://social-scheduler.zona21.workers.dev` — abre a URL impressa, loga, e o Worker cria/atualiza a conta no D1 automaticamente ao receber o redirect.
