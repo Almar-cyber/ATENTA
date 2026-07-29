@@ -13,7 +13,8 @@ export interface Env {
   TOKEN_ENCRYPTION_KEY: string;
 
   // Gates the dashboard + /api/* (see src/lib/auth.ts) — single shared password, any username.
-  DASHBOARD_PASSWORD: string;
+  // Optional: unset means no gate at all, i.e. the dashboard and API are publicly reachable.
+  DASHBOARD_PASSWORD?: string;
 
   YOUTUBE_CLIENT_ID: string;
   YOUTUBE_CLIENT_SECRET: string;

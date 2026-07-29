@@ -28,8 +28,9 @@ wrangler d1 create social-scheduler          # database_id já no wrangler.toml
 wrangler d1 execute social-scheduler --remote --file=migrations/0001_init.sql
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
-wrangler secret put DASHBOARD_PASSWORD       # protege o dashboard e a API (ver seção Dashboard)
 wrangler deploy
+# DASHBOARD_PASSWORD é opcional e hoje NÃO está definido — sem ele o dashboard fica aberto.
+# Ver "Autenticação" na seção Dashboard.
 ```
 
 Para os CLIs locais (`enqueue`, `youtube-auth`, `*-auth-url`), copiar `.env.example` para `.env` e preencher `D1_ACCOUNT_ID` / `D1_DATABASE_ID` / `D1_API_TOKEN` (um API token com permissão de D1 Edit, criado no dashboard da Cloudflare). **Importante**: não nomeie essas variáveis `CF_ACCOUNT_ID`/`CF_API_TOKEN` — o Wrangler carrega esse mesmo `.env` sozinho e trata esses dois nomes como credenciais de autenticação da Cloudflare, o que quebra silenciosamente todo comando `wrangler` (secret put, deploy, ...) rodado nessa pasta.
@@ -100,9 +101,27 @@ uma página só (HTML/CSS/JS inline no próprio Worker, sem build step) pra:
 - **Cancelar** — enquanto o post ainda está `draft`/`queued` (antes do poller pegar pra publicar),
   tanto na lista quanto no modal de detalhe do calendário.
 
-Protegido por HTTP Basic Auth contra um único secret (`DASHBOARD_PASSWORD` — qualquer usuário
-serve, só a senha é validada) já que é uma ferramenta pessoal exposta num Worker público. As rotas
-`/oauth/callback/*` continuam sem autenticação (são redirects que vêm direto de cada plataforma).
+### Autenticação (opcional, hoje DESLIGADA)
+
+O gate é opt-in: **sem o secret `DASHBOARD_PASSWORD` definido, o dashboard e todo o `/api/*` ficam
+abertos para qualquer um que acesse a URL** — que é o estado atual, por escolha deliberada. Vale
+saber o que isso expõe, porque é mais que "ler minha fila": `POST /api/posts` agenda publicação em
+qualquer conta conectada e `POST /api/media` escreve no bucket R2. Os tokens seguem criptografados
+e nenhum endpoint os devolve.
+
+Pra religar (efeito imediato, sem redeploy) — este comando grava e já testa sozinho:
+
+```bash
+printf 'Nova senha: ' && read -rs P && echo && printf '%s' "$P" | npx wrangler secret put DASHBOARD_PASSWORD && sleep 6 && curl -s -o /dev/null -w "login: HTTP %{http_code}\n" -u "almar:$P" https://social-scheduler.zona21.workers.dev/; unset P
+```
+
+Pra desligar de novo: `npx wrangler secret delete DASHBOARD_PASSWORD`.
+
+Quando ligado, é HTTP Basic Auth contra esse único secret — qualquer nome de usuário serve, só a
+senha é validada. Use `printf '%s'` (não `echo`) ao gravar por pipe: o `\n` do `echo` entra na
+senha e nada casa depois. As rotas `/oauth/callback/*` e `/privacy` nunca passam pelo gate — são
+acessadas pelos redirects de consentimento de cada plataforma e pelos revisores dos apps, que não
+têm como apresentar credencial.
 
 A validação de mídia por plataforma (ex: YouTube/TikTok exigem vídeo, Pinterest/Instagram exigem
 `public_url`) reaproveita o `validate()` de cada adapter — um post que vai falhar na hora de
