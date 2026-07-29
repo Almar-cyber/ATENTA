@@ -44,12 +44,21 @@ export const instagramAdapter: PlatformAdapter = {
 
     const asset = media[0];
     const isVideo = asset.mime_type.startsWith('video/');
+    const options = target.options as { as_story?: boolean };
     const body = new URLSearchParams({
       access_token: tokens.access_token,
       caption: target.caption_override ?? '',
     });
-    if (isVideo) {
+
+    // Same container+publish flow for feed posts, Reels, and Stories — only media_type differs.
+    // Meta doesn't support interactive Story elements (stickers, links, music) via the API
+    // regardless — this only ever posts the base image/video.
+    if (options.as_story) {
+      body.set('media_type', 'STORIES');
+    } else if (isVideo) {
       body.set('media_type', 'REELS');
+    }
+    if (isVideo) {
       body.set('video_url', asset.public_url!);
     } else {
       body.set('image_url', asset.public_url!);

@@ -11,14 +11,30 @@ function parseArgs(argv: string[]): Record<string, string> {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const { platform, account: accountName, scheduled_for: scheduledFor, caption, title } = args;
+  const { platform, account: accountName, scheduled_for: scheduledFor, caption, title, options: optionsJson } = args;
 
   if (!platform || !accountName || !scheduledFor) {
     console.error(
-      'Usage: npm run enqueue -- --platform=youtube --account="<display_name>" --scheduled_for=2026-08-01T12:00:00Z --caption="..." [--title="..."]'
+      'Usage: npm run enqueue -- --platform=youtube --account="<display_name>" --scheduled_for=2026-08-01T12:00:00Z --caption="..." [--title="..."] [--options=\'{"as_story":true}\']\n' +
+        '\nPer-platform options (post_targets.options, passed straight to the adapter):\n' +
+        '  instagram: {"as_story": true}                — post as a Story instead of feed/Reel\n' +
+        '  youtube:   {"categoryId": "22", "title": "..."}\n' +
+        '  pinterest: {"board_id": "..."}                — overrides the account\'s default board\n' +
+        '  tiktok:    {"privacy_level": "PUBLIC_TO_EVERYONE", "disable_duet": true, ...}'
     );
     process.exit(1);
     return;
+  }
+
+  let options: Record<string, unknown> = {};
+  if (optionsJson) {
+    try {
+      options = JSON.parse(optionsJson);
+    } catch {
+      console.error(`--options is not valid JSON: ${optionsJson}`);
+      process.exit(1);
+      return;
+    }
   }
 
   const accounts = await d1Query<{ id: string }>('select id from accounts where platform = ? and display_name = ?', [
@@ -41,13 +57,10 @@ async function main(): Promise<void> {
   ]);
 
   const targetId = crypto.randomUUID();
-  await d1Query('insert into post_targets (id, scheduled_post_id, account_id, platform, status) values (?, ?, ?, ?, ?)', [
-    targetId,
-    postId,
-    accountId,
-    platform,
-    'queued',
-  ]);
+  await d1Query(
+    'insert into post_targets (id, scheduled_post_id, account_id, platform, status, options) values (?, ?, ?, ?, ?, ?)',
+    [targetId, postId, accountId, platform, 'queued', JSON.stringify(options)]
+  );
 
   console.log(`Enqueued post ${postId} for ${platform}/${accountName} at ${scheduledFor}`);
 }
