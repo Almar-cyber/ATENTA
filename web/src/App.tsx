@@ -66,25 +66,30 @@ function Dashboard() {
       <main className="grid items-start gap-5 p-6 lg:grid-cols-[360px_1fr]">
         <PostComposer onPreviewChange={setPreviewItems} />
 
-        <AnimatePresence>
-          {previewItems.length > 0 && (
-            <motion.section
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="rounded-xl border bg-card p-4 lg:col-span-2"
-            >
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pré-visualização</p>
-              <div className="flex flex-wrap gap-3">
-                {previewItems.map(({ accountId, input }) => (
-                  <PostPreview key={accountId} input={input} />
-                ))}
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
+        {/* Composer's sidebar column is sticky, so the preview strip lives inside THIS column
+            (stacked above the list) rather than spanning both columns as its own grid row —
+            a col-span row here would auto-place below the sidebar's row and visually collide
+            with the sticky composer instead of sitting cleanly beside it. */}
+        <div className="space-y-5">
+          <AnimatePresence>
+            {previewItems.length > 0 && (
+              <motion.section
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="rounded-xl border bg-card p-4"
+              >
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pré-visualização</p>
+                <div className="flex flex-wrap gap-3">
+                  {previewItems.map(({ accountId, input }) => (
+                    <PostPreview key={accountId} input={input} />
+                  ))}
+                </div>
+              </motion.section>
+            )}
+          </AnimatePresence>
 
-        <section className="rounded-xl border bg-card p-4">
+          <section className="rounded-xl border bg-card p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold">Posts agendados</h2>
             <div className="flex flex-wrap items-center gap-2">
@@ -142,7 +147,8 @@ function Dashboard() {
               {view === 'grid' && <GridPlanner posts={visible} onOpen={setSelection} />}
             </motion.div>
           </div>
-        </section>
+          </section>
+        </div>
       </main>
 
       <PostDialog selection={selection} onClose={() => setSelection(null)} />
