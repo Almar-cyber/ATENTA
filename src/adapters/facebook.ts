@@ -2,12 +2,18 @@ import type { PublishResult, PlatformAdapter } from '../lib/types.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
+import { checkDuration } from '../lib/videoLimits.js';
 
 const GRAPH_VERSION = 'v21.0';
 
 // Meta documents no numeric cap for attached_media on a Page /feed post; 10 is a conservative
 // self-imposed limit matching what the Facebook composer itself allows.
 const CAROUSEL_MAX_ITEMS = 10;
+
+// Meta's own docs are inconsistent across endpoints (simple upload vs. resumable vs. Business
+// Help Center figures range from 1200s to 4h) — using the most conservative documented figure.
+// No minimum duration is documented, so none is enforced.
+const MAX_VIDEO_DURATION_SECONDS = 1200;
 
 interface MetaTokens {
   access_token: string; // Page access token, shared with instagram.ts's own copy on the linked IG account row
@@ -44,6 +50,9 @@ export const facebookAdapter: PlatformAdapter = {
     for (const asset of media) {
       if (!asset.public_url) {
         throw new Error('facebook: media needs a public_url (custom R2 domain) — see README Pendências');
+      }
+      if (asset.mime_type.startsWith('video/')) {
+        checkDuration('facebook', asset, undefined, MAX_VIDEO_DURATION_SECONDS);
       }
     }
   },

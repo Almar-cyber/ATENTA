@@ -1,4 +1,5 @@
 import type { Account, Post } from './types';
+import type { MediaMetadata } from './mediaMetadata';
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(path, opts);
@@ -47,9 +48,15 @@ export function createPost(payload: CreatePostPayload): Promise<{ id: string; ta
   });
 }
 
-export function uploadMedia(file: File): Promise<{ id: string; public_url: string | null; mime_type: string }> {
+export function uploadMedia(
+  file: File,
+  meta: MediaMetadata = {}
+): Promise<{ id: string; public_url: string | null; mime_type: string; duration_seconds: number | null; width: number | null; height: number | null }> {
   const form = new FormData();
   form.append('file', file);
+  if (meta.duration_seconds != null) form.append('duration_seconds', String(meta.duration_seconds));
+  if (meta.width != null) form.append('width', String(meta.width));
+  if (meta.height != null) form.append('height', String(meta.height));
   return req('/api/media', { method: 'POST', body: form });
 }
 

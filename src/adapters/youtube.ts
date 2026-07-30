@@ -1,19 +1,26 @@
 import type { PlatformAdapter } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
-import { fetchWithRetry } from '../lib/http.js';
+import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
 import { nowIso } from '../lib/db.js';
+import { checkDuration } from '../lib/videoLimits.js';
 
 interface YoutubeTokens {
   access_token: string;
   refresh_token: string;
 }
 
-// NOTE: single-PUT upload below (not the chunked 256KB-boundary resumable protocol from the
-// architecture doc) — fine for typical personal-use video sizes, but large files can exceed a
-// Worker's CPU/memory limits in one shot. TODO: chunk + persist byte offset in
-// post_targets.adapter_state if that becomes a real constraint.
+// developers.google.com — 12h/256GB is YouTube's hard ceiling for every account. The 15min
+// soft threshold (unverified accounts) isn't enforced here since a verified account can exceed
+// it; that's a client-side-only hint (see web/src/lib/platforms.ts).
+const MAX_VIDEO_DURATION_SECONDS = 12 * 60 * 60;
+
+// NOTE: still a single PUT for the whole video (not the chunked 256KB-boundary resumable
+// protocol from the architecture doc) — the memory risk of that single PUT is fixed (it's
+// streamed from R2 via toFixedLengthBody, not buffered into one arrayBuffer), but this still
+// can't resume a crashed/interrupted upload mid-transfer the way true chunking would. Revisit if
+// that becomes a real problem for the video sizes actually in use — see README "Pendências".
 export const youtubeAdapter: PlatformAdapter = {
   platform: 'youtube',
 
@@ -52,6 +59,7 @@ export const youtubeAdapter: PlatformAdapter = {
   validate(_target, media) {
     if (media.length !== 1) throw new Error('youtube: exactly one video file required');
     if (!media[0].mime_type.startsWith('video/')) throw new Error('youtube: media must be a video file');
+    checkDuration('youtube', media[0], undefined, MAX_VIDEO_DURATION_SECONDS);
   },
 
   async publish(target, media, account, env) {
@@ -59,9 +67,6 @@ export const youtubeAdapter: PlatformAdapter = {
     if (!tokens?.access_token) throw new Error('youtube: no access_token on file');
 
     const video = media[0];
-    const object = await env.MEDIA.get(video.storage_key);
-    if (!object) throw new Error(`youtube: media object not found in R2: ${video.storage_key}`);
-    const bytes = await object.arrayBuffer();
 
     // NOT using YouTube's native privacyStatus:'private' + publishAt scheduling: the poller
     // (worker.ts) only calls publish() once scheduled_for is already due, so by the time we'd
@@ -99,10 +104,14 @@ export const youtubeAdapter: PlatformAdapter = {
     const uploadUrl = initRes.headers.get('Location');
     if (!uploadUrl) throw new Error('youtube: no resumable upload URL returned');
 
-    const uploadRes = await fetchWithRetry(uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': video.mime_type, 'Content-Length': String(video.size_bytes) },
-      body: bytes,
+    const uploadRes = await fetchWithRetry(uploadUrl, async () => {
+      const object = await env.MEDIA.get(video.storage_key);
+      if (!object) throw new Error(`youtube: media object not found in R2: ${video.storage_key}`);
+      return {
+        method: 'PUT',
+        headers: { 'Content-Type': video.mime_type, 'Content-Length': String(video.size_bytes) },
+        body: toFixedLengthBody(object.body, video.size_bytes),
+      };
     });
     if (!uploadRes.ok) throw new Error(`youtube: upload failed: ${uploadRes.status} ${await uploadRes.text()}`);
     const result = (await uploadRes.json()) as { id: string };

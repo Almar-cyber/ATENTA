@@ -23,6 +23,9 @@ export interface Media {
   public_url: string | null;
   mime_type: string;
   storage_key: string;
+  duration_seconds?: number | null;
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface Target {
@@ -60,4 +63,7 @@ export interface QueuedMedia {
   name: string;
   mime_type: string;
   public_url?: string | null;
+  duration_seconds?: number;
+  width?: number;
+  height?: number;
 }

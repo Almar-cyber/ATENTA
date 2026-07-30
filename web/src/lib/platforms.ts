@@ -66,6 +66,38 @@ export const PLATFORM_PREVIEW_SHAPE: Record<Platform, PreviewShape> = {
 
 export const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4', 'video/quicktime'];
 
+export interface VideoLimits {
+  minDurationSeconds?: number;
+  maxDurationSeconds?: number;
+  maxSizeBytes?: number;
+}
+
+const MB = 1024 * 1024;
+const GB = 1024 * MB;
+
+// Client-side hints only — the adapter's validate() on the Worker is the authority (design.md
+// principle #2). Sourced from each platform's official docs; confidence varies (Pinterest's file
+// size isn't documented anywhere, so it's omitted rather than guessed; Meta's own docs disagree
+// with themselves across endpoints, so facebook uses the more conservative figure).
+export const PLATFORM_VIDEO_LIMITS: Partial<Record<Platform, VideoLimits>> = {
+  instagram: { minDurationSeconds: 3, maxDurationSeconds: 900, maxSizeBytes: 300 * MB },
+  facebook: { maxDurationSeconds: 1200, maxSizeBytes: 1 * GB },
+  linkedin: { minDurationSeconds: 3, maxDurationSeconds: 1800, maxSizeBytes: 500 * MB },
+  pinterest: { minDurationSeconds: 4, maxDurationSeconds: 300 },
+  // Absolute ceiling only — the real per-creator duration limit is live data from TikTok's
+  // creator_info endpoint, checked server-side in tiktok.ts (varies by account, not knowable here).
+  tiktok: { maxDurationSeconds: 600, maxSizeBytes: 4 * GB },
+  // Hard ceiling only; the 15min soft-warning (verified accounts can exceed it) is a separate
+  // check below, not a validate()-enforced limit.
+  youtube: { maxDurationSeconds: 43200, maxSizeBytes: 256 * GB },
+};
+
+// Instagram Stories have a much tighter window than a feed/Reels video — checked separately
+// since the composer's "publicar como Story" toggle changes which limit applies.
+export const INSTAGRAM_STORY_VIDEO_LIMITS: VideoLimits = { minDurationSeconds: 3, maxDurationSeconds: 60, maxSizeBytes: 100 * MB };
+
+export const YOUTUBE_LONG_VIDEO_WARN_SECONDS = 900;
+
 export const STATUS_META: Record<PostStatus, { label: string; className: string }> = {
   draft: { label: 'Rascunho', className: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200' },
   queued: { label: 'Na fila', className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },

@@ -1,10 +1,15 @@
 import type { PlatformAdapter } from '../lib/types.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
-import { fetchWithRetry } from '../lib/http.js';
+import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
 import { nowIso } from '../lib/db.js';
+import { checkDuration } from '../lib/videoLimits.js';
 
 const API_BASE = 'https://open.tiktokapis.com/v2';
+
+// developers.tiktok.com — absolute ceiling across all creators. The real, tighter per-creator
+// limit is live data from creator_info/query, checked in publish() below before upload.
+const MAX_VIDEO_DURATION_SECONDS = 600;
 
 interface TiktokTokens {
   access_token: string;
@@ -61,6 +66,7 @@ export const tiktokAdapter: PlatformAdapter = {
   validate(_target, media) {
     if (media.length !== 1) throw new Error('tiktok: exactly one video is required');
     if (!media[0].mime_type.startsWith('video/')) throw new Error('tiktok: media must be a video');
+    checkDuration('tiktok', media[0], undefined, MAX_VIDEO_DURATION_SECONDS);
   },
 
   async publish(target, media, account, env) {
@@ -74,16 +80,27 @@ export const tiktokAdapter: PlatformAdapter = {
       headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
     });
     if (!creatorRes.ok) throw new Error(`tiktok: creator_info/query failed: ${creatorRes.status} ${await creatorRes.text()}`);
-    const creatorJson = (await creatorRes.json()) as { data: { privacy_level_options: string[] } };
+    const creatorJson = (await creatorRes.json()) as {
+      data: { privacy_level_options: string[]; max_video_post_duration_sec?: number };
+    };
 
     const options = target.options as { privacy_level?: string; disable_duet?: boolean; disable_comment?: boolean; disable_stitch?: boolean };
     const privacyLevel = options.privacy_level ?? creatorJson.data.privacy_level_options[0];
     if (!privacyLevel) throw new Error('tiktok: no privacy_level available from creator_info');
 
     const asset = media[0];
-    const object = await env.MEDIA.get(asset.storage_key);
-    if (!object) throw new Error(`tiktok: media not found in R2: ${asset.storage_key}`);
-    const bytes = await object.arrayBuffer();
+
+    // The real, per-creator ceiling — tighter than (and only knowable via) this live call, unlike
+    // the platform-wide absolute limit already checked in validate(). Not a known-codes API error,
+    // so classifyError() below needs its own entry to route this to 'permanent' instead of the
+    // 'retryable' default (retrying won't shrink the video).
+    const creatorMaxDuration = creatorJson.data.max_video_post_duration_sec;
+    if (creatorMaxDuration != null && asset.duration_seconds != null && asset.duration_seconds > creatorMaxDuration) {
+      throw Object.assign(
+        new Error(`tiktok: vídeo muito longo para este criador (${asset.duration_seconds.toFixed(0)}s, máximo ${creatorMaxDuration}s)`),
+        { code: 'video_too_long_for_creator' }
+      );
+    }
 
     const initRes = await fetchWithRetry(`${API_BASE}/post/publish/video/init/`, {
       method: 'POST',
@@ -107,13 +124,20 @@ export const tiktokAdapter: PlatformAdapter = {
     if (!initRes.ok) throw new Error(`tiktok: video/init failed: ${initRes.status} ${await initRes.text()}`);
     const initJson = (await initRes.json()) as { data: { publish_id: string; upload_url: string } };
 
-    const uploadRes = await fetchWithRetry(initJson.data.upload_url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': asset.mime_type,
-        'Content-Range': `bytes 0-${asset.size_bytes - 1}/${asset.size_bytes}`,
-      },
-      body: bytes,
+    // Single request (source_info above already told TikTok this is one chunk covering the whole
+    // file) — streamed from R2 rather than buffered, so the Worker never holds the whole video
+    // in memory at once.
+    const uploadRes = await fetchWithRetry(initJson.data.upload_url, async () => {
+      const object = await env.MEDIA.get(asset.storage_key);
+      if (!object) throw new Error(`tiktok: media not found in R2: ${asset.storage_key}`);
+      return {
+        method: 'PUT',
+        headers: {
+          'Content-Type': asset.mime_type,
+          'Content-Range': `bytes 0-${asset.size_bytes - 1}/${asset.size_bytes}`,
+        },
+        body: toFixedLengthBody(object.body, asset.size_bytes),
+      };
     });
     if (!uploadRes.ok) throw new Error(`tiktok: chunk upload failed: ${uploadRes.status}`);
 
@@ -152,6 +176,7 @@ export const tiktokAdapter: PlatformAdapter = {
       spam_risk_too_many_posts: 'quota',
       url_ownership_unverified: 'permanent',
       privacy_level_option_mismatch: 'permanent',
+      video_too_long_for_creator: 'permanent',
     });
   },
 };

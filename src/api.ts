@@ -165,6 +165,9 @@ interface MediaByTargetRow {
   public_url: string | null;
   mime_type: string;
   storage_key: string;
+  duration_seconds: number | null;
+  width: number | null;
+  height: number | null;
 }
 
 async function getMediaByTargetIds(env: Env, targetIds: string[]): Promise<Map<string, MediaByTargetRow[]>> {
@@ -173,7 +176,8 @@ async function getMediaByTargetIds(env: Env, targetIds: string[]): Promise<Map<s
 
   const placeholders = targetIds.map(() => '?').join(',');
   const { results } = await env.DB.prepare(
-    `select ptm.post_target_id, ma.id, ma.public_url, ma.mime_type, ma.storage_key
+    `select ptm.post_target_id, ma.id, ma.public_url, ma.mime_type, ma.storage_key,
+            ma.duration_seconds, ma.width, ma.height
      from post_target_media ptm
      join media_assets ma on ma.id = ptm.media_asset_id
      where ptm.post_target_id in (${placeholders})
@@ -409,17 +413,46 @@ async function uploadMedia(request: Request, env: Env): Promise<Response> {
   const bytes = await file.arrayBuffer();
   const mimeType = file.type || 'application/octet-stream';
 
+  // Client-measured (via <video>/createImageBitmap) — best-effort, so a missing/unparsable
+  // value is just left null rather than rejected.
+  const durationSeconds = parseOptionalFloat(form.get('duration_seconds'));
+  const width = parseOptionalInt(form.get('width'));
+  const height = parseOptionalInt(form.get('height'));
+
   await env.MEDIA.put(storageKey, bytes, { httpMetadata: { contentType: mimeType } });
 
   const publicUrl = env.MEDIA_PUBLIC_BASE_URL ? `${env.MEDIA_PUBLIC_BASE_URL}/${storageKey}` : null;
 
   await env.DB.prepare(
-    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes) values (?, ?, ?, ?, ?)`
+    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, duration_seconds, width, height) values (?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, storageKey, publicUrl, mimeType, bytes.byteLength)
+    .bind(id, storageKey, publicUrl, mimeType, bytes.byteLength, durationSeconds, width, height)
     .run();
 
-  return jsonResponse({ id, storage_key: storageKey, public_url: publicUrl, mime_type: mimeType, size_bytes: bytes.byteLength }, 201);
+  return jsonResponse(
+    {
+      id,
+      storage_key: storageKey,
+      public_url: publicUrl,
+      mime_type: mimeType,
+      size_bytes: bytes.byteLength,
+      duration_seconds: durationSeconds,
+      width,
+      height,
+    },
+    201
+  );
+}
+
+function parseOptionalFloat(value: FormDataEntryValue | null): number | null {
+  if (typeof value !== 'string' || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseOptionalInt(value: FormDataEntryValue | null): number | null {
+  const n = parseOptionalFloat(value);
+  return n === null ? null : Math.round(n);
 }
 
 async function cancelTarget(targetId: string, env: Env): Promise<Response> {

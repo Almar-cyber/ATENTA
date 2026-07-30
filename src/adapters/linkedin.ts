@@ -1,13 +1,19 @@
 import type { PlatformAdapter, MediaAsset } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
-import { fetchWithRetry } from '../lib/http.js';
+import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
+import { checkDuration } from '../lib/videoLimits.js';
 
 export const LINKEDIN_VERSION = '202607';
 
 // content.multiImage.images accepts 2-20 images (LinkedIn MultiImage API schema).
 const MULTI_IMAGE_MAX = 20;
+
+// learn.microsoft.com/linkedin video spec (API technically accepts up to 5GB, but spec's own
+// duration figure is what's enforced here).
+const MIN_VIDEO_DURATION_SECONDS = 3;
+const MAX_VIDEO_DURATION_SECONDS = 1800;
 
 interface LinkedinTokens {
   access_token: string;
@@ -49,6 +55,9 @@ export const linkedinAdapter: PlatformAdapter = {
     // multi-video or mixed image+video post type (carousel cards are ads-only).
     if (media.length > 1 && media.some((m) => m.mime_type.startsWith('video/'))) {
       throw new Error('linkedin: multi-media posts support images only (vídeo apenas sozinho)');
+    }
+    if (media.length === 1 && media[0].mime_type.startsWith('video/')) {
+      checkDuration('linkedin', media[0], MIN_VIDEO_DURATION_SECONDS, MAX_VIDEO_DURATION_SECONDS);
     }
   },
 
@@ -148,14 +157,17 @@ async function uploadVideo(env: Env, tokens: LinkedinTokens, asset: MediaAsset):
     };
   };
 
-  const object = await env.MEDIA.get(asset.storage_key);
-  if (!object) throw new Error(`linkedin: media not found in R2: ${asset.storage_key}`);
-  const bytes = new Uint8Array(await object.arrayBuffer());
-
+  // One range read per chunk (not the whole video up front) — keeps memory bounded to a single
+  // chunk regardless of the video's total size. The read happens inside the fetchWithRetry
+  // factory so a retry gets a fresh R2 read instead of an already-consumed stream.
   const uploadedPartIds: string[] = [];
   for (const instr of initJson.value.uploadInstructions) {
-    const chunk = bytes.slice(instr.firstByte, instr.lastByte + 1);
-    const res = await fetchWithRetry(instr.uploadUrl, { method: 'PUT', body: chunk });
+    const length = instr.lastByte - instr.firstByte + 1;
+    const res = await fetchWithRetry(instr.uploadUrl, async () => {
+      const object = await env.MEDIA.get(asset.storage_key, { range: { offset: instr.firstByte, length } });
+      if (!object || !('body' in object)) throw new Error(`linkedin: media not found in R2: ${asset.storage_key}`);
+      return { method: 'PUT', body: toFixedLengthBody(object.body, length) };
+    });
     if (!res.ok) throw new Error(`linkedin: video chunk upload failed: ${res.status}`);
     const etag = res.headers.get('ETag');
     if (etag) uploadedPartIds.push(etag);

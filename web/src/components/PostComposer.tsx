@@ -11,15 +11,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useScheduler } from '@/store';
 import { onPrefill, onPrefillDate } from '@/lib/composer-bus';
 import { createPost, uploadMedia } from '@/lib/api';
-import { localToIso } from '@/lib/format';
+import { fmtBytes, fmtDuration, localToIso } from '@/lib/format';
+import { readMediaMetadata } from '@/lib/mediaMetadata';
 import type { QueuedMedia } from '@/lib/types';
 import {
   ALLOWED_MIME_TYPES,
+  INSTAGRAM_STORY_VIDEO_LIMITS,
   PLATFORM_CAPTION_LIMITS,
   PLATFORM_LABELS,
   PLATFORM_MEDIA_MAX,
   PLATFORM_MULTI_IMAGE_ONLY,
   PLATFORM_REQUIRES_MEDIA,
+  PLATFORM_VIDEO_LIMITS,
+  YOUTUBE_LONG_VIDEO_WARN_SECONDS,
   isVideoMime,
 } from '@/lib/platforms';
 import { PostPreview } from './PostPreview';
@@ -61,6 +65,9 @@ export function PostComposer() {
           name: (m.storage_key || 'mídia').replace(/^[0-9a-f-]{36}-/, ''),
           mime_type: m.mime_type,
           public_url: m.public_url,
+          duration_seconds: m.duration_seconds ?? undefined,
+          width: m.width ?? undefined,
+          height: m.height ?? undefined,
         }))
       );
       toast.success('Post duplicado — escolha uma nova data.');
@@ -77,28 +84,33 @@ export function PostComposer() {
     });
   }, []);
 
-  function onPickFiles(files: FileList | null) {
+  async function onPickFiles(files: FileList | null) {
     if (!files) return;
     const rejected: string[] = [];
-    const add: QueuedMedia[] = [];
+    const accepted: File[] = [];
     Array.from(files).forEach((file) => {
       if (!ALLOWED_MIME_TYPES.includes(file.type)) {
         rejected.push(`${file.name} (${file.type || 'tipo desconhecido'})`);
         return;
       }
-      add.push({ key: newKey(), file, name: file.name, mime_type: file.type });
+      accepted.push(file);
     });
     if (rejected.length) {
       toast.error(`Não suportado: ${rejected.join(', ')}. Use JPEG, PNG, MP4 ou MOV — RAW de câmera precisa ser exportado antes.`);
     }
-    if (add.length) setQueue((q) => [...q, ...add]);
     if (fileRef.current) fileRef.current.value = '';
+    if (accepted.length === 0) return;
+    const add: QueuedMedia[] = await Promise.all(
+      accepted.map(async (file) => ({ key: newKey(), file, name: file.name, mime_type: file.type, ...(await readMediaMetadata(file)) }))
+    );
+    setQueue((q) => [...q, ...add]);
   }
 
   // Replaces the media in one carousel slot without disturbing the others' order — distinct
   // from remove+re-add, which would drop the new file at the end of the queue instead.
-  function replaceMedia(key: string, file: File) {
-    setQueue((q) => q.map((item) => (item.key === key ? { key: newKey(), file, name: file.name, mime_type: file.type } : item)));
+  async function replaceMedia(key: string, file: File) {
+    const meta = await readMediaMetadata(file);
+    setQueue((q) => q.map((item) => (item.key === key ? { key: newKey(), file, name: file.name, mime_type: file.type, ...meta } : item)));
   }
 
   function resetForm() {
@@ -132,6 +144,27 @@ export function PostComposer() {
       if (count > max) out.push(`${name} aceita no máximo ${max} ${max === 1 ? 'arquivo' : 'arquivos'} (você anexou ${count})`);
       if (count > 1 && hasVideo && PLATFORM_MULTI_IMAGE_ONLY[a.platform]) out.push(`${name}: carrossel aceita apenas imagens — vídeo só sozinho`);
       if (count > 1 && a.platform === 'instagram' && isStory) out.push(`${name}: Story aceita apenas um arquivo`);
+
+      const videoLimits = a.platform === 'instagram' && isStory ? INSTAGRAM_STORY_VIDEO_LIMITS : PLATFORM_VIDEO_LIMITS[a.platform];
+      if (videoLimits) {
+        for (const item of queue) {
+          if (!isVideoMime(item.mime_type)) continue;
+          const dur = item.duration_seconds;
+          if (dur != null && videoLimits.minDurationSeconds != null && dur < videoLimits.minDurationSeconds) {
+            out.push(`${name}: vídeo muito curto (${fmtDuration(dur)}, mínimo ${fmtDuration(videoLimits.minDurationSeconds)})`);
+          }
+          if (dur != null && videoLimits.maxDurationSeconds != null && dur > videoLimits.maxDurationSeconds) {
+            out.push(`${name}: vídeo muito longo (${fmtDuration(dur)}, máximo ${fmtDuration(videoLimits.maxDurationSeconds)})`);
+          }
+          const size = item.file?.size;
+          if (size != null && videoLimits.maxSizeBytes != null && size > videoLimits.maxSizeBytes) {
+            out.push(`${name}: arquivo muito grande (${fmtBytes(size)}, máximo ${fmtBytes(videoLimits.maxSizeBytes)})`);
+          }
+          if (a.platform === 'youtube' && dur != null && dur > YOUTUBE_LONG_VIDEO_WARN_SECONDS) {
+            out.push(`${name}: vídeos acima de 15min precisam de conta verificada`);
+          }
+        }
+      }
     }
     return out;
   }, [selectedAccounts, body, queue, isStory]);
@@ -145,7 +178,10 @@ export function PostComposer() {
       const mediaIds: string[] = [];
       for (const item of queue) {
         if (item.assetId) mediaIds.push(item.assetId);
-        else if (item.file) mediaIds.push((await uploadMedia(item.file)).id);
+        else if (item.file) {
+          const meta = { duration_seconds: item.duration_seconds, width: item.width, height: item.height };
+          mediaIds.push((await uploadMedia(item.file, meta)).id);
+        }
       }
       await createPost({
         title: title || undefined,
@@ -189,7 +225,7 @@ export function PostComposer() {
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className={`text-xs ${h.includes('⚠') || h.includes('exige') || h.includes('máximo') || h.includes('apenas') ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}
+                className={`text-xs ${h.includes('⚠') || h.includes('exige') || h.includes('máximo') || h.includes('apenas') || h.includes('muito') ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}
               >
                 {h}
               </motion.p>

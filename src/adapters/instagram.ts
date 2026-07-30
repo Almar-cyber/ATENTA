@@ -2,6 +2,7 @@ import type { MediaAsset, PlatformAdapter } from '../lib/types.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
+import { checkDuration } from '../lib/videoLimits.js';
 
 const GRAPH_VERSION = 'v21.0';
 
@@ -17,6 +18,18 @@ interface AdapterState {
 // Carousels: 2-10 items, images and videos may be mixed
 // (developers.facebook.com/docs/instagram-platform/content-publishing).
 const CAROUSEL_MAX_ITEMS = 10;
+
+const MIN_VIDEO_DURATION_SECONDS = 3;
+const MAX_REELS_DURATION_SECONDS = 900;
+const MAX_STORY_DURATION_SECONDS = 60;
+
+// Feed/carousel photo aspect-ratio range Meta documents for Content Publishing
+// (developers.facebook.com/docs/instagram-platform/content-publishing). Not applied to video:
+// every non-Story video this adapter publishes goes out as a Reel (see publish() below), which
+// is expected to be vertical — checking it against the feed range would reject normal Reels.
+// Not applied to Stories either — no equally solid documented hard range found for those.
+const MIN_FEED_ASPECT_RATIO = 4 / 5;
+const MAX_FEED_ASPECT_RATIO = 1.91;
 
 // Phase 2. Same non-expiring-in-practice Page token story as facebook.ts — see that file's
 // comment. Publish is genuinely asynchronous here (unlike the other five adapters): create a
@@ -46,6 +59,19 @@ export const instagramAdapter: PlatformAdapter = {
     for (const asset of media) {
       if (!asset.public_url) {
         throw new Error('instagram: media needs a public_url (custom R2 domain) — see README Pendências');
+      }
+      if (asset.mime_type.startsWith('video/')) {
+        checkDuration(
+          'instagram',
+          asset,
+          MIN_VIDEO_DURATION_SECONDS,
+          options.as_story ? MAX_STORY_DURATION_SECONDS : MAX_REELS_DURATION_SECONDS
+        );
+      } else if (!options.as_story && asset.width != null && asset.height != null) {
+        const ratio = asset.width / asset.height;
+        if (ratio < MIN_FEED_ASPECT_RATIO || ratio > MAX_FEED_ASPECT_RATIO) {
+          throw new Error(`instagram: proporção da imagem fora do permitido (${asset.width}x${asset.height}) — use entre 4:5 e 1.91:1`);
+        }
       }
     }
   },

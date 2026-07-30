@@ -1,14 +1,19 @@
 import type { PlatformAdapter } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
-import { fetchWithRetry } from '../lib/http.js';
+import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
 import { nowIso } from '../lib/db.js';
+import { checkDuration } from '../lib/videoLimits.js';
 
 const API_BASE = 'https://api.pinterest.com/v5';
 
 // media_source.items is minItems 2 / maxItems 5 in Pinterest's own v5 OpenAPI spec.
 const CAROUSEL_MAX_ITEMS = 5;
+
+// help.pinterest.com — file size isn't documented anywhere, not enforced here.
+const MIN_VIDEO_DURATION_SECONDS = 4;
+const MAX_VIDEO_DURATION_SECONDS = 300;
 
 interface PinterestTokens {
   access_token: string;
@@ -68,6 +73,9 @@ export const pinterestAdapter: PlatformAdapter = {
     }
     for (const asset of media) {
       if (!asset.public_url) throw new Error('pinterest: media needs a public_url (custom R2 domain)');
+      if (asset.mime_type.startsWith('video/')) {
+        checkDuration('pinterest', asset, MIN_VIDEO_DURATION_SECONDS, MAX_VIDEO_DURATION_SECONDS);
+      }
     }
     const options = target.options as { board_id?: string };
     if (!options.board_id) throw new Error('pinterest: no board_id in options and no default board resolved at auth time');
@@ -115,10 +123,14 @@ export const pinterestAdapter: PlatformAdapter = {
       // Pinterest's registered upload is itself a pull from a URL in most v5 flows, but the
       // documented shape varies by account tier — verify against current docs before relying on
       // this in production; falling back to a direct PUT of the R2 bytes if upload_parameters
-      // isn't present.
-      const object = await env.MEDIA.get(asset.storage_key);
-      if (!object) throw new Error(`pinterest: media not found in R2: ${asset.storage_key}`);
-      const uploadRes = await fetchWithRetry(registerJson.upload_url, { method: 'PUT', body: await object.arrayBuffer() });
+      // isn't present. Streamed rather than buffered whole — Pinterest's API gives no chunk
+      // boundaries to range-read against, so this is one request, but the R2 body is piped
+      // through rather than materialized as an arrayBuffer first.
+      const uploadRes = await fetchWithRetry(registerJson.upload_url, async () => {
+        const object = await env.MEDIA.get(asset.storage_key);
+        if (!object) throw new Error(`pinterest: media not found in R2: ${asset.storage_key}`);
+        return { method: 'PUT', body: toFixedLengthBody(object.body, asset.size_bytes) };
+      });
       if (!uploadRes.ok) throw new Error(`pinterest: video upload failed: ${uploadRes.status}`);
 
       return { state: 'processing', adapterState: { media_id: registerJson.media_id } satisfies AdapterState };
