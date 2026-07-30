@@ -38,11 +38,20 @@ export interface CreatePostPayload {
   pinterest_board_id?: string;
   instagram_as_story?: boolean;
   save_as?: 'draft';
+  target_caption_overrides?: Record<string, string>;
 }
 
 export function createPost(payload: CreatePostPayload): Promise<{ id: string; target_count: number }> {
   return req('/api/posts', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updatePost(id: string, payload: Partial<CreatePostPayload>): Promise<{ ok: true }> {
+  return req(`/api/posts/${id}`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });

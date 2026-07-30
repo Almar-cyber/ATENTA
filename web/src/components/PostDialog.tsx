@@ -6,7 +6,7 @@ import type { Post, Target } from '@/lib/types';
 import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
 import { cancelTarget, queueTarget } from '@/lib/api';
-import { requestPrefill } from '@/lib/composer-bus';
+import { requestPrefill, requestEdit } from '@/lib/composer-bus';
 import { useScheduler } from '@/store';
 import { PostPreview } from './PostPreview';
 
@@ -21,6 +21,9 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
   const post = selection?.post;
   const target = selection?.target;
   const status = target ? STATUS_META[target.status] : null;
+  // Same status logic as the server's PATCH guard — never show an edit affordance for a post
+  // the server would reject anyway (one target past 'queued' locks the whole post).
+  const canEdit = post ? post.targets.every((t) => t.status === 'draft' || t.status === 'queued') : false;
 
   async function act(fn: () => Promise<unknown>, ok: string) {
     try {
@@ -87,6 +90,17 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
               <Button variant="outline" onClick={onClose}>
                 Fechar
               </Button>
+              {canEdit && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    requestEdit({ post });
+                    onClose();
+                  }}
+                >
+                  Editar
+                </Button>
+              )}
               <Button variant="outline" onClick={() => requestPrefill({ post, target })}>
                 Duplicar
               </Button>

@@ -31,3 +31,22 @@ export function onPrefillDate(fn: DateListener): () => void {
 export function requestPrefillDate(localDateTime: string): void {
   for (const fn of dateListeners) fn(localDateTime);
 }
+
+// Separate channel for "editar" — operates on the WHOLE POST (every target), unlike onPrefill
+// (duplicar) which only carries the single target that was clicked, since editing needs to
+// show/preserve all of a post's destination accounts.
+export interface EditPayload {
+  post: Post;
+}
+
+type EditListener = (p: EditPayload) => void;
+const editListeners = new Set<EditListener>();
+
+export function onEdit(fn: EditListener): () => void {
+  editListeners.add(fn);
+  return () => editListeners.delete(fn);
+}
+
+export function requestEdit(payload: EditPayload): void {
+  for (const fn of editListeners) fn(payload);
+}

@@ -32,6 +32,9 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   const queueMatch = /^\/api\/post-targets\/([^/]+)\/queue$/.exec(pathname);
   if (queueMatch && method === 'POST') return queueTarget(queueMatch[1], env);
 
+  const updatePostMatch = /^\/api\/posts\/([^/]+)$/.exec(pathname);
+  if (updatePostMatch && method === 'PATCH') return updatePost(updatePostMatch[1], request, env);
+
   return jsonResponse({ error: 'not found' }, 404);
 }
 
@@ -206,6 +209,25 @@ interface CreatePostBody {
   pinterest_board_id?: string;
   instagram_as_story?: boolean;
   save_as?: string;
+  // Keyed by account_id; overrides the shared `body` for just that one target's caption.
+  target_caption_overrides?: Record<string, string>;
+}
+
+// Same fields as CreatePostBody minus save_as — an edit never re-decides the initial
+// draft/queued split (see updatePost's per-account status logic instead). Every field is
+// optional and independently "only touch what's present" — see updatePost.
+interface UpdatePostBody {
+  title?: string;
+  body?: string;
+  scheduled_for?: string;
+  target_account_ids?: string[];
+  media_asset_id?: string;
+  media_asset_ids?: string[];
+  options?: Record<string, unknown>;
+  youtube_privacy_status?: string;
+  pinterest_board_id?: string;
+  instagram_as_story?: boolean;
+  target_caption_overrides?: Record<string, string>;
 }
 
 interface AccountRow {
@@ -214,23 +236,46 @@ interface AccountRow {
   status: string;
 }
 
-async function createPost(request: Request, env: Env): Promise<Response> {
-  let payload: CreatePostBody;
-  try {
-    payload = await request.json();
-  } catch {
-    return jsonResponse({ error: 'JSON inválido' }, 400);
-  }
+// A target's status only ever starts life as one of these two (an update's newly-added account
+// defaults to 'queued', matching what a non-draft createPost call would do) — every other
+// PostTargetStatus is reached later, by the poller.
+type NewTargetStatus = 'draft' | 'queued';
 
-  if (!payload.body?.trim()) return jsonResponse({ error: 'Legenda (body) é obrigatória' }, 400);
-  if (!payload.scheduled_for || Number.isNaN(Date.parse(payload.scheduled_for))) {
-    return jsonResponse({ error: 'scheduled_for inválido' }, 400);
-  }
-  if (!Array.isArray(payload.target_account_ids) || payload.target_account_ids.length === 0) {
-    return jsonResponse({ error: 'Selecione ao menos uma conta de destino' }, 400);
-  }
+interface TargetToInsert {
+  id: string;
+  account: AccountRow;
+  status: NewTargetStatus;
+  options: Record<string, unknown>;
+}
 
-  const accountIds = payload.target_account_ids;
+interface ValidateAccountsAndMediaParams {
+  accountIds: string[] | undefined;
+  mediaAssetId?: string;
+  mediaAssetIds?: string[];
+  options?: Record<string, unknown>;
+  youtubePrivacyStatus?: string;
+  pinterestBoardId?: string;
+  instagramAsStory?: boolean;
+  // createPost uses one status for every target (from save_as); updatePost's full-replace uses a
+  // per-account status (from each target's OLD status) — so the caller decides, not this helper.
+  getTargetStatus: (accountId: string) => NewTargetStatus;
+}
+
+type ValidateAccountsAndMediaResult =
+  | { ok: true; media: MediaAsset[]; targets: TargetToInsert[] }
+  | { ok: false; response: Response };
+
+// Shared by createPost and updatePost's full-replace branch: validate the target accounts exist
+// and are active, validate the requested media exists with no duplicates, then — per target —
+// merge platform-specific options and run the adapter's own validate() (skipped for drafts, same
+// as createPost always did). Returns either the built target list or the 400 Response to send
+// back verbatim; callers must not perform any DB write before checking `ok`.
+async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMediaParams): Promise<ValidateAccountsAndMediaResult> {
+  if (!Array.isArray(params.accountIds) || params.accountIds.length === 0) {
+    return { ok: false, response: jsonResponse({ error: 'Selecione ao menos uma conta de destino' }, 400) };
+  }
+  const accountIds = params.accountIds;
+
   const { results: accountRows } = await env.DB.prepare(
     `select id, platform, status from accounts where id in (${accountIds.map(() => '?').join(',')})`
   )
@@ -239,57 +284,61 @@ async function createPost(request: Request, env: Env): Promise<Response> {
   const accounts = accountRows ?? [];
 
   if (accounts.length !== accountIds.length) {
-    return jsonResponse({ error: 'Uma ou mais contas não foram encontradas' }, 400);
+    return { ok: false, response: jsonResponse({ error: 'Uma ou mais contas não foram encontradas' }, 400) };
   }
   const inactive = accounts.filter((a) => a.status !== 'active');
   if (inactive.length > 0) {
-    return jsonResponse(
-      { error: `Conta(s) inativa(s), precisa reautenticar: ${inactive.map((a) => a.platform).join(', ')}` },
-      400
-    );
+    return {
+      ok: false,
+      response: jsonResponse(
+        { error: `Conta(s) inativa(s), precisa reautenticar: ${inactive.map((a) => a.platform).join(', ')}` },
+        400
+      ),
+    };
   }
 
   // media_asset_ids is the carousel-capable form; media_asset_id is kept for single-media callers.
   // Order matters (it becomes post_target_media.position), so each id is fetched in turn rather
   // than with one IN (...) query, whose result order SQLite doesn't guarantee.
-  const mediaIds = payload.media_asset_ids?.length ? payload.media_asset_ids : payload.media_asset_id ? [payload.media_asset_id] : [];
+  const mediaIds = params.mediaAssetIds?.length ? params.mediaAssetIds : params.mediaAssetId ? [params.mediaAssetId] : [];
   // post_target_media's primary key is (post_target_id, media_asset_id, role), so the same asset
   // can't legally appear twice in one target — reject it here with a readable message instead of
   // letting the insert fail mid-loop.
   if (new Set(mediaIds).size !== mediaIds.length) {
-    return jsonResponse({ error: 'a mesma mídia foi enviada mais de uma vez no carrossel' }, 400);
+    return { ok: false, response: jsonResponse({ error: 'a mesma mídia foi enviada mais de uma vez no carrossel' }, 400) };
   }
   const media: MediaAsset[] = [];
   for (const mediaId of mediaIds) {
     const row = await env.DB.prepare(`select * from media_assets where id = ?`).bind(mediaId).first<any>();
-    if (!row) return jsonResponse({ error: `media_asset_id não encontrado: ${mediaId}` }, 400);
+    if (!row) return { ok: false, response: jsonResponse({ error: `media_asset_id não encontrado: ${mediaId}` }, 400) };
     media.push(rowToMediaAsset(row));
   }
 
-  const scheduledPostId = crypto.randomUUID();
   const ts = nowIso();
-  const targetStatus = payload.save_as === 'draft' ? 'draft' : 'queued';
-  const targetsToInsert: Array<{ id: string; account: AccountRow; options: Record<string, unknown> }> = [];
+  const targets: TargetToInsert[] = [];
 
   // Reuse each adapter's own validate() so an impossible post (missing required video, missing
   // public_url, ...) is rejected here instead of silently failing at poller time. Drafts skip this
   // entirely — the point of a draft is capturing the idea before media/details are final.
   for (const account of accounts) {
     const platform = account.platform as Platform;
-    if (!PLATFORMS.includes(platform)) return jsonResponse({ error: `plataforma desconhecida: ${platform}` }, 400);
+    if (!PLATFORMS.includes(platform)) {
+      return { ok: false, response: jsonResponse({ error: `plataforma desconhecida: ${platform}` }, 400) };
+    }
 
-    const options: Record<string, unknown> = { ...(payload.options ?? {}) };
-    if (platform === 'youtube' && payload.youtube_privacy_status) {
-      options.privacyStatus = payload.youtube_privacy_status;
+    const options: Record<string, unknown> = { ...(params.options ?? {}) };
+    if (platform === 'youtube' && params.youtubePrivacyStatus) {
+      options.privacyStatus = params.youtubePrivacyStatus;
     }
-    if (platform === 'pinterest' && payload.pinterest_board_id) {
-      options.board_id = payload.pinterest_board_id;
+    if (platform === 'pinterest' && params.pinterestBoardId) {
+      options.board_id = params.pinterestBoardId;
     }
-    if (platform === 'instagram' && payload.instagram_as_story) {
+    if (platform === 'instagram' && params.instagramAsStory) {
       options.as_story = true;
     }
 
-    if (targetStatus !== 'draft') {
+    const status = params.getTargetStatus(account.id);
+    if (status !== 'draft') {
       const fakeTarget: PostTarget = {
         id: '',
         scheduled_post_id: '',
@@ -310,22 +359,39 @@ async function createPost(request: Request, env: Env): Promise<Response> {
         // Each adapter's own message is already prefixed with its platform name (e.g. "youtube: ...").
         adapters[platform].validate(fakeTarget, media);
       } catch (err) {
-        return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 400);
+        return { ok: false, response: jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 400) };
       }
     }
 
-    targetsToInsert.push({ id: crypto.randomUUID(), account, options });
+    targets.push({ id: crypto.randomUUID(), account, status, options });
   }
 
-  await env.DB.prepare(`insert into scheduled_posts (id, title, body, scheduled_for) values (?, ?, ?, ?)`)
-    .bind(scheduledPostId, payload.title ?? null, payload.body, payload.scheduled_for)
-    .run();
+  return { ok: true, media, targets };
+}
 
-  for (const t of targetsToInsert) {
+// Shared by createPost and updatePost's full-replace branch: insert one post_targets row per
+// validated target plus its post_target_media rows, in the same two-level loop createPost always
+// used. Assumes scheduledPostId already exists as a row in scheduled_posts.
+async function insertTargets(
+  env: Env,
+  scheduledPostId: string,
+  targets: TargetToInsert[],
+  media: MediaAsset[],
+  captionOverrides: Record<string, string> | undefined
+): Promise<void> {
+  for (const t of targets) {
     await env.DB.prepare(
-      `insert into post_targets (id, scheduled_post_id, account_id, platform, status, options) values (?, ?, ?, ?, ?, ?)`
+      `insert into post_targets (id, scheduled_post_id, account_id, platform, status, options, caption_override) values (?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind(t.id, scheduledPostId, t.account.id, t.account.platform, targetStatus, JSON.stringify(t.options))
+      .bind(
+        t.id,
+        scheduledPostId,
+        t.account.id,
+        t.account.platform,
+        t.status,
+        JSON.stringify(t.options),
+        captionOverrides?.[t.account.id] ?? null
+      )
       .run();
 
     for (let i = 0; i < media.length; i++) {
@@ -336,8 +402,138 @@ async function createPost(request: Request, env: Env): Promise<Response> {
         .run();
     }
   }
+}
 
-  return jsonResponse({ id: scheduledPostId, target_count: targetsToInsert.length }, 201);
+async function createPost(request: Request, env: Env): Promise<Response> {
+  let payload: CreatePostBody;
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+
+  if (!payload.body?.trim()) return jsonResponse({ error: 'Legenda (body) é obrigatória' }, 400);
+  if (!payload.scheduled_for || Number.isNaN(Date.parse(payload.scheduled_for))) {
+    return jsonResponse({ error: 'scheduled_for inválido' }, 400);
+  }
+
+  const targetStatus: NewTargetStatus = payload.save_as === 'draft' ? 'draft' : 'queued';
+
+  const result = await validateAccountsAndMedia(env, {
+    accountIds: payload.target_account_ids,
+    mediaAssetId: payload.media_asset_id,
+    mediaAssetIds: payload.media_asset_ids,
+    options: payload.options,
+    youtubePrivacyStatus: payload.youtube_privacy_status,
+    pinterestBoardId: payload.pinterest_board_id,
+    instagramAsStory: payload.instagram_as_story,
+    getTargetStatus: () => targetStatus,
+  });
+  if (!result.ok) return result.response;
+
+  const scheduledPostId = crypto.randomUUID();
+  await env.DB.prepare(`insert into scheduled_posts (id, title, body, scheduled_for) values (?, ?, ?, ?)`)
+    .bind(scheduledPostId, payload.title ?? null, payload.body, payload.scheduled_for)
+    .run();
+
+  await insertTargets(env, scheduledPostId, result.targets, result.media, payload.target_caption_overrides);
+
+  return jsonResponse({ id: scheduledPostId, target_count: result.targets.length }, 201);
+}
+
+async function updatePost(id: string, request: Request, env: Env): Promise<Response> {
+  let payload: UpdatePostBody;
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+
+  // Pure shape validation before any DB access, same as createPost — and, importantly, before any
+  // DB write below, so a bad date can never be discovered only after the full-replace branch has
+  // already deleted/inserted post_targets (which would leave the edit half-applied).
+  if (payload.scheduled_for !== undefined && (!payload.scheduled_for || Number.isNaN(Date.parse(payload.scheduled_for)))) {
+    return jsonResponse({ error: 'scheduled_for inválido' }, 400);
+  }
+  // Same rule createPost enforces on `body` — an edit that clears the caption to blank must be
+  // rejected too, otherwise a post could end up in the same "no caption" state createPost has
+  // always refused to create.
+  if (payload.body !== undefined && !payload.body.trim()) {
+    return jsonResponse({ error: 'Legenda (body) é obrigatória' }, 400);
+  }
+
+  const post = await env.DB.prepare(`select id from scheduled_posts where id = ?`).bind(id).first<{ id: string }>();
+  if (!post) return jsonResponse({ error: 'post não encontrado' }, 404);
+
+  // Guard applies to every PATCH, not just the full-replace branch below: the moment any target
+  // moves past 'queued' (publishing/processing/published/failed/canceled/ambiguous) the whole post
+  // locks. No partial/per-target editing — real complexity for near-zero benefit in a solo-user app.
+  const { results: targetRows } = await env.DB.prepare(`select account_id, status from post_targets where scheduled_post_id = ?`)
+    .bind(id)
+    .all<{ account_id: string; status: string }>();
+  const existingTargets = targetRows ?? [];
+
+  const locked = existingTargets.some((t) => t.status !== 'draft' && t.status !== 'queued');
+  if (locked) {
+    return jsonResponse({ error: 'não é possível editar: um ou mais destinos já estão publicando/publicados' }, 409);
+  }
+
+  // target_account_ids present signals "full replace": the caller is editing accounts/media/
+  // options, not just nudging the date, so every target is validated and rebuilt from scratch.
+  if (payload.target_account_ids !== undefined) {
+    // Guaranteed 'draft' | 'queued' — every row here just passed the guard above.
+    const oldStatusMap = new Map<string, NewTargetStatus>();
+    for (const t of existingTargets) {
+      oldStatusMap.set(t.account_id, t.status as NewTargetStatus);
+    }
+
+    const result = await validateAccountsAndMedia(env, {
+      accountIds: payload.target_account_ids,
+      mediaAssetId: payload.media_asset_id,
+      mediaAssetIds: payload.media_asset_ids,
+      options: payload.options,
+      youtubePrivacyStatus: payload.youtube_privacy_status,
+      pinterestBoardId: payload.pinterest_board_id,
+      instagramAsStory: payload.instagram_as_story,
+      // An account not previously targeted (newly added during this edit) defaults to 'queued' —
+      // matching what a non-draft createPost call would do.
+      getTargetStatus: (accountId) => oldStatusMap.get(accountId) ?? 'queued',
+    });
+    if (!result.ok) return result.response;
+
+    // Cascades to post_target_media (ON DELETE CASCADE — migrations/0001_init.sql), so the fresh
+    // insert below starts from a clean slate instead of trying to diff old vs new media rows.
+    await env.DB.prepare(`delete from post_targets where scheduled_post_id = ?`).bind(id).run();
+    await insertTargets(env, id, result.targets, result.media, payload.target_caption_overrides);
+  }
+
+  // D1 bind semantics have no clean "leave this column alone if it wasn't sent" (a plain
+  // `set title = coalesce(?, title)` would need a real NULL-vs-absent distinction we don't have),
+  // so the SET clause is built dynamically from whichever fields actually showed up in the
+  // payload — the same approach listPosts already uses for its WHERE clause.
+  const setClauses: string[] = [];
+  const setParams: unknown[] = [];
+  if (payload.title !== undefined) {
+    setClauses.push('title = ?');
+    setParams.push(payload.title);
+  }
+  if (payload.body !== undefined) {
+    setClauses.push('body = ?');
+    setParams.push(payload.body);
+  }
+  if (payload.scheduled_for !== undefined) {
+    setClauses.push('scheduled_for = ?');
+    setParams.push(payload.scheduled_for);
+  }
+  if (setClauses.length > 0) {
+    setClauses.push('updated_at = ?');
+    setParams.push(nowIso());
+    await env.DB.prepare(`update scheduled_posts set ${setClauses.join(', ')} where id = ?`)
+      .bind(...setParams, id)
+      .run();
+  }
+
+  return jsonResponse({ ok: true });
 }
 
 interface RescheduleBody {

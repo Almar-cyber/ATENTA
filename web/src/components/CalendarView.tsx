@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Post, Target } from '@/lib/types';
 import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
 import { dayKey } from '@/lib/format';
 import { requestPrefillDate } from '@/lib/composer-bus';
+import { updatePost } from '@/lib/api';
+import { useScheduler } from '@/store';
 import { Button } from '@/components/ui/button';
 import type { DialogSelection } from './PostDialog';
 
@@ -16,9 +19,11 @@ interface Entry {
 }
 
 export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogSelection) => void }) {
+  const { reload } = useScheduler();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
+  const dragId = useRef<string | null>(null);
 
   const byDay = useMemo(() => {
     const map = new Map<string, Entry[]>();
@@ -32,6 +37,8 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
     }
     return map;
   }, [posts]);
+
+  const postsById = useMemo(() => new Map(posts.map((p) => [p.id, p])), [posts]);
 
   const first = new Date(year, month, 1);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -50,6 +57,39 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
     }
     setMonth(m);
     setYear(y);
+  }
+
+  async function movePost(post: Post, newIso: string): Promise<boolean> {
+    try {
+      await updatePost(post.id, { scheduled_for: newIso });
+      await reload();
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
+  async function handleDrop(day: number) {
+    const id = dragId.current;
+    dragId.current = null;
+    if (!id) return;
+    const post = postsById.get(id);
+    if (!post) return;
+    const original = new Date(post.scheduled_for);
+    const next = new Date(year, month, day, original.getHours(), original.getMinutes());
+    if (dayKey(next) === dayKey(original)) return;
+    const previousIso = post.scheduled_for;
+    const ok = await movePost(post, next.toISOString());
+    if (!ok) return;
+    toast.success('Post reagendado.', {
+      action: {
+        label: 'Desfazer',
+        onClick: () => {
+          movePost(post, previousIso);
+        },
+      },
+    });
   }
 
   return (
@@ -92,20 +132,25 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
             <button
               key={day}
               onClick={() => requestPrefillDate(local)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => handleDrop(day)}
               className={`min-h-24 rounded-lg border p-1.5 text-left transition-colors hover:border-primary ${isToday ? 'border-2 border-primary' : ''}`}
             >
               <div className="mb-1 text-xs font-semibold">{day}</div>
               {entries.slice(0, 3).map(({ post, target }) => {
                 const failed = target.status === 'failed' || target.status === 'ambiguous';
+                const movable = target.status === 'draft' || target.status === 'queued';
                 return (
                   <span
                     key={target.id}
+                    draggable={movable ? true : undefined}
+                    onDragStart={movable ? () => (dragId.current = post.id) : undefined}
                     onClick={(e) => {
                       e.stopPropagation();
                       onOpen({ post, target });
                     }}
                     title={`${PLATFORM_LABELS[target.platform]} — ${target.account_name}`}
-                    className={`mb-0.5 flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[11px] ${failed ? 'bg-red-100 dark:bg-red-500/15' : 'bg-muted'} ${target.status === 'draft' ? 'opacity-70' : ''}`}
+                    className={`mb-0.5 flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[11px] ${failed ? 'bg-red-100 dark:bg-red-500/15' : 'bg-muted'} ${target.status === 'draft' ? 'opacity-70' : ''} ${movable ? 'cursor-grab active:cursor-grabbing' : ''}`}
                     style={{ borderLeft: `3px ${target.status === 'draft' ? 'dashed' : 'solid'} ${PLATFORM_COLORS[target.platform]}` }}
                   >
                     {failed && <AlertTriangle className="size-2.5 shrink-0 text-red-600" />}

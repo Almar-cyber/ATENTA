@@ -14,17 +14,33 @@ interface Entry {
   target: Target;
 }
 
-// Instagram posts still in play, newest first (top-left = next to publish, like a real IG profile).
+// Most recent published posts to anchor the grid against — enough to fill several rows of
+// context without letting the grid grow unbounded over the account's lifetime.
+const MAX_PUBLISHED_ENTRIES = 18;
+
+// Published entries anchor on when they actually went out; everything still in play anchors on
+// its (re)schedulable slot.
+function effectiveTimestamp({ post, target }: Entry): string {
+  return target.status === 'published' ? target.published_at ?? post.scheduled_for : post.scheduled_for;
+}
+
+// Instagram tiles for the grid: the real published feed (capped to the most recent
+// MAX_PUBLISHED_ENTRIES) plus everything still in play (shown in full, uncapped), so the grid
+// shows how a new post will actually sit next to the already-published feed — newest first
+// (top-left = next to publish, like a real IG profile).
 function gridEntries(posts: Post[]): Entry[] {
-  const out: Entry[] = [];
+  const upcoming: Entry[] = [];
+  const published: Entry[] = [];
   for (const post of posts) {
     for (const target of post.targets) {
       if (target.platform !== 'instagram') continue;
-      if (target.status === 'published' || target.status === 'canceled' || target.status === 'failed') continue;
-      out.push({ post, target });
+      if (target.status === 'canceled' || target.status === 'failed') continue;
+      (target.status === 'published' ? published : upcoming).push({ post, target });
     }
   }
-  out.sort((a, b) => (a.post.scheduled_for < b.post.scheduled_for ? 1 : -1));
+  published.sort((a, b) => (effectiveTimestamp(a) < effectiveTimestamp(b) ? 1 : -1));
+  const out = upcoming.concat(published.slice(0, MAX_PUBLISHED_ENTRIES));
+  out.sort((a, b) => (effectiveTimestamp(a) < effectiveTimestamp(b) ? 1 : -1));
   return out;
 }
 
@@ -50,7 +66,12 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
     const fromId = dragId.current;
     dragId.current = null;
     if (!fromId || fromId === toId) return;
-    const order = entries.map((e) => e.post.id);
+    // Published posts are fixed anchors, not reorderable: reschedulePosts permutes scheduled_for
+    // only among the exact set of ids it's given, so a published post's real, already-elapsed
+    // scheduled_for must never enter that set. Excluding published entries here means an attempt
+    // to drag one (or drop onto one) naturally no-ops below via a missing index, and every other
+    // drag's payload stays free of published ids too.
+    const order = entries.filter((e) => e.target.status !== 'published').map((e) => e.post.id);
     const from = order.indexOf(fromId);
     const to = order.indexOf(toId);
     if (from === -1 || to === -1) return;
@@ -76,12 +97,13 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         {entries.map(({ post, target }) => {
           const m = target.media[0];
           const video = isVideoMime(m?.mime_type);
+          const published = target.status === 'published';
           return (
             <motion.div
               layout
               key={post.id}
-              draggable
-              onDragStart={() => (dragId.current = post.id)}
+              draggable={published ? undefined : true}
+              onDragStart={published ? undefined : () => (dragId.current = post.id)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(post.id)}
               onClick={() => onOpen({ post, target })}
@@ -98,6 +120,9 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
               )}
               {target.status === 'draft' && (
                 <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">rascunho</span>
+              )}
+              {published && (
+                <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">publicado</span>
               )}
               {target.media.length > 1 && <span className="absolute right-1 top-1 text-xs text-white drop-shadow">▣</span>}
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 pb-0.5 pt-3 text-center text-[10px] text-white">

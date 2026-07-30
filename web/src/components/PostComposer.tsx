@@ -9,9 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useScheduler } from '@/store';
-import { onPrefill, onPrefillDate } from '@/lib/composer-bus';
-import { createPost, uploadMedia } from '@/lib/api';
-import { fmtBytes, fmtDuration, localToIso } from '@/lib/format';
+import { onPrefill, onPrefillDate, onEdit } from '@/lib/composer-bus';
+import { createPost, updatePost, uploadMedia } from '@/lib/api';
+import type { CreatePostPayload } from '@/lib/api';
+import { fmtBytes, fmtDuration, isoToLocalInput, localToIso } from '@/lib/format';
 import { readMediaMetadata } from '@/lib/mediaMetadata';
 import type { QueuedMedia } from '@/lib/types';
 import {
@@ -46,6 +47,10 @@ export function PostComposer() {
   const [ytPrivacy, setYtPrivacy] = useState('');
   const [pinBoard, setPinBoard] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  // Per-account caption customization (Feature B): presence of a key means that account diverges
+  // from the shared `body`; absence means it uses `body` as-is.
+  const [captionOverrides, setCaptionOverrides] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Prefill from a "duplicar" request coming out of any view.
@@ -71,6 +76,40 @@ export function PostComposer() {
         }))
       );
       toast.success('Post duplicado — escolha uma nova data.');
+      document.getElementById('composer-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
+
+  // Load an existing post into the form for in-place editing ("editar"), across ALL its targets
+  // — unlike onPrefill (duplicar) above, which only prefills from the single target clicked.
+  useEffect(() => {
+    return onEdit(({ post }) => {
+      setEditingPostId(post.id);
+      setTitle(post.title ?? '');
+      setBody(post.body ?? '');
+      setScheduledLocal(isoToLocalInput(post.scheduled_for));
+      setSelected(new Set(post.targets.map((t) => t.account_id)));
+      setYtPrivacy((post.targets.find((t) => t.platform === 'youtube')?.options?.privacyStatus as string) ?? '');
+      setPinBoard((post.targets.find((t) => t.platform === 'pinterest')?.options?.board_id as string) ?? '');
+      setIsStory(post.targets.some((t) => !!t.options?.as_story));
+      setQueue(
+        (post.targets[0]?.media ?? []).map((m) => ({
+          key: newKey(),
+          assetId: m.id,
+          name: (m.storage_key || 'mídia').replace(/^[0-9a-f-]{36}-/, ''),
+          mime_type: m.mime_type,
+          public_url: m.public_url,
+          duration_seconds: m.duration_seconds ?? undefined,
+          width: m.width ?? undefined,
+          height: m.height ?? undefined,
+        }))
+      );
+      setCaptionOverrides(
+        Object.fromEntries(
+          post.targets.filter((t) => t.caption_override != null).map((t) => [t.account_id, t.caption_override as string])
+        )
+      );
+      toast.success('Editando post — altere e salve.');
       document.getElementById('composer-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }, []);
@@ -122,6 +161,7 @@ export function PostComposer() {
     setIsStory(false);
     setYtPrivacy('');
     setPinBoard('');
+    setCaptionOverrides({});
   }
 
   const selectedAccounts = useMemo(
@@ -136,8 +176,9 @@ export function PostComposer() {
     const hasVideo = queue.some((q) => isVideoMime(q.mime_type));
     for (const a of selectedAccounts) {
       const name = PLATFORM_LABELS[a.platform];
+      const effectiveCaption = captionOverrides[a.id] ?? body;
       const limit = PLATFORM_CAPTION_LIMITS[a.platform];
-      if (limit != null) out.push(`${name}: ${body.length}/${limit}${body.length > limit ? ' ⚠' : ''}`);
+      if (limit != null) out.push(`${name}: ${effectiveCaption.length}/${limit}${effectiveCaption.length > limit ? ' ⚠' : ''}`);
       const requires = PLATFORM_REQUIRES_MEDIA[a.platform];
       if (requires && count === 0) out.push(`${name} exige ${requires} — anexe um arquivo`);
       const max = PLATFORM_MEDIA_MAX[a.platform];
@@ -167,7 +208,7 @@ export function PostComposer() {
       }
     }
     return out;
-  }, [selectedAccounts, body, queue, isStory]);
+  }, [selectedAccounts, body, queue, isStory, captionOverrides]);
 
   async function submit(asDraft: boolean) {
     if (selected.size === 0) return toast.error('Selecione ao menos uma conta de destino.');
@@ -183,7 +224,7 @@ export function PostComposer() {
           mediaIds.push((await uploadMedia(item.file, meta)).id);
         }
       }
-      await createPost({
+      const payload: CreatePostPayload = {
         title: title || undefined,
         body,
         scheduled_for: localToIso(scheduledLocal),
@@ -193,9 +234,16 @@ export function PostComposer() {
         pinterest_board_id: pinBoard || undefined,
         instagram_as_story: isStory || undefined,
         save_as: asDraft ? 'draft' : undefined,
-      });
-      toast.success(asDraft ? 'Rascunho salvo.' : 'Post agendado com sucesso.');
+        target_caption_overrides: Object.keys(captionOverrides).length ? captionOverrides : undefined,
+      };
+      if (editingPostId) {
+        await updatePost(editingPostId, payload);
+      } else {
+        await createPost(payload);
+      }
+      toast.success(editingPostId ? 'Post atualizado.' : asDraft ? 'Rascunho salvo.' : 'Post agendado com sucesso.');
       resetForm();
+      setEditingPostId(null);
       await reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -210,6 +258,24 @@ export function PostComposer() {
         <CardTitle>Novo post</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {editingPostId && (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+            <span>Editando post agendado</span>
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              className="h-auto p-0"
+              onClick={() => {
+                setEditingPostId(null);
+                resetForm();
+              }}
+            >
+              Cancelar edição
+            </Button>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="f-title">Título (opcional, usado no YouTube)</Label>
           <Input id="f-title" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -243,6 +309,63 @@ export function PostComposer() {
           <AccountPicker accounts={accounts} selected={selected} onChange={setSelected} />
         </div>
 
+        {selectedAccounts.length >= 2 && (
+          <div className="space-y-2 border-t pt-3">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Legendas por conta (opcional)
+            </Label>
+            <div className="space-y-2">
+              {selectedAccounts.map((a) => {
+                const override = captionOverrides[a.id];
+                const hasOverride = override !== undefined;
+                return (
+                  <div key={a.id} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-muted-foreground">
+                        {PLATFORM_LABELS[a.platform]} — {a.display_name}
+                      </span>
+                      {hasOverride ? (
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="xs"
+                          className="h-auto p-0"
+                          onClick={() =>
+                            setCaptionOverrides((prev) => {
+                              const next = { ...prev };
+                              delete next[a.id];
+                              return next;
+                            })
+                          }
+                        >
+                          Usar legenda padrão
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="xs"
+                          className="h-auto p-0"
+                          onClick={() => setCaptionOverrides((prev) => ({ ...prev, [a.id]: body }))}
+                        >
+                          Personalizar legenda
+                        </Button>
+                      )}
+                    </div>
+                    {hasOverride && (
+                      <Textarea
+                        value={override}
+                        onChange={(e) => setCaptionOverrides((prev) => ({ ...prev, [a.id]: e.target.value }))}
+                        className="min-h-16 text-sm"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="f-media">Mídia (imagem ou vídeo, opcional)</Label>
           <Input
@@ -265,34 +388,40 @@ export function PostComposer() {
           />
         </div>
 
-        <label className="flex items-center gap-2 text-sm font-medium">
-          <Checkbox checked={isStory} onCheckedChange={(v) => setIsStory(!!v)} />
-          Publicar como Story (Instagram)
-        </label>
+        {selectedAccounts.some((a) => a.platform === 'instagram') && (
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <Checkbox checked={isStory} onCheckedChange={(v) => setIsStory(!!v)} />
+            Publicar como Story (Instagram)
+          </label>
+        )}
 
-        <div className="space-y-1.5">
-          <Label>Privacidade (YouTube)</Label>
-          <Select value={ytPrivacy || 'default'} onValueChange={(v) => setYtPrivacy(v === 'default' ? '' : v)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">padrão (unlisted)</SelectItem>
-              <SelectItem value="public">public</SelectItem>
-              <SelectItem value="unlisted">unlisted</SelectItem>
-              <SelectItem value="private">private</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {selectedAccounts.some((a) => a.platform === 'youtube') && (
+          <div className="space-y-1.5">
+            <Label>Privacidade (YouTube)</Label>
+            <Select value={ytPrivacy || 'default'} onValueChange={(v) => setYtPrivacy(v === 'default' ? '' : v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">padrão (unlisted)</SelectItem>
+                <SelectItem value="public">public</SelectItem>
+                <SelectItem value="unlisted">unlisted</SelectItem>
+                <SelectItem value="private">private</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="f-board">Board ID (Pinterest, opcional)</Label>
-          <Input id="f-board" value={pinBoard} onChange={(e) => setPinBoard(e.target.value)} placeholder="usa o board padrão da conta se vazio" />
-        </div>
+        {selectedAccounts.some((a) => a.platform === 'pinterest') && (
+          <div className="space-y-1.5">
+            <Label htmlFor="f-board">Board ID (Pinterest, opcional)</Label>
+            <Input id="f-board" value={pinBoard} onChange={(e) => setPinBoard(e.target.value)} placeholder="usa o board padrão da conta se vazio" />
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 pt-1">
           <Button onClick={() => submit(false)} disabled={submitting}>
-            {submitting ? 'Agendando…' : 'Agendar post'}
+            {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
           </Button>
           <Button variant="outline" onClick={() => submit(true)} disabled={submitting}>
             Salvar como rascunho
@@ -310,7 +439,7 @@ export function PostComposer() {
                     input={{
                       platform: a.platform,
                       accountName: a.display_name,
-                      caption: body,
+                      caption: captionOverrides[a.id] ?? body,
                       title,
                       media: queue,
                       isStory,
