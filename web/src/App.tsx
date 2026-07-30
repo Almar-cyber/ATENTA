@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
 import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
@@ -7,6 +7,8 @@ import type { Post } from '@/lib/types';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PostComposer } from '@/components/PostComposer';
+import type { KeyedPreviewInput } from '@/components/PostComposer';
+import { PostPreview } from '@/components/PostPreview';
 import { AlertBanner } from '@/components/AlertBanner';
 import { ListView } from '@/components/ListView';
 import { CalendarView } from '@/components/CalendarView';
@@ -48,6 +50,7 @@ function Dashboard() {
   const { posts, accounts, filters, setFilters } = useScheduler();
   const [view, setView] = useState<View>('list');
   const [selection, setSelection] = useState<DialogSelection | null>(null);
+  const [previewItems, setPreviewItems] = useState<KeyedPreviewInput[]>([]);
 
   const visible = useMemo(() => accountFilter(posts, filters.account), [posts, filters.account]);
 
@@ -61,7 +64,25 @@ function Dashboard() {
         }}
       />
       <main className="grid items-start gap-5 p-6 lg:grid-cols-[360px_1fr]">
-        <PostComposer />
+        <PostComposer onPreviewChange={setPreviewItems} />
+
+        <AnimatePresence>
+          {previewItems.length > 0 && (
+            <motion.section
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="rounded-xl border bg-card p-4 lg:col-span-2"
+            >
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pré-visualização</p>
+              <div className="flex flex-wrap gap-3">
+                {previewItems.map(({ accountId, input }) => (
+                  <PostPreview key={accountId} input={input} />
+                ))}
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
 
         <section className="rounded-xl border bg-card p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

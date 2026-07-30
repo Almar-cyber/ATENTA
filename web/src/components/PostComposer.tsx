@@ -27,7 +27,7 @@ import {
   YOUTUBE_LONG_VIDEO_WARN_SECONDS,
   isVideoMime,
 } from '@/lib/platforms';
-import { PostPreview } from './PostPreview';
+import type { PreviewInput } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
 
@@ -35,7 +35,15 @@ function newKey() {
   return crypto.randomUUID();
 }
 
-export function PostComposer() {
+// One entry per selected account, keyed for the parent to render — the composer's own sidebar is
+// too narrow to show these side by side, so PostComposer reports them upward instead of rendering
+// them itself; see App.tsx's full-width preview strip.
+export interface KeyedPreviewInput {
+  accountId: string;
+  input: PreviewInput;
+}
+
+export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: KeyedPreviewInput[]) => void }) {
   const { accounts, accountsById, reload } = useScheduler();
 
   const [title, setTitle] = useState('');
@@ -209,6 +217,26 @@ export function PostComposer() {
     }
     return out;
   }, [selectedAccounts, body, queue, isStory, captionOverrides]);
+
+  const previewItems: KeyedPreviewInput[] = useMemo(
+    () =>
+      selectedAccounts.map((a) => ({
+        accountId: a.id,
+        input: {
+          platform: a.platform,
+          accountName: a.display_name,
+          caption: captionOverrides[a.id] ?? body,
+          title,
+          media: queue,
+          isStory,
+        },
+      })),
+    [selectedAccounts, body, captionOverrides, title, queue, isStory]
+  );
+
+  useEffect(() => {
+    onPreviewChange?.(previewItems);
+  }, [previewItems, onPreviewChange]);
 
   async function submit(asDraft: boolean) {
     if (selected.size === 0) return toast.error('Selecione ao menos uma conta de destino.');
@@ -428,28 +456,6 @@ export function PostComposer() {
           </Button>
         </div>
 
-        <AnimatePresence>
-          {selectedAccounts.length > 0 && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3 border-t pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pré-visualização</p>
-              <div className="flex flex-wrap gap-3">
-                {selectedAccounts.map((a) => (
-                  <PostPreview
-                    key={a.id}
-                    input={{
-                      platform: a.platform,
-                      accountName: a.display_name,
-                      caption: captionOverrides[a.id] ?? body,
-                      title,
-                      media: queue,
-                      isStory,
-                    }}
-                  />
-                ))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </CardContent>
     </Card>
   );
