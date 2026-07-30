@@ -22,13 +22,14 @@ A org Supabase existente já tinha 2 projetos ativos no free tier (limite da con
 ## Setup (Fase 0 — já feito neste ambiente)
 
 ```bash
-npm install
+npm install                                  # deps do Worker
+npm run web:install                          # deps do frontend (web/)
 wrangler login
 wrangler d1 create social-scheduler          # database_id já no wrangler.toml
 wrangler d1 execute social-scheduler --remote --file=migrations/0001_init.sql
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
-wrangler deploy
+npm run deploy                               # builda o front (web/ → dist/) e faz wrangler deploy
 # DASHBOARD_PASSWORD é opcional e hoje NÃO está definido — sem ele o dashboard fica aberto.
 # Ver "Autenticação" na seção Dashboard.
 ```
@@ -78,8 +79,16 @@ Para os CLIs locais (`enqueue`, `youtube-auth`, `*-auth-url`), copiar `.env.exam
 
 ## Dashboard
 
-`https://social-scheduler.zona21.workers.dev/` (também em `/dashboard`) serve um dashboard de
-uma página só (HTML/CSS/JS inline no próprio Worker, sem build step) pra:
+`https://social-scheduler.zona21.workers.dev/` serve o dashboard. É um app **React + Vite +
+TypeScript + Tailwind v4 + shadcn/ui** (preset Nova: Radix, Lucide, Geist) com animações via
+**motion** (motion.dev), em `web/`. O build sai em `dist/` e é servido pelos **static assets** do
+Cloudflare Worker (`[assets]` no `wrangler.toml`); o Worker continua dono de `/api/*`,
+`/oauth/*` e `/privacy`, e delega o resto pro SPA. Guia de design em [`web/design.md`](web/design.md).
+
+Comandos (na raiz): `npm run web:dev` (Vite com HMR, proxy do /api pro `wrangler dev`),
+`npm run dev` (build do front + `wrangler dev`), `npm run deploy` (build do front + `wrangler deploy`).
+
+O que dá pra fazer:
 
 - **Criar posts** — formulário com legenda, título opcional (YouTube), data/hora, contas de
   destino (uma ou várias, uma checkbox por conta autenticada), upload de mídia (um arquivo ou
@@ -195,9 +204,13 @@ wrangler d1 execute social-scheduler --remote --command "insert into post_target
 ## Rodando localmente
 
 ```bash
-npm run dev      # wrangler dev — Worker local (D1 local + cron testável via /__scheduled)
-npm run deploy   # publica de verdade (ativa o Cron Trigger real)
+npm run web:dev  # Vite com HMR na 5173, proxy de /api pro wrangler dev — melhor pra mexer na UI
+npm run dev      # builda o front + wrangler dev na 8787 (Worker local, D1 local, cron via /__scheduled)
+npm run deploy   # builda o front + publica de verdade (ativa o Cron Trigger real)
 ```
+
+Pra `web:dev`: rode `npm run dev` (ou `wrangler dev`) num terminal e `npm run web:dev` noutro — o
+Vite serve a UI com hot reload e encaminha as chamadas de API pro Worker local.
 
 ## Fases
 
@@ -208,6 +221,7 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 5. **Fase 4** ✅ (código, confiança menor) — TikTok. Falta gerar o app e submeter a auditoria — comece esse passo primeiro, é o que demora mais.
 6. **Fase 5** ✅ — Dashboard web (`GET /`) pra criar e consultar posts agendados sem precisar dos CLIs ou do D1 Table Editor. Falta só você rodar `wrangler secret put DASHBOARD_PASSWORD` (passo já incluído no Setup acima).
 7. **Fase 6** ✅ (código, não testado contra as APIs reais) — Carrossel/multi-mídia nas quatro plataformas que suportam, + toggle de Stories do Instagram no dashboard. Ver seção Carrossel e a ressalva em Pendências.
+8. **Fase 7** ✅ — Dashboard reescrito como app React (Vite + TS + Tailwind + shadcn/ui + motion) em `web/`, servido pelos static assets do Worker. Novidades de UI: planejador em grade arrastável do Instagram e pré-visualização por plataforma no composer e no modal de detalhe. Ver [`web/design.md`](web/design.md).
 
 Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que falta em todos os casos é você gerar as credenciais OAuth de cada plataforma (não posso criar essas contas/apps por você) e rodar o CLI de auth correspondente.
 

@@ -1,6 +1,5 @@
 import { adapters } from './adapters/index.js';
 import { handleApiRequest } from './api.js';
-import { DASHBOARD_HTML } from './dashboard.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { checkDashboardAuth } from './lib/auth.js';
 import { encryptJSON } from './lib/crypto.js';
@@ -68,11 +67,10 @@ export default {
     if (url.pathname.startsWith('/api/')) {
       return handleApiRequest(request, url, env);
     }
-    if (url.pathname === '/' || url.pathname === '/dashboard') {
-      return new Response(DASHBOARD_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-    }
 
-    return new Response('not found', { status: 404 });
+    // Everything else is the React SPA (web/ → dist/), served by the assets binding. With
+    // not_found_handling = "single-page-application", unknown paths return index.html.
+    return env.ASSETS.fetch(request);
   },
 };
 

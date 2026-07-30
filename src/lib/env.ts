@@ -4,6 +4,10 @@ export interface Env {
   DB: D1Database;
   MEDIA: R2Bucket;
 
+  // Static-assets binding (wrangler.toml [assets]) serving the built React SPA from ./dist.
+  // The Worker owns /api, /oauth and /privacy and delegates everything else to this.
+  ASSETS: Fetcher;
+
   // Plain (non-secret) var — see wrangler.toml [vars]. Base URL of the custom R2 domain used to
   // build media_assets.public_url on upload; empty/undefined leaves public_url null (media still
   // uploads fine, it just isn't usable by platforms that require a fetchable URL — see README).

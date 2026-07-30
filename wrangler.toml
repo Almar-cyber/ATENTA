@@ -12,6 +12,15 @@ database_id = "ae4c3e52-8249-4007-a2fe-e1c1a871d80f"
 binding = "MEDIA"
 bucket_name = "social-scheduler-media"
 
+# The built React app (web/ → dist/) is served from here. run_worker_first = true means the Worker's
+# fetch() runs for every request; it handles /api, /oauth and /privacy and calls env.ASSETS.fetch()
+# for everything else. not_found_handling serves index.html for unknown paths (SPA behaviour).
+[assets]
+binding = "ASSETS"
+directory = "./dist"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
 [triggers]
 crons = ["*/10 * * * *"]
 
