@@ -1,5 +1,5 @@
 import type { MediaAsset, PlatformAdapter } from '../lib/types.js';
-import { classifyByKnownCodes } from '../lib/errors.js';
+import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { checkDuration } from '../lib/videoLimits.js';
@@ -137,7 +137,12 @@ export const instagramAdapter: PlatformAdapter = {
     const statusRes = await fetchWithRetry(
       `https://graph.facebook.com/${GRAPH_VERSION}/${state.creation_id}?fields=status_code&access_token=${encodeURIComponent(tokens.access_token)}`
     );
-    if (!statusRes.ok) throw new Error(`instagram: container status check failed: ${statusRes.status}`);
+    if (!statusRes.ok) {
+      const bodyText = await statusRes.text();
+      throw Object.assign(new Error(`instagram: container status check failed: ${statusRes.status} ${bodyText}`), {
+        code: metaErrorType(bodyText),
+      });
+    }
     const statusJson = (await statusRes.json()) as { status_code: string };
 
     if (statusJson.status_code === 'IN_PROGRESS') {
@@ -151,7 +156,12 @@ export const instagramAdapter: PlatformAdapter = {
       method: 'POST',
       body: new URLSearchParams({ access_token: tokens.access_token, creation_id: state.creation_id }),
     });
-    if (!publishRes.ok) throw new Error(`instagram: media_publish failed: ${publishRes.status} ${await publishRes.text()}`);
+    if (!publishRes.ok) {
+      const bodyText = await publishRes.text();
+      throw Object.assign(new Error(`instagram: media_publish failed: ${publishRes.status} ${bodyText}`), {
+        code: metaErrorType(bodyText),
+      });
+    }
     const publishJson = (await publishRes.json()) as { id: string };
 
     return { state: 'published', externalId: publishJson.id };
@@ -171,6 +181,20 @@ async function createContainer(igUserId: string, body: URLSearchParams): Promise
     method: 'POST',
     body,
   });
-  if (!res.ok) throw new Error(`instagram: container create failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const bodyText = await res.text();
+    throw Object.assign(new Error(`instagram: container create failed: ${res.status} ${bodyText}`), {
+      code: metaErrorType(bodyText),
+    });
+  }
   return ((await res.json()) as { id: string }).id;
+}
+
+// Graph API error envelope: { error: { message, type, code, error_subcode?, fbtrace_id } }. `type`
+// (e.g. "OAuthException") is used over the numeric `code` since it covers the whole family of
+// token-invalid codes (190, 102, ...) that classifyError's 'OAuthException' key is meant to catch,
+// not just the specific 190 case. Same shape/reasoning as facebook.ts's own copy of this helper.
+function metaErrorType(bodyText: string): string | undefined {
+  const parsed = safeParseJson(bodyText) as { error?: { type?: string } } | undefined;
+  return parsed?.error?.type;
 }

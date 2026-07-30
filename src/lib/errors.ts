@@ -18,3 +18,13 @@ function extractCode(err: unknown): string | undefined {
   }
   return undefined;
 }
+
+// Best-effort parse of an already-read response body: a malformed/non-JSON body just means no
+// code to attach (falls through to classifyByKnownCodes' fallback), not a new error to throw.
+export function safeParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}

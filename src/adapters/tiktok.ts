@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from '../lib/types.js';
-import { classifyByKnownCodes } from '../lib/errors.js';
+import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
 import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
 import { nowIso } from '../lib/db.js';
@@ -79,7 +79,12 @@ export const tiktokAdapter: PlatformAdapter = {
       method: 'POST',
       headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
     });
-    if (!creatorRes.ok) throw new Error(`tiktok: creator_info/query failed: ${creatorRes.status} ${await creatorRes.text()}`);
+    if (!creatorRes.ok) {
+      const bodyText = await creatorRes.text();
+      throw Object.assign(new Error(`tiktok: creator_info/query failed: ${creatorRes.status} ${bodyText}`), {
+        code: tiktokErrorCode(bodyText),
+      });
+    }
     const creatorJson = (await creatorRes.json()) as {
       data: { privacy_level_options: string[]; max_video_post_duration_sec?: number };
     };
@@ -121,12 +126,16 @@ export const tiktokAdapter: PlatformAdapter = {
         },
       }),
     });
-    if (!initRes.ok) throw new Error(`tiktok: video/init failed: ${initRes.status} ${await initRes.text()}`);
+    if (!initRes.ok) {
+      const bodyText = await initRes.text();
+      throw Object.assign(new Error(`tiktok: video/init failed: ${initRes.status} ${bodyText}`), { code: tiktokErrorCode(bodyText) });
+    }
     const initJson = (await initRes.json()) as { data: { publish_id: string; upload_url: string } };
 
     // Single request (source_info above already told TikTok this is one chunk covering the whole
     // file) — streamed from R2 rather than buffered, so the Worker never holds the whole video
-    // in memory at once.
+    // in memory at once. Uploads to a signed storage URL, not TikTok's own API, so there's no
+    // {error:{code,...}} envelope to parse here on failure (unlike the other throws in this file).
     const uploadRes = await fetchWithRetry(initJson.data.upload_url, async () => {
       const object = await env.MEDIA.get(asset.storage_key);
       if (!object) throw new Error(`tiktok: media not found in R2: ${asset.storage_key}`);
@@ -156,13 +165,20 @@ export const tiktokAdapter: PlatformAdapter = {
       headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ publish_id: state.publish_id }),
     });
-    if (!res.ok) throw new Error(`tiktok: status/fetch failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) {
+      const bodyText = await res.text();
+      throw Object.assign(new Error(`tiktok: status/fetch failed: ${res.status} ${bodyText}`), { code: tiktokErrorCode(bodyText) });
+    }
     const json = (await res.json()) as { data: { status: string; publicaly_available_post_id?: string[] } };
 
     if (json.data.status === 'PROCESSING_DOWNLOAD' || json.data.status === 'PROCESSING_UPLOAD' || json.data.status === 'PROCESSING') {
       return { state: 'processing', adapterState: state };
     }
     if (json.data.status === 'FAILED') {
+      // 200 OK with a business-level failure, not the {error:{code,...}} envelope the other
+      // throws above parse — TikTok's docs don't confirm a stable machine-readable failure-reason
+      // field on this endpoint's `data`, so nothing is attached here (stays 'retryable' via
+      // classifyError's fallback, same as before this change).
       throw new Error(`tiktok: publish ${state.publish_id} ended in FAILED`);
     }
     // PUBLISH_COMPLETE (naming per TikTok docs at research time — verify before relying on it)
@@ -180,3 +196,11 @@ export const tiktokAdapter: PlatformAdapter = {
     });
   },
 };
+
+// TikTok's v2 envelope: { data, error: { code, message, log_id } } — `error.code` is the
+// documented machine-readable string (e.g. "access_token_invalid"), matching classifyError's
+// table keys directly with no coercion needed.
+function tiktokErrorCode(bodyText: string): string | undefined {
+  const parsed = safeParseJson(bodyText) as { error?: { code?: string } } | undefined;
+  return parsed?.error?.code;
+}

@@ -1,6 +1,6 @@
 import type { PlatformAdapter } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
-import { classifyByKnownCodes } from '../lib/errors.js';
+import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
 import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
 import { nowIso } from '../lib/db.js';
@@ -100,7 +100,10 @@ export const youtubeAdapter: PlatformAdapter = {
         body: JSON.stringify(metadata),
       }
     );
-    if (!initRes.ok) throw new Error(`youtube: upload init failed: ${initRes.status} ${await initRes.text()}`);
+    if (!initRes.ok) {
+      const bodyText = await initRes.text();
+      throw Object.assign(new Error(`youtube: upload init failed: ${initRes.status} ${bodyText}`), { code: googleErrorReason(bodyText) });
+    }
     const uploadUrl = initRes.headers.get('Location');
     if (!uploadUrl) throw new Error('youtube: no resumable upload URL returned');
 
@@ -113,7 +116,10 @@ export const youtubeAdapter: PlatformAdapter = {
         body: toFixedLengthBody(object.body, video.size_bytes),
       };
     });
-    if (!uploadRes.ok) throw new Error(`youtube: upload failed: ${uploadRes.status} ${await uploadRes.text()}`);
+    if (!uploadRes.ok) {
+      const bodyText = await uploadRes.text();
+      throw Object.assign(new Error(`youtube: upload failed: ${uploadRes.status} ${bodyText}`), { code: googleErrorReason(bodyText) });
+    }
     const result = (await uploadRes.json()) as { id: string };
 
     return { state: 'published', externalId: result.id, externalUrl: `https://youtu.be/${result.id}` };
@@ -131,3 +137,13 @@ export const youtubeAdapter: PlatformAdapter = {
     });
   },
 };
+
+// Google's standard API error envelope: { error: { code, message, errors: [{ domain, reason,
+// message }] } } (developers.google.com/youtube/v3/errors) — `errors[0].reason` (e.g.
+// "quotaExceeded") is the machine-readable field matching classifyError's table keys. Still the
+// same googleapis.com JSON envelope on the resumable-upload PUT, not a third-party signed URL, so
+// this applies there too.
+function googleErrorReason(bodyText: string): string | undefined {
+  const parsed = safeParseJson(bodyText) as { error?: { errors?: Array<{ reason?: string }> } } | undefined;
+  return parsed?.error?.errors?.[0]?.reason;
+}

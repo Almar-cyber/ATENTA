@@ -1,6 +1,6 @@
 import type { PlatformAdapter, MediaAsset } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
-import { classifyByKnownCodes } from '../lib/errors.js';
+import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
 import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { checkDuration } from '../lib/videoLimits.js';
@@ -99,7 +99,8 @@ export const linkedinAdapter: PlatformAdapter = {
     if (!res.ok) {
       // No read-back permission on this tier — classifyError() below routes network-level
       // failures here to 'ambiguous' rather than a blind retry (architecture doc §2/§3).
-      throw new Error(`linkedin: post failed: ${res.status} ${await res.text()}`);
+      const bodyText = await res.text();
+      throw Object.assign(new Error(`linkedin: post failed: ${res.status} ${bodyText}`), { code: linkedinErrorCode(bodyText) });
     }
     const postUrn = res.headers.get('x-restli-id');
     if (!postUrn) throw new Error('linkedin: no post URN in x-restli-id header');
@@ -127,13 +128,17 @@ async function uploadImage(env: Env, tokens: LinkedinTokens, asset: MediaAsset):
     headers: authHeaders(tokens.access_token),
     body: JSON.stringify({ initializeUploadRequest: { owner: tokens.member_urn } }),
   });
-  if (!initRes.ok) throw new Error(`linkedin: image init failed: ${initRes.status} ${await initRes.text()}`);
+  if (!initRes.ok) {
+    const bodyText = await initRes.text();
+    throw Object.assign(new Error(`linkedin: image init failed: ${initRes.status} ${bodyText}`), { code: linkedinErrorCode(bodyText) });
+  }
   const initJson = (await initRes.json()) as { value: { uploadUrl: string; image: string } };
 
   const object = await env.MEDIA.get(asset.storage_key);
   if (!object) throw new Error(`linkedin: media not found in R2: ${asset.storage_key}`);
 
-  // No Authorization header on this PUT — it's a pre-signed one-time upload URL (per LinkedIn docs).
+  // No Authorization header on this PUT — it's a pre-signed one-time upload URL (per LinkedIn docs),
+  // not a LinkedIn REST API response, so there's no {code,message} envelope here to parse.
   const uploadRes = await fetchWithRetry(initJson.value.uploadUrl, { method: 'PUT', body: await object.arrayBuffer() });
   if (!uploadRes.ok) throw new Error(`linkedin: image upload failed: ${uploadRes.status}`);
 
@@ -148,7 +153,10 @@ async function uploadVideo(env: Env, tokens: LinkedinTokens, asset: MediaAsset):
       initializeUploadRequest: { owner: tokens.member_urn, fileSizeBytes: asset.size_bytes, uploadCaptions: false },
     }),
   });
-  if (!initRes.ok) throw new Error(`linkedin: video init failed: ${initRes.status} ${await initRes.text()}`);
+  if (!initRes.ok) {
+    const bodyText = await initRes.text();
+    throw Object.assign(new Error(`linkedin: video init failed: ${initRes.status} ${bodyText}`), { code: linkedinErrorCode(bodyText) });
+  }
   const initJson = (await initRes.json()) as {
     value: {
       uploadInstructions: Array<{ uploadUrl: string; firstByte: number; lastByte: number }>;
@@ -180,7 +188,24 @@ async function uploadVideo(env: Env, tokens: LinkedinTokens, asset: MediaAsset):
       finalizeUploadRequest: { video: initJson.value.video, uploadToken: initJson.value.uploadToken, uploadedPartIds },
     }),
   });
-  if (!finalizeRes.ok) throw new Error(`linkedin: video finalize failed: ${finalizeRes.status} ${await finalizeRes.text()}`);
+  if (!finalizeRes.ok) {
+    const bodyText = await finalizeRes.text();
+    throw Object.assign(new Error(`linkedin: video finalize failed: ${finalizeRes.status} ${bodyText}`), {
+      code: linkedinErrorCode(bodyText),
+    });
+  }
 
   return initJson.value.video;
+}
+
+// LinkedIn's versioned REST APIs return { status, code, message } on failure (Handling Errors,
+// learn.microsoft.com/linkedin) — `code` (e.g. "REVOKED_ACCESS_TOKEN", "ACCESS_DENIED") is the
+// documented field and is checked first. Falls back to a bare `error` field in case a 401 instead
+// carries an OAuth-Bearer-style body (RFC 6750) — unconfirmed against a live account, but cheap to
+// also check. NOTE: classifyError's lowercase `invalid_access_token` key doesn't obviously match
+// either documented shape above (both are UPPER_SNAKE_CASE) — flagging as unverified rather than
+// guessing further; worth checking against a real expired/invalid-token response.
+function linkedinErrorCode(bodyText: string): string | undefined {
+  const parsed = safeParseJson(bodyText) as { code?: string; error?: string } | undefined;
+  return parsed?.code ?? parsed?.error;
 }

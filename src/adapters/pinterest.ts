@@ -1,6 +1,6 @@
 import type { PlatformAdapter } from '../lib/types.js';
 import type { Env } from '../lib/env.js';
-import { classifyByKnownCodes } from '../lib/errors.js';
+import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
 import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
 import { nowIso } from '../lib/db.js';
@@ -105,7 +105,12 @@ export const pinterestAdapter: PlatformAdapter = {
           },
         }),
       });
-      if (!res.ok) throw new Error(`pinterest: carousel pin create failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw Object.assign(new Error(`pinterest: carousel pin create failed: ${res.status} ${bodyText}`), {
+          code: pinterestErrorCode(bodyText),
+        });
+      }
       const json = (await res.json()) as { id: string };
 
       return { state: 'published', externalId: json.id, externalUrl: `https://www.pinterest.com/pin/${json.id}/` };
@@ -117,7 +122,12 @@ export const pinterestAdapter: PlatformAdapter = {
         headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ media_type: 'video' }),
       });
-      if (!registerRes.ok) throw new Error(`pinterest: media register failed: ${registerRes.status} ${await registerRes.text()}`);
+      if (!registerRes.ok) {
+        const bodyText = await registerRes.text();
+        throw Object.assign(new Error(`pinterest: media register failed: ${registerRes.status} ${bodyText}`), {
+          code: pinterestErrorCode(bodyText),
+        });
+      }
       const registerJson = (await registerRes.json()) as { media_id: string; upload_url: string; upload_parameters?: Record<string, string> };
 
       // Pinterest's registered upload is itself a pull from a URL in most v5 flows, but the
@@ -145,7 +155,10 @@ export const pinterestAdapter: PlatformAdapter = {
         media_source: { source_type: 'image_url', url: asset.public_url },
       }),
     });
-    if (!res.ok) throw new Error(`pinterest: pin create failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) {
+      const bodyText = await res.text();
+      throw Object.assign(new Error(`pinterest: pin create failed: ${res.status} ${bodyText}`), { code: pinterestErrorCode(bodyText) });
+    }
     const json = (await res.json()) as { id: string };
 
     return { state: 'published', externalId: json.id, externalUrl: `https://www.pinterest.com/pin/${json.id}/` };
@@ -161,7 +174,12 @@ export const pinterestAdapter: PlatformAdapter = {
     const statusRes = await fetchWithRetry(`${API_BASE}/media/${state.media_id}`, {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-    if (!statusRes.ok) throw new Error(`pinterest: media status check failed: ${statusRes.status}`);
+    if (!statusRes.ok) {
+      const bodyText = await statusRes.text();
+      throw Object.assign(new Error(`pinterest: media status check failed: ${statusRes.status} ${bodyText}`), {
+        code: pinterestErrorCode(bodyText),
+      });
+    }
     const statusJson = (await statusRes.json()) as { status: string };
 
     if (statusJson.status === 'processing' || statusJson.status === 'registered') {
@@ -183,7 +201,12 @@ export const pinterestAdapter: PlatformAdapter = {
         media_source: { source_type: 'video_id', media_id: state.media_id, cover_image_url: undefined },
       }),
     });
-    if (!pinRes.ok) throw new Error(`pinterest: pin create (video) failed: ${pinRes.status} ${await pinRes.text()}`);
+    if (!pinRes.ok) {
+      const bodyText = await pinRes.text();
+      throw Object.assign(new Error(`pinterest: pin create (video) failed: ${pinRes.status} ${bodyText}`), {
+        code: pinterestErrorCode(bodyText),
+      });
+    }
     const pinJson = (await pinRes.json()) as { id: string };
 
     return { state: 'published', externalId: pinJson.id, externalUrl: `https://www.pinterest.com/pin/${pinJson.id}/` };
@@ -193,3 +216,15 @@ export const pinterestAdapter: PlatformAdapter = {
     return classifyByKnownCodes(err, { invalid_token: 'auth', rate_limit_exceeded: 'quota' });
   },
 };
+
+// Pinterest v5 errors are documented as { code, message } with a numeric `code` — stringified and
+// used as a last resort. classifyError's table keys (invalid_token, rate_limit_exceeded) read as
+// OAuth/HTTP convention strings rather than Pinterest's own numeric codes, so a bare `error` field
+// (RFC 6750 Bearer-token style, used by some resource APIs on an expired/invalid token) is checked
+// first. UNVERIFIED against a live Pinterest error response — worth confirming with a forced
+// invalid-token or rate-limited call before trusting this in production.
+function pinterestErrorCode(bodyText: string): string | undefined {
+  const parsed = safeParseJson(bodyText) as { code?: number | string; error?: string } | undefined;
+  if (typeof parsed?.error === 'string') return parsed.error;
+  return parsed?.code != null ? String(parsed.code) : undefined;
+}

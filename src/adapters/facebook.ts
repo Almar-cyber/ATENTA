@@ -1,5 +1,5 @@
 import type { PublishResult, PlatformAdapter } from '../lib/types.js';
-import { classifyByKnownCodes } from '../lib/errors.js';
+import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { checkDuration } from '../lib/videoLimits.js';
@@ -80,7 +80,12 @@ export const facebookAdapter: PlatformAdapter = {
             published: 'false',
           }),
         });
-        if (!photoRes.ok) throw new Error(`facebook: unpublished photo upload failed: ${photoRes.status} ${await photoRes.text()}`);
+        if (!photoRes.ok) {
+          const bodyText = await photoRes.text();
+          throw Object.assign(new Error(`facebook: unpublished photo upload failed: ${photoRes.status} ${bodyText}`), {
+            code: metaErrorType(bodyText),
+          });
+        }
         mediaFbids.push(((await photoRes.json()) as { id: string }).id);
       }
 
@@ -124,9 +129,21 @@ export const facebookAdapter: PlatformAdapter = {
 
 async function publishTo(endpoint: string, body: URLSearchParams): Promise<PublishResult> {
   const res = await fetchWithRetry(`https://graph.facebook.com/${GRAPH_VERSION}/${endpoint}`, { method: 'POST', body });
-  if (!res.ok) throw new Error(`facebook: publish failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const bodyText = await res.text();
+    throw Object.assign(new Error(`facebook: publish failed: ${res.status} ${bodyText}`), { code: metaErrorType(bodyText) });
+  }
   const json = (await res.json()) as { id: string; post_id?: string };
   const externalId = json.post_id ?? json.id;
 
   return { state: 'published', externalId, externalUrl: `https://www.facebook.com/${externalId}` };
+}
+
+// Graph API error envelope: { error: { message, type, code, error_subcode?, fbtrace_id } }. `type`
+// (e.g. "OAuthException") is used over the numeric `code` since it covers the whole family of
+// token-invalid codes (190, 102, ...) that classifyError's 'OAuthException' key is meant to catch,
+// not just the specific 190 case.
+function metaErrorType(bodyText: string): string | undefined {
+  const parsed = safeParseJson(bodyText) as { error?: { type?: string } } | undefined;
+  return parsed?.error?.type;
 }
