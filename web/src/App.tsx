@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
 import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
@@ -106,19 +106,20 @@ function Dashboard() {
           </div>
 
           <div className="overflow-x-auto">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={view}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.15 }}
-              >
-                {view === 'list' && <ListView posts={visible} onOpen={setSelection} />}
-                {view === 'calendar' && <CalendarView posts={visible} onOpen={setSelection} />}
-                {view === 'grid' && <GridPlanner posts={visible} onOpen={setSelection} />}
-              </motion.div>
-            </AnimatePresence>
+            {/* Remount-and-fade on view change (key={view}). No AnimatePresence/exit here on
+                purpose: mode="wait" deadlocks when the 30s poll re-creates `visible` mid-exit,
+                freezing the old view. Keying the div remounts instantly, then motion plays the
+                enter. */}
+            <motion.div
+              key={view}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.15 }}
+            >
+              {view === 'list' && <ListView posts={visible} onOpen={setSelection} />}
+              {view === 'calendar' && <CalendarView posts={visible} onOpen={setSelection} />}
+              {view === 'grid' && <GridPlanner posts={visible} onOpen={setSelection} />}
+            </motion.div>
           </div>
         </section>
       </main>
