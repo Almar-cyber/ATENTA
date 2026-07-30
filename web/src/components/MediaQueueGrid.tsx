@@ -1,0 +1,144 @@
+import { useRef, useState } from 'react';
+import { motion } from 'motion/react';
+import { RefreshCw, X, ImageIcon, Film } from 'lucide-react';
+import { toast } from 'sonner';
+import type { QueuedMedia } from '@/lib/types';
+import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
+import { useMediaUrl } from '@/lib/useMediaUrl';
+
+function Tile({
+  item,
+  index,
+  onDragStart,
+  onDrop,
+  onRemove,
+  onReplaceClick,
+}: {
+  item: QueuedMedia;
+  index: number;
+  onDragStart: () => void;
+  onDrop: () => void;
+  onRemove: () => void;
+  onReplaceClick: () => void;
+}) {
+  const url = useMediaUrl(item);
+  const [broken, setBroken] = useState(false);
+  const video = isVideoMime(item.mime_type);
+
+  return (
+    <motion.div
+      layout
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
+      className="group relative aspect-square cursor-grab overflow-hidden rounded-lg border bg-muted active:cursor-grabbing"
+    >
+      {url && !broken ? (
+        video ? (
+          <video src={url} muted preload="metadata" className="size-full object-cover" onError={() => setBroken(true)} />
+        ) : (
+          <img src={url} alt="" className="size-full object-cover" onError={() => setBroken(true)} />
+        )
+      ) : (
+        <div className="grid size-full place-items-center text-muted-foreground">
+          {video ? <Film className="size-5" /> : <ImageIcon className="size-5" />}
+        </div>
+      )}
+
+      <span className="absolute left-1 top-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-white">
+        {index + 1}
+      </span>
+
+      <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          type="button"
+          title="Trocar mídia deste slot"
+          onClick={onReplaceClick}
+          className="grid size-6 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80"
+        >
+          <RefreshCw className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          title="Remover"
+          onClick={onRemove}
+          className="grid size-6 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+export function MediaQueueGrid({
+  items,
+  onReorder,
+  onRemove,
+  onReplace,
+}: {
+  items: QueuedMedia[];
+  onReorder: (next: QueuedMedia[]) => void;
+  onRemove: (key: string) => void;
+  onReplace: (key: string, file: File) => void;
+}) {
+  const dragKey = useRef<string | null>(null);
+  const replaceKey = useRef<string | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+
+  function handleDrop(toKey: string) {
+    const fromKey = dragKey.current;
+    dragKey.current = null;
+    if (!fromKey || fromKey === toKey) return;
+    const next = items.slice();
+    const from = next.findIndex((i) => i.key === fromKey);
+    const to = next.findIndex((i) => i.key === toKey);
+    if (from === -1 || to === -1) return;
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    onReorder(next);
+  }
+
+  function handleReplaceClick(key: string) {
+    replaceKey.current = key;
+    replaceInputRef.current?.click();
+  }
+
+  function handleReplaceInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const key = replaceKey.current;
+    replaceKey.current = null;
+    if (!file || !key) return;
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      toast.error(`Não suportado: ${file.name} (${file.type || 'tipo desconhecido'}). Use JPEG, PNG, MP4 ou MOV.`);
+      return;
+    }
+    onReplace(key, file);
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      <input
+        ref={replaceInputRef}
+        type="file"
+        hidden
+        accept="image/jpeg,image/png,video/mp4,video/quicktime"
+        onChange={handleReplaceInputChange}
+      />
+      {items.map((item, idx) => (
+        <Tile
+          key={item.key}
+          item={item}
+          index={idx}
+          onDragStart={() => (dragKey.current = item.key)}
+          onDrop={() => handleDrop(item.key)}
+          onRemove={() => onRemove(item.key)}
+          onReplaceClick={() => handleReplaceClick(item.key)}
+        />
+      ))}
+    </div>
+  );
+}

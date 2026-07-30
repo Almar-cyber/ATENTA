@@ -279,10 +279,14 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
 
   // TODO (per adapter, Phase 1+): use the platform's real quota-reset boundary instead of a flat 24h.
   const delayMs = errorClass === 'quota' ? 24 * 3_600_000 : 15 * 60_000;
-  await env.DB.prepare(
-    `update post_targets set status = 'queued', last_error = ?, attempt_count = ?, scheduled_for = ?, updated_at = ? where id = ?`
-  )
-    .bind(message, attemptCount, new Date(Date.now() + delayMs).toISOString(), ts, target.id)
+  const nextRunAt = new Date(Date.now() + delayMs).toISOString();
+  // scheduled_for lives on scheduled_posts, not post_targets (one schedule shared by all of a
+  // post's targets) — two updates, one per table.
+  await env.DB.prepare(`update post_targets set status = 'queued', last_error = ?, attempt_count = ?, updated_at = ? where id = ?`)
+    .bind(message, attemptCount, ts, target.id)
+    .run();
+  await env.DB.prepare(`update scheduled_posts set scheduled_for = ?, updated_at = ? where id = ?`)
+    .bind(nextRunAt, ts, target.scheduled_post_id)
     .run();
 }
 
