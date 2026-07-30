@@ -89,17 +89,35 @@ uma página só (HTML/CSS/JS inline no próprio Worker, sem build step) pra:
   mídia, já que a ideia é capturar antes de estar pronto); "Mover p/ fila" promove pra `queued`.
 - **Duplicar** — copia um post existente pro formulário reaproveitando a mídia já no R2 (sem
   re-upload), pra republicar em outra data ou outra conta.
-- **Consultar** — duas visões, alternáveis por aba (inspirado no calendário editorial de
-  ferramentas como mLabs/Buffer/Later): **lista** agrupada por dia, com thumbnail real da mídia, e
-  um **calendário mensal** com um chip por post em cada dia (cor da borda = plataforma). O status
-  aparece na própria peça, não só na coluna de badge: borda tracejada = rascunho, ⚠ + fundo
-  vermelho = falhou. Clicar num chip abre o detalhe; clicar num dia vazio já pré-preenche a data no
+- **Pré-visualização** — abaixo do formulário, um card por conta selecionada mostra como o post
+  vai ficar (mock do formato de cada rede: Instagram quadrado com @usuário, YouTube 16:9 com
+  título, Story 9:16 sem legenda, etc.), já com a mídia que está na fila. Avisa quando a legenda
+  passa do limite da plataforma e quando um Story ignora a legenda. O mesmo card aparece no modal
+  de detalhe de qualquer post agendado ("Como vai ficar").
+- **Consultar** — três visões, alternáveis por aba (inspirado no calendário editorial de
+  ferramentas como mLabs/Buffer/Later): **lista** agrupada por dia, com thumbnail real da mídia; um
+  **calendário mensal** com um chip por post em cada dia (cor da borda = plataforma); e um **Grid
+  IG** — a grade 3-colunas do perfil do Instagram, mais novo no canto superior esquerdo, que dá pra
+  **arrastar e reordenar** antes de decidir a ordem final (ver abaixo). O status aparece na própria
+  peça, não só na coluna de badge: borda tracejada = rascunho, ⚠ + fundo vermelho = falhou. Clicar
+  num chip/tile abre o detalhe; clicar num dia vazio do calendário já pré-preenche a data no
   formulário. Filtros por status, plataforma e conta. Atualiza sozinho a cada 30s.
 - **Alerta no topo** — barra vermelha quando algum post falhou ou alguma conta precisa
   reautenticar; clicar nela filtra a lista pelas falhas. Compensa em parte a falta de e-mail
   automático dos Cron Triggers (ver Pendências), mas só enquanto o dashboard estiver aberto.
 - **Cancelar** — enquanto o post ainda está `draft`/`queued` (antes do poller pegar pra publicar),
   tanto na lista quanto no modal de detalhe do calendário.
+
+### Grid IG (planejador arrastável)
+
+A aba **Grid IG** mostra os posts de Instagram ainda não publicados (`draft`/`queued`/`processing`)
+na grade 3-colunas do perfil, mais novo primeiro. Arrastar um tile pra outra posição reordena a
+sequência: os **horários já agendados não mudam de valor** — o conjunto de `scheduled_for` é o
+mesmo, só é redistribuído na nova ordem (o tile que passou a ser o mais antigo fica com o horário
+mais cedo, e assim por diante). Ou seja, dá pra decidir a estética do feed sem inventar datas
+novas nem deixar buracos. `POST /api/posts/reschedule` faz essa permutação no servidor; o botão
+**Desfazer** restaura a ordem anterior (um passo). Posts publicados/cancelados não aparecem —
+não dá pra reordenar o que já saiu.
 
 ### Autenticação (opcional, hoje DESLIGADA)
 
@@ -149,6 +167,11 @@ publicar) — o dashboard também avisa antes de enviar:
 
 Vídeo sozinho continua funcionando em todas. A ordem dos arquivos na fila do dashboard (setas ↑/↓)
 é a ordem em que aparecem no carrossel — ela é gravada em `post_target_media.position`.
+
+**Formatos aceitos:** JPEG, PNG, MP4 e MOV. RAW de câmera (`.ARW`, `.CR2`, `.NEF`) passa num
+filtro `image/*` e sobe pro R2 sem erro, mas toda plataforma recusa na hora de publicar — então
+`POST /api/media` (e o input do dashboard) rejeitam esses formatos na entrada, com a mensagem
+mandando exportar antes. A allowlist fica em `ALLOWED_MIME_TYPES` (`src/api.ts`).
 
 **Stories (Instagram)** — checkbox no formulário. Aceita exatamente um arquivo (imagem ou vídeo);
 a API da Meta não publica Stories em carrossel nem elementos interativos (stickers, links, música),

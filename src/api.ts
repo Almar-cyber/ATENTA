@@ -6,6 +6,16 @@ import type { MediaAsset, Platform, PostTarget } from './lib/types.js';
 const PLATFORMS: readonly Platform[] = ['youtube', 'linkedin', 'instagram', 'facebook', 'pinterest', 'tiktok'];
 const MAX_POSTS_LIMIT = 300;
 
+// What the platforms actually ingest. Camera RAW (image/x-sony-arw, image/x-canon-cr2, ...) passes
+// an `accept="image/*"` filter and uploads fine, but every platform rejects it at publish time —
+// so it's refused here instead, where the error is still attached to the file you just picked.
+const ALLOWED_MIME_TYPES: readonly string[] = [
+  'image/jpeg',
+  'image/png',
+  'video/mp4',
+  'video/quicktime',
+];
+
 export async function handleApiRequest(request: Request, url: URL, env: Env): Promise<Response> {
   const { pathname } = url;
   const method = request.method;
@@ -13,6 +23,7 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   if (pathname === '/api/accounts' && method === 'GET') return listAccounts(env);
   if (pathname === '/api/posts' && method === 'GET') return listPosts(url, env);
   if (pathname === '/api/posts' && method === 'POST') return createPost(request, env);
+  if (pathname === '/api/posts/reschedule' && method === 'POST') return reschedulePosts(request, env);
   if (pathname === '/api/media' && method === 'POST') return uploadMedia(request, env);
 
   const cancelMatch = /^\/api\/post-targets\/([^/]+)\/cancel$/.exec(pathname);
@@ -325,6 +336,51 @@ async function createPost(request: Request, env: Env): Promise<Response> {
   return jsonResponse({ id: scheduledPostId, target_count: targetsToInsert.length }, 201);
 }
 
+interface RescheduleBody {
+  // scheduled_post ids in their NEW visual order; they get the same set of scheduled_for
+  // timestamps those posts already had, reassigned so the first id takes the earliest slot, etc.
+  // This is how the Instagram grid drag-and-drop reorders posts without inventing new times.
+  ordered_post_ids?: string[];
+}
+
+async function reschedulePosts(request: Request, env: Env): Promise<Response> {
+  let payload: RescheduleBody;
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+  const ids = payload.ordered_post_ids;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return jsonResponse({ error: 'ordered_post_ids é obrigatório' }, 400);
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const { results } = await env.DB.prepare(
+    `select id, scheduled_for from scheduled_posts where id in (${placeholders})`
+  )
+    .bind(...ids)
+    .all<{ id: string; scheduled_for: string }>();
+  const rows = results ?? [];
+
+  if (rows.length !== ids.length) {
+    return jsonResponse({ error: 'um ou mais posts não foram encontrados' }, 400);
+  }
+
+  // The pool of timestamps is exactly the ones these posts already hold, sorted ascending; the
+  // i-th id in the requested order gets the i-th earliest timestamp. So dragging only ever
+  // permutes existing slots — it never creates a brand-new time or leaves a gap.
+  const slots = rows.map((r) => r.scheduled_for).sort();
+  const ts = nowIso();
+  for (let i = 0; i < ids.length; i++) {
+    await env.DB.prepare(`update scheduled_posts set scheduled_for = ?, updated_at = ? where id = ?`)
+      .bind(slots[i], ts, ids[i])
+      .run();
+  }
+
+  return jsonResponse({ ok: true, reordered: ids.length });
+}
+
 async function uploadMedia(request: Request, env: Env): Promise<Response> {
   let form: FormData;
   try {
@@ -335,6 +391,17 @@ async function uploadMedia(request: Request, env: Env): Promise<Response> {
 
   const file = form.get('file');
   if (!(file instanceof File)) return jsonResponse({ error: 'envie um arquivo no campo "file"' }, 400);
+
+  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+    return jsonResponse(
+      {
+        error:
+          `formato não suportado em "${file.name}" (${file.type || 'tipo desconhecido'}). ` +
+          'As plataformas aceitam JPEG, PNG, MP4 e MOV — RAW de câmera (.ARW, .CR2, .NEF) precisa ser exportado antes.',
+      },
+      400
+    );
+  }
 
   const id = crypto.randomUUID();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload';

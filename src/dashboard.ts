@@ -262,6 +262,86 @@ export const DASHBOARD_HTML = `<!doctype html>
   .modal-row { margin-bottom: 10px; font-size: 13px; }
   .modal-row .label { font-weight: 600; display: block; margin-bottom: 2px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
   .modal-media-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+  /* --- Pre-visualizacao do post --- */
+  #preview-box { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
+  #preview-box h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--muted); }
+  .preview-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+    margin-bottom: 14px;
+    max-width: 320px;
+  }
+  .preview-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px; }
+  .preview-avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 12px;
+  }
+  .preview-name { font-size: 13px; font-weight: 600; line-height: 1.2; }
+  .preview-sub { font-size: 11px; color: var(--muted); }
+  .preview-media {
+    position: relative;
+    width: 100%;
+    background: #f3f4f6;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .preview-media.square { aspect-ratio: 1 / 1; }
+  .preview-media.story { aspect-ratio: 9 / 16; }
+  .preview-media.wide { aspect-ratio: 16 / 9; }
+  .preview-media.tall { aspect-ratio: 2 / 3; }
+  .preview-media img, .preview-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .preview-media .empty-media { color: var(--muted); font-size: 12px; padding: 24px 10px; text-align: center; }
+  .preview-dots { position: absolute; bottom: 8px; left: 0; right: 0; display: flex; justify-content: center; gap: 4px; }
+  .preview-dots span { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.55); box-shadow: 0 0 2px rgba(0,0,0,.4); }
+  .preview-dots span.on { background: #fff; }
+  .preview-count {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(0,0,0,.6); color: #fff;
+    font-size: 11px; padding: 2px 7px; border-radius: 999px;
+  }
+  .preview-body { padding: 9px 10px; font-size: 13px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+  .preview-body .handle { font-weight: 600; margin-right: 5px; }
+  .preview-actions { padding: 0 10px 9px; color: var(--muted); font-size: 14px; letter-spacing: 4px; }
+  .preview-warn { font-size: 11px; color: #dc2626; padding: 0 10px 9px; }
+
+  /* --- Grid do Instagram (planejador) --- */
+  .ig-grid-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+  .ig-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 3px;
+    max-width: 480px;
+  }
+  .ig-tile {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    background: #e5e7eb;
+    overflow: hidden;
+    cursor: grab;
+    border: 2px solid transparent;
+  }
+  .ig-tile img, .ig-tile video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  .ig-tile.dragging { opacity: 0.35; }
+  .ig-tile.drop-target { border-color: var(--accent); }
+  .ig-tile .tile-when {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,.72));
+    color: #fff; font-size: 10px; padding: 12px 4px 3px; text-align: center;
+  }
+  .ig-tile .tile-badge {
+    position: absolute; top: 3px; left: 3px;
+    font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+    background: rgba(0,0,0,.65); color: #fff;
+  }
+  .ig-tile .tile-multi { position: absolute; top: 3px; right: 3px; font-size: 11px; color: #fff; text-shadow: 0 0 3px rgba(0,0,0,.8); }
+  .ig-tile .tile-noimg { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 18px; }
+  .ig-grid-msg { font-size: 13px; margin-top: 10px; }
+  .ig-grid-msg.error { color: #dc2626; }
+  .ig-grid-msg.success { color: #16a34a; }
   .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
   .modal-actions .btn, .modal-actions .btn-secondary { margin-top: 0; }
 </style>
@@ -290,8 +370,8 @@ export const DASHBOARD_HTML = `<!doctype html>
         <div id="target-accounts"></div>
 
         <label for="f-media">Mídia (imagem ou vídeo, opcional)</label>
-        <input type="file" id="f-media" name="media" accept="image/*,video/*" multiple>
-        <div class="hint">Selecione 2+ imagens para criar um carrossel. YouTube, TikTok, Instagram e Pinterest exigem mídia (vídeo nos dois primeiros).</div>
+        <input type="file" id="f-media" name="media" accept="image/jpeg,image/png,video/mp4,video/quicktime" multiple>
+        <div class="hint">Selecione 2+ imagens para criar um carrossel. JPEG, PNG, MP4 ou MOV — RAW de câmera não é aceito pelas plataformas. YouTube, TikTok, Instagram e Pinterest exigem mídia (vídeo nos dois primeiros).</div>
         <div id="media-queue"></div>
 
         <label class="account-check" style="font-weight:600;margin-top:12px">
@@ -316,6 +396,11 @@ export const DASHBOARD_HTML = `<!doctype html>
         </div>
         <div id="new-post-message" class="message"></div>
       </form>
+
+      <div id="preview-box" style="display:none">
+        <h3>Pré-visualização</h3>
+        <div id="preview-cards"></div>
+      </div>
     </section>
 
     <section id="posts-card">
@@ -325,6 +410,7 @@ export const DASHBOARD_HTML = `<!doctype html>
           <div class="view-tabs">
             <button type="button" class="view-tab active" id="tab-list">Lista</button>
             <button type="button" class="view-tab" id="tab-calendar">Calendário</button>
+            <button type="button" class="view-tab" id="tab-grid">Grid IG</button>
           </div>
           <select id="filter-status">
             <option value="">todos os status</option>
@@ -362,6 +448,14 @@ export const DASHBOARD_HTML = `<!doctype html>
         </div>
         <div id="calendar-grid"></div>
       </div>
+      <div id="view-grid" style="display:none">
+        <div class="ig-grid-toolbar">
+          <span>Arraste para reordenar — os horários já agendados são redistribuídos na nova ordem.</span>
+          <button type="button" class="btn btn-secondary" id="grid-undo" style="margin-top:0" disabled>Desfazer</button>
+        </div>
+        <div class="ig-grid" id="ig-grid"></div>
+        <div id="grid-message" class="ig-grid-msg"></div>
+      </div>
     </section>
   </main>
 
@@ -375,6 +469,11 @@ export const DASHBOARD_HTML = `<!doctype html>
   var PLATFORM_MEDIA_MAX = { instagram: 10, facebook: 10, linkedin: 20, pinterest: 5, youtube: 1, tiktok: 1 };
   // Instagram is the only one whose carousel accepts video alongside images.
   var PLATFORM_MULTI_IMAGE_ONLY = { facebook: true, linkedin: true, pinterest: true };
+  // Mirrors ALLOWED_MIME_TYPES in api.ts — checked here too so a 25MB RAW file is rejected
+  // before it's uploaded, not after.
+  var ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4', 'video/quicktime'];
+  // Aspect ratio each platform's preview should mimic.
+  var PREVIEW_SHAPE = { instagram: 'square', facebook: 'square', linkedin: 'square', pinterest: 'tall', youtube: 'wide', tiktok: 'story' };
   var STATUS_META = {
     draft: { label: 'Rascunho', cls: 'gray' },
     queued: { label: 'Na fila', cls: 'blue' },
@@ -397,6 +496,12 @@ export const DASHBOARD_HTML = `<!doctype html>
     // {assetId, name, mime_type} (an already-uploaded asset, reused when duplicating a post).
     // A plain array because FileList is immutable and can't be reordered in place.
     mediaQueue: [],
+    // Object URLs created for the live preview, revoked on each re-render (see releasePreviewUrls).
+    previewUrls: [],
+    // Snapshot of grid order (post ids) before the last drag, for the Undo button.
+    gridUndo: null,
+    // post id currently being dragged in the IG grid.
+    dragPostId: null,
     calYear: new Date().getFullYear(),
     calMonth: new Date().getMonth()
   };
@@ -625,13 +730,15 @@ export const DASHBOARD_HTML = `<!doctype html>
     form.pinterest_board_id.value = (target.options && target.options.board_id) || '';
     form.instagram_as_story.checked = !!(target.options && target.options.as_story);
 
-    // Reuse the already-uploaded R2 assets by id instead of re-uploading anything.
+    // Reuse the already-uploaded R2 assets by id instead of re-uploading anything. public_url is
+    // kept so the live preview can render the existing media.
     state.mediaQueue = (target.media || []).map(function (m) {
-      return { assetId: m.id, name: (m.storage_key || 'mídia').replace(/^[0-9a-f-]{36}-/, ''), mime_type: m.mime_type };
+      return { assetId: m.id, name: (m.storage_key || 'mídia').replace(/^[0-9a-f-]{36}-/, ''), mime_type: m.mime_type, public_url: m.public_url };
     });
     document.getElementById('f-media').value = '';
     renderMediaQueue();
     updateComposerHints();
+    updatePreview();
     setMessage(target.media && target.media.length ? 'Post duplicado — mídia original reaproveitada, escolha uma nova data.' : 'Post duplicado — escolha uma nova data.', false);
     document.getElementById('new-post-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -698,19 +805,18 @@ export const DASHBOARD_HTML = `<!doctype html>
 
     var whenRow = el('div', { class: 'modal-row' }, [el('span', { class: 'label', text: 'Quando' }), document.createTextNode(fmtDate(post.scheduled_for))]);
     var statusRow = el('div', { class: 'modal-row' }, [el('span', { class: 'label', text: 'Status' }), el('span', { class: 'badge ' + statusMeta.cls, text: statusMeta.label })]);
-    var captionRow = el('div', { class: 'modal-row' }, [el('span', { class: 'label', text: 'Legenda' }), document.createTextNode(target.caption_override || post.body || '')]);
-    [whenRow, statusRow, captionRow].forEach(function (r) { box.appendChild(r); });
+    [whenRow, statusRow].forEach(function (r) { box.appendChild(r); });
 
-    if (target.media && target.media.length > 0) {
-      var mediaRow = el('div', { class: 'modal-row' }, [el('span', { class: 'label', text: 'Mídia' })]);
-      var mediaWrap = el('div', { class: 'modal-media-row' });
-      target.media.forEach(function (m) {
-        var thumb = renderMediaThumb(m, 120);
-        mediaWrap.appendChild(m.public_url ? el('a', { href: m.public_url, target: '_blank', rel: 'noopener' }, [thumb]) : thumb);
-      });
-      mediaRow.appendChild(mediaWrap);
-      box.appendChild(mediaRow);
-    }
+    // Platform-accurate preview of how the post will look — same renderer as the composer.
+    var previewRow = el('div', { class: 'modal-row' }, [el('span', { class: 'label', text: 'Como vai ficar' })]);
+    previewRow.appendChild(renderPostPreview(target.platform, {
+      accountName: target.account_name,
+      caption: target.caption_override || post.body || '',
+      title: post.title,
+      media: target.media || [],
+      isStory: !!(target.options && target.options.as_story)
+    }));
+    box.appendChild(previewRow);
     if (target.status === 'published' && target.external_url) {
       box.appendChild(el('div', { class: 'modal-row' }, [el('span', { class: 'label', text: 'Link' }), el('a', { href: target.external_url, target: '_blank', rel: 'noopener', text: 'ver post publicado ↗' })]));
     }
@@ -823,7 +929,8 @@ export const DASHBOARD_HTML = `<!doctype html>
 
   function renderView() {
     if (state.view === 'list') renderListView();
-    else renderCalendarView();
+    else if (state.view === 'calendar') renderCalendarView();
+    else renderGridView();
     updateAlertBanner();
   }
 
@@ -831,9 +938,152 @@ export const DASHBOARD_HTML = `<!doctype html>
     state.view = view;
     document.getElementById('tab-list').classList.toggle('active', view === 'list');
     document.getElementById('tab-calendar').classList.toggle('active', view === 'calendar');
+    document.getElementById('tab-grid').classList.toggle('active', view === 'grid');
     document.getElementById('view-list').style.display = view === 'list' ? '' : 'none';
     document.getElementById('view-calendar').style.display = view === 'calendar' ? '' : 'none';
+    document.getElementById('view-grid').style.display = view === 'grid' ? '' : 'none';
     renderView();
+  }
+
+  // Posts eligible for the Instagram grid: an IG target that hasn't gone out yet, newest-first
+  // (top-left = next to be published, mimicking how a real IG profile grid fills). Cancelled and
+  // published posts are excluded — you can't reorder what's already gone.
+  function instagramGridEntries() {
+    var entries = [];
+    state.posts.forEach(function (post) {
+      post.targets.forEach(function (t) {
+        if (t.platform !== 'instagram') return;
+        if (t.status === 'published' || t.status === 'canceled' || t.status === 'failed') return;
+        entries.push({ post: post, target: t });
+      });
+    });
+    entries.sort(function (a, b) { return a.post.scheduled_for < b.post.scheduled_for ? 1 : -1; });
+    return entries;
+  }
+
+  function renderGridView() {
+    var grid = document.getElementById('ig-grid');
+    var msg = document.getElementById('grid-message');
+    grid.innerHTML = '';
+    msg.textContent = '';
+    msg.className = 'ig-grid-msg';
+
+    var entries = instagramGridEntries();
+    if (entries.length === 0) {
+      grid.appendChild(el('div', { class: 'ig-grid-msg', text: 'Nenhum post do Instagram na fila para planejar.', style: 'grid-column:1/-1' }));
+      document.getElementById('grid-undo').disabled = !state.gridUndo;
+      return;
+    }
+
+    entries.forEach(function (entry, idx) {
+      var tile = el('div', { class: 'ig-tile', draggable: 'true' });
+      tile.dataset.postId = entry.post.id;
+      tile.dataset.idx = String(idx);
+
+      var media = entry.target.media || [];
+      if (media.length && media[0].public_url) {
+        var m = media[0];
+        var isVideo = m.mime_type && m.mime_type.indexOf('video/') === 0;
+        var node = isVideo
+          ? (function () { var v = el('video', { src: m.public_url, preload: 'metadata', muted: 'muted' }); return v; })()
+          : el('img', { src: m.public_url, alt: '' });
+        node.addEventListener('error', function () {
+          if (node.parentNode) node.parentNode.replaceChild(el('div', { class: 'tile-noimg', text: '\\uD83D\\uDDBC' }), node);
+        });
+        tile.appendChild(node);
+      } else {
+        tile.appendChild(el('div', { class: 'tile-noimg', text: media.length ? '\\uD83D\\uDDBC' : '\\u270D' }));
+      }
+
+      if (entry.target.status === 'draft') tile.appendChild(el('span', { class: 'tile-badge', text: 'rascunho' }));
+      if (media.length > 1) tile.appendChild(el('span', { class: 'tile-multi', text: '\\u25A3' }));
+      tile.appendChild(el('div', { class: 'tile-when', text: fmtDate(entry.post.scheduled_for) }));
+
+      tile.addEventListener('click', function () { openTargetModal(entry.post, entry.target); });
+      wireTileDrag(tile);
+      grid.appendChild(tile);
+    });
+
+    document.getElementById('grid-undo').disabled = !state.gridUndo;
+  }
+
+  function wireTileDrag(tile) {
+    tile.addEventListener('dragstart', function (ev) {
+      state.dragPostId = tile.dataset.postId;
+      tile.classList.add('dragging');
+      ev.dataTransfer.effectAllowed = 'move';
+      // Firefox requires data to be set for a drag to start at all.
+      ev.dataTransfer.setData('text/plain', tile.dataset.postId);
+    });
+    tile.addEventListener('dragend', function () {
+      tile.classList.remove('dragging');
+      Array.prototype.forEach.call(document.querySelectorAll('.ig-tile.drop-target'), function (t) { t.classList.remove('drop-target'); });
+    });
+    tile.addEventListener('dragover', function (ev) {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      tile.classList.add('drop-target');
+    });
+    tile.addEventListener('dragleave', function () { tile.classList.remove('drop-target'); });
+    tile.addEventListener('drop', function (ev) {
+      ev.preventDefault();
+      tile.classList.remove('drop-target');
+      var from = state.dragPostId;
+      var to = tile.dataset.postId;
+      if (from && to && from !== to) commitGridReorder(from, to);
+    });
+  }
+
+  async function commitGridReorder(fromPostId, toPostId) {
+    var order = instagramGridEntries().map(function (e) { return e.post.id; });
+    var fromIdx = order.indexOf(fromPostId);
+    var toIdx = order.indexOf(toPostId);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    order.splice(toIdx, 0, order.splice(fromIdx, 1)[0]);
+
+    // The grid is newest-first but scheduled_for slots are assigned earliest-first on the server,
+    // so send the reversed order: the tile now shown last holds the earliest timestamp.
+    var chronological = order.slice().reverse();
+
+    var msg = document.getElementById('grid-message');
+    var prevUndo = state.gridUndo;
+    state.gridUndo = instagramGridEntries().map(function (e) { return e.post.id; });
+    try {
+      await api('/api/posts/reschedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ordered_post_ids: chronological })
+      });
+      // Message set AFTER the reload, since renderGridView() clears #grid-message on each render.
+      await loadPosts();
+      msg.textContent = 'Ordem atualizada — horários redistribuídos.';
+      msg.className = 'ig-grid-msg success';
+    } catch (err) {
+      state.gridUndo = prevUndo;
+      msg.textContent = err.message;
+      msg.className = 'ig-grid-msg error';
+    }
+  }
+
+  async function undoGridReorder() {
+    if (!state.gridUndo) return;
+    var chronological = state.gridUndo.slice().reverse();
+    var msg = document.getElementById('grid-message');
+    try {
+      await api('/api/posts/reschedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ordered_post_ids: chronological })
+      });
+      state.gridUndo = null;
+      await loadPosts();
+      msg.textContent = 'Ordem anterior restaurada.';
+      msg.className = 'ig-grid-msg success';
+    } catch (err) {
+      msg.textContent = err.message;
+      msg.className = 'ig-grid-msg error';
+    }
   }
 
   function updateAlertBanner() {
@@ -923,6 +1173,7 @@ export const DASHBOARD_HTML = `<!doctype html>
         state.mediaQueue.splice(idx, 1);
         renderMediaQueue();
         updateComposerHints();
+        updatePreview();
       });
       item.appendChild(rmBtn);
 
@@ -937,12 +1188,123 @@ export const DASHBOARD_HTML = `<!doctype html>
     state.mediaQueue[idx] = state.mediaQueue[target];
     state.mediaQueue[target] = tmp;
     renderMediaQueue();
+    updatePreview();
   }
 
   function clearMediaQueue() {
     state.mediaQueue = [];
     document.getElementById('f-media').value = '';
     renderMediaQueue();
+    updatePreview();
+  }
+
+  // Object URLs let the preview show a file that hasn't been uploaded yet. They're revoked on the
+  // next render so a long composing session doesn't leak them.
+  function releasePreviewUrls() {
+    state.previewUrls.forEach(function (u) { URL.revokeObjectURL(u); });
+    state.previewUrls = [];
+  }
+
+  function previewMediaNode(entry, shape) {
+    var mime = mediaQueueMime(entry);
+    var isVideo = mime.indexOf('video/') === 0;
+    var src;
+    if (entry.file) {
+      src = URL.createObjectURL(entry.file);
+      state.previewUrls.push(src);
+    } else {
+      src = entry.public_url;
+    }
+    if (!src) return el('div', { class: 'empty-media', text: isVideo ? 'vídeo' : 'imagem' });
+
+    var node = isVideo
+      ? el('video', { src: src, preload: 'metadata', muted: 'muted', playsinline: 'playsinline' })
+      : el('img', { src: src, alt: '' });
+    node.addEventListener('error', function () {
+      if (node.parentNode) node.parentNode.replaceChild(el('div', { class: 'empty-media', text: 'mídia não pôde ser exibida' }), node);
+    });
+    return node;
+  }
+
+  // Rough mock of how the post lands on each platform. Not pixel-perfect — enough to catch a
+  // caption that gets cut, a crop that loses the subject, or the wrong file order in a carousel.
+  function renderPostPreview(platform, opts) {
+    var label = PLATFORM_LABELS[platform] || platform;
+    var color = PLATFORM_COLORS[platform] || '#9ca3af';
+    var isStory = platform === 'instagram' && opts.isStory;
+    var shape = isStory ? 'story' : (PREVIEW_SHAPE[platform] || 'square');
+    var card = el('div', { class: 'preview-card' });
+
+    card.appendChild(el('div', { class: 'preview-head' }, [
+      el('div', { class: 'preview-avatar', style: 'background:' + color, text: (opts.accountName || '?').charAt(0).toUpperCase() }),
+      el('div', {}, [
+        el('div', { class: 'preview-name', text: opts.accountName || label }),
+        el('div', { class: 'preview-sub', text: isStory ? label + ' · Story' : label })
+      ])
+    ]));
+
+    var mediaBox = el('div', { class: 'preview-media ' + shape });
+    if (opts.media.length === 0) {
+      mediaBox.appendChild(el('div', { class: 'empty-media', text: 'sem mídia' }));
+    } else {
+      mediaBox.appendChild(previewMediaNode(opts.media[0], shape));
+      if (opts.media.length > 1) {
+        mediaBox.appendChild(el('div', { class: 'preview-count', text: '1/' + opts.media.length }));
+        var dots = el('div', { class: 'preview-dots' });
+        opts.media.forEach(function (_, i) { dots.appendChild(el('span', { class: i === 0 ? 'on' : '' })); });
+        mediaBox.appendChild(dots);
+      }
+    }
+    card.appendChild(mediaBox);
+
+    // YouTube shows the title above the description; everywhere else the caption is the content.
+    if (platform === 'youtube' && opts.title) {
+      card.appendChild(el('div', { class: 'preview-body', style: 'font-weight:600;padding-bottom:0', text: opts.title }));
+    }
+    if (!isStory) {
+      var limit = PLATFORM_CAPTION_LIMITS[platform];
+      var caption = opts.caption || '';
+      var body = el('div', { class: 'preview-body' });
+      if (platform === 'instagram' && opts.accountName) {
+        body.appendChild(el('span', { class: 'handle', text: opts.accountName }));
+      }
+      body.appendChild(document.createTextNode(limit && caption.length > limit ? caption.slice(0, limit) : caption));
+      card.appendChild(body);
+      if (limit && caption.length > limit) {
+        card.appendChild(el('div', { class: 'preview-warn', text: 'cortado em ' + limit + ' caracteres (' + caption.length + ' escritos)' }));
+      }
+    } else if (opts.caption) {
+      card.appendChild(el('div', { class: 'preview-warn', text: 'a legenda não aparece num Story — a API só publica a imagem/vídeo' }));
+    }
+
+    return card;
+  }
+
+  function updatePreview() {
+    releasePreviewUrls();
+    var form = document.getElementById('new-post-form');
+    var box = document.getElementById('preview-box');
+    var cards = document.getElementById('preview-cards');
+    cards.innerHTML = '';
+
+    var checked = Array.prototype.slice.call(form.querySelectorAll('input[name="target"]:checked'));
+    if (checked.length === 0) {
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = 'block';
+
+    checked.forEach(function (input) {
+      var account = state.accountsById[input.value];
+      if (!account) return;
+      cards.appendChild(renderPostPreview(account.platform, {
+        accountName: account.display_name,
+        caption: form.body.value,
+        title: form.title.value,
+        media: state.mediaQueue,
+        isStory: form.instagram_as_story.checked
+      }));
+    });
   }
 
   function updateComposerHints() {
@@ -1058,6 +1420,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       form.reset();
       clearMediaQueue();
       updateComposerHints();
+      updatePreview();
       loadPosts();
     } catch (err) {
       setMessage(err.message, true);
@@ -1076,18 +1439,28 @@ export const DASHBOARD_HTML = `<!doctype html>
   document.getElementById('save-draft-btn').addEventListener('click', function () {
     submitPost(true);
   });
-  document.getElementById('f-body').addEventListener('input', updateComposerHints);
-  document.getElementById('target-accounts').addEventListener('change', updateComposerHints);
-  document.getElementById('f-ig-story').addEventListener('change', updateComposerHints);
+  document.getElementById('f-body').addEventListener('input', function () { updateComposerHints(); updatePreview(); });
+  document.getElementById('f-title').addEventListener('input', updatePreview);
+  document.getElementById('target-accounts').addEventListener('change', function () { updateComposerHints(); updatePreview(); });
+  document.getElementById('f-ig-story').addEventListener('change', function () { updateComposerHints(); updatePreview(); });
   // Append rather than replace, and clear the input so picking the same file again still fires
   // 'change' — lets the queue be built up across several trips to the file dialog.
   document.getElementById('f-media').addEventListener('change', function (ev) {
+    var rejected = [];
     Array.prototype.forEach.call(ev.target.files, function (file) {
+      if (ALLOWED_MIME_TYPES.indexOf(file.type) === -1) {
+        rejected.push(file.name + ' (' + (file.type || 'tipo desconhecido') + ')');
+        return;
+      }
       state.mediaQueue.push({ file: file });
     });
     ev.target.value = '';
+    if (rejected.length) {
+      setMessage('Não suportado: ' + rejected.join(', ') + '. Use JPEG, PNG, MP4 ou MOV — RAW de câmera precisa ser exportado antes.', true);
+    }
     renderMediaQueue();
     updateComposerHints();
+    updatePreview();
   });
 
   document.getElementById('filter-status').addEventListener('change', loadPosts);
@@ -1096,6 +1469,8 @@ export const DASHBOARD_HTML = `<!doctype html>
   document.getElementById('refresh-btn').addEventListener('click', loadPosts);
   document.getElementById('tab-list').addEventListener('click', function () { setView('list'); });
   document.getElementById('tab-calendar').addEventListener('click', function () { setView('calendar'); });
+  document.getElementById('tab-grid').addEventListener('click', function () { setView('grid'); });
+  document.getElementById('grid-undo').addEventListener('click', undoGridReorder);
   document.getElementById('cal-prev').addEventListener('click', function () {
     state.calMonth -= 1;
     if (state.calMonth < 0) { state.calMonth = 11; state.calYear -= 1; }
