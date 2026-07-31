@@ -64,6 +64,25 @@ export const PLATFORM_PREVIEW_SHAPE: Record<Platform, PreviewShape> = {
   tiktok: 'story',
 };
 
+// Tamanho recomendado por rede (dica de cliente, como os outros mapas PLATFORM_*). Serve pra
+// avisar no preview qual resolução render melhor e se o arquivo atual vai ser cortado.
+export interface MediaSpec {
+  width: number;
+  height: number;
+  ratio: string;
+}
+
+export const PLATFORM_RECOMMENDED_MEDIA: Record<Platform, MediaSpec> = {
+  instagram: { width: 1080, height: 1350, ratio: '4:5' },
+  facebook: { width: 1200, height: 1200, ratio: '1:1' },
+  linkedin: { width: 1200, height: 1200, ratio: '1:1' },
+  pinterest: { width: 1000, height: 1500, ratio: '2:3' },
+  youtube: { width: 1920, height: 1080, ratio: '16:9' },
+  tiktok: { width: 1080, height: 1920, ratio: '9:16' },
+};
+
+export const INSTAGRAM_STORY_RECOMMENDED: MediaSpec = { width: 1080, height: 1920, ratio: '9:16' };
+
 export const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4', 'video/quicktime'];
 
 export interface VideoLimits {

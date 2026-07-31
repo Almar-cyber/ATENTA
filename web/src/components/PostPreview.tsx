@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Platform, QueuedMedia } from '@/lib/types';
 import {
+  INSTAGRAM_STORY_RECOMMENDED,
   PLATFORM_CAPTION_LIMITS,
   PLATFORM_COLORS,
   PLATFORM_LABELS,
   PLATFORM_PREVIEW_SHAPE,
+  PLATFORM_RECOMMENDED_MEDIA,
   isVideoMime,
 } from '@/lib/platforms';
 import { useMediaUrl } from '@/lib/useMediaUrl';
@@ -54,6 +56,17 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   // item) enquanto o índice ainda aponta pro slot antigo.
   const [index, setIndex] = useState(0);
   const safeIndex = Math.min(index, Math.max(0, media.length - 1));
+
+  // Tamanho recomendado da rede + aviso quando o arquivo atual tem outra proporção (a plataforma
+  // corta pra caber). Só dá pra avaliar quando o upload capturou width/height.
+  const recommended = isStory ? INSTAGRAM_STORY_RECOMMENDED : PLATFORM_RECOMMENDED_MEDIA[platform];
+  const current = media[safeIndex];
+  const willCrop = useMemo(() => {
+    if (!current?.width || !current?.height) return false;
+    const fileRatio = current.width / current.height;
+    const targetRatio = recommended.width / recommended.height;
+    return Math.abs(fileRatio - targetRatio) > 0.02;
+  }, [current?.width, current?.height, recommended.width, recommended.height]);
 
   return (
     // Só borda, sem sombra deslocada: o preview vive dentro de uma coluna com scroll (composer e
@@ -147,6 +160,17 @@ export function PostPreview({ input }: { input: PreviewInput }) {
           cortado em {limit} caracteres ({caption.length} escritos)
         </div>
       )}
+
+      <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+        <div>
+          Ideal: {recommended.width}×{recommended.height}px ({recommended.ratio})
+        </div>
+        {current?.width && current?.height && (
+          <div className={willCrop ? 'text-destructive' : ''}>
+            Seu arquivo: {current.width}×{current.height}px{willCrop ? ' — será cortado' : ' ✓'}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
