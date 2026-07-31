@@ -56,7 +56,9 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   const safeIndex = Math.min(index, Math.max(0, media.length - 1));
 
   return (
-    <div className="w-full max-w-[300px] overflow-hidden rounded-2xl bg-card border-2 border-foreground shadow-[4px_4px_0_0_var(--foreground)]">
+    // Só borda, sem sombra deslocada: o preview vive dentro de uma coluna com scroll (composer e
+    // dialog), e ali a sombra sólida era cortada pelo overflow, aparecendo como um canto quebrado.
+    <div className="w-full max-w-[300px] overflow-hidden rounded-2xl border-2 border-foreground bg-card">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div
           className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white"

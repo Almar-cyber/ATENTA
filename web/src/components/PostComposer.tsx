@@ -273,6 +273,12 @@ export function PostComposer({
     [tabAccounts, body, captionOverrides, title, queue, isStory]
   );
 
+  // Só habilita o que faz sentido no estado atual: agendar exige conta + data + nenhum problema
+  // pendente; rascunho exige apenas a conta (rascunho pula a validação de mídia, por design).
+  const hasBlockingProblem = hints.some((h) => h.problem);
+  const canDraft = selected.size > 0;
+  const canSchedule = canDraft && !!scheduledLocal && !hasBlockingProblem;
+
   async function submit(asDraft: boolean) {
     if (selected.size === 0) return toast.error('Selecione ao menos uma conta de destino.');
     if (!scheduledLocal) return toast.error('Informe data/hora do agendamento.');
@@ -507,10 +513,10 @@ export function PostComposer({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-4">
-        <Button size="lg" onClick={() => submit(false)} disabled={submitting}>
+        <Button size="lg" onClick={() => submit(false)} disabled={submitting || !canSchedule}>
           {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
         </Button>
-        <Button size="lg" variant="outline" onClick={() => submit(true)} disabled={submitting}>
+        <Button size="lg" variant="outline" onClick={() => submit(true)} disabled={submitting || !canDraft}>
           Salvar como rascunho
         </Button>
       </div>

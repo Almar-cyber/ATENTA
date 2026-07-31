@@ -1,6 +1,8 @@
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { MoreHorizontal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { Post, Target } from '@/lib/types';
 import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
@@ -78,8 +80,15 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-2 border-t px-5 py-4">
-                {canEdit && (
+              <div className="flex items-center gap-2 border-t px-5 py-4">
+                {/* Hierarquia: UMA ação principal à esquerda (a que faz sentido no estado do
+                    post), e as raras/destrutivas num menu "⋯" à direita — antes eram quatro botões
+                    concorrendo e quebrando em duas linhas. */}
+                {target.status === 'draft' ? (
+                  <Button onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
+                    Mover para fila
+                  </Button>
+                ) : canEdit ? (
                   <Button
                     onClick={() => {
                       requestEdit({ post });
@@ -88,24 +97,42 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                   >
                     Editar
                   </Button>
+                ) : (
+                  <Button onClick={() => requestPrefill({ post, target })}>Duplicar</Button>
                 )}
-                <Button variant="ghost" onClick={() => requestPrefill({ post, target })}>
-                  Duplicar
-                </Button>
-                {target.status === 'draft' && (
-                  <Button variant="ghost" onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
-                    Mover para fila
-                  </Button>
-                )}
-                {(target.status === 'draft' || target.status === 'queued') && (
+
+                {target.status === 'draft' && canEdit && (
                   <Button
-                    variant="ghost"
-                    className="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => act(() => cancelTarget(target.id), 'Post cancelado.')}
+                    variant="outline"
+                    onClick={() => {
+                      requestEdit({ post });
+                      onClose();
+                    }}
                   >
-                    Cancelar
+                    Editar
                   </Button>
                 )}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="ml-auto" aria-label="Mais ações">
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {(target.status === 'draft' || canEdit) && (
+                      <DropdownMenuItem onClick={() => requestPrefill({ post, target })}>Duplicar</DropdownMenuItem>
+                    )}
+                    {(target.status === 'draft' || target.status === 'queued') && (
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => act(() => cancelTarget(target.id), 'Post cancelado.')}
+                      >
+                        Cancelar post
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
