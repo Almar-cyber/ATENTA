@@ -59,10 +59,12 @@ function Tile({
         {index + 1}
       </span>
 
-      <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        {/* Só imagem já escolhida do disco: recortar exige os bytes locais (o que veio do R2 é de
-            outro domínio e sujaria o canvas). */}
-        {!video && item.file && onCropClick && (
+      {/* Visíveis sempre (fracos), fortes no hover: escondidas por completo, ninguém achava o
+          recorte — que é a única saída quando a foto não cabe na proporção da rede. */}
+      <div className="absolute right-1 top-1 flex gap-1 opacity-70 transition-opacity group-hover:opacity-100">
+        {/* Qualquer imagem, inclusive a que veio de um post duplicado/editado — nesse caso o
+            composer baixa os bytes pela nossa origem antes de abrir o recorte. */}
+        {!video && onCropClick && (
           <button
             type="button"
             title="Recortar"

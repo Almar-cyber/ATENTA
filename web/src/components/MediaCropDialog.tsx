@@ -9,6 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 // Proporções que a API de publicação do Instagram aceita. Fora desta faixa ela recusa o container —
 // não existe corte do lado dela, por isso o corte acontece aqui, antes do upload.
 export const CROP_PRESETS = [
+  { id: '9:16', label: '9:16', hint: 'Vertical cheio — Reel, Story, Short', ratio: 9 / 16 },
   { id: '4:5', label: '4:5', hint: 'Retrato — ocupa mais o feed', ratio: 4 / 5 },
   { id: '1:1', label: '1:1', hint: 'Quadrado', ratio: 1 },
   { id: '1.91:1', label: '1.91:1', hint: 'Paisagem', ratio: 1.91 },
@@ -18,11 +19,20 @@ export const CROP_PRESETS = [
 const MAX_OUTPUT_WIDTH = 1440;
 const FRAME_WIDTH = 300;
 
-function defaultPresetFor(width: number, height: number): string {
-  const ratio = width / height;
-  if (ratio <= 0.9) return '4:5';
-  if (ratio < 1.4) return '1:1';
-  return '1.91:1';
+// O padrão é o formato escolhido no compositor (Reel → 9:16, post de feed → 4:5): é pra ele que a
+// pessoa está recortando. Sem formato definido, cai no preset mais próximo do arquivo original.
+function defaultPresetFor(width: number, height: number, targetRatio?: number): string {
+  const ratio = targetRatio ?? width / height;
+  let bestId: string = CROP_PRESETS[0].id;
+  let bestDiff = Infinity;
+  for (const p of CROP_PRESETS) {
+    const diff = Math.abs(p.ratio - ratio);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestId = p.id;
+    }
+  }
+  return bestId;
 }
 
 /**
@@ -31,10 +41,13 @@ function defaultPresetFor(width: number, height: number): string {
  */
 export function MediaCropDialog({
   file,
+  targetRatio,
   onCancel,
   onDone,
 }: {
   file: File | null;
+  /** Proporção do formato escolhido no compositor — vira o preset inicial. */
+  targetRatio?: number;
   onCancel: () => void;
   onDone: (cropped: File) => void;
 }) {
@@ -55,30 +68,32 @@ export function MediaCropDialog({
     const image = new Image();
     image.onload = () => {
       setImg(image);
-      setPresetId(defaultPresetFor(image.naturalWidth, image.naturalHeight));
+      setPresetId(defaultPresetFor(image.naturalWidth, image.naturalHeight, targetRatio));
       setZoom(1);
       setOffset({ x: 0, y: 0 });
     };
     image.src = url;
     return () => URL.revokeObjectURL(url);
-  }, [file]);
+  }, [file, targetRatio]);
 
   const ratio = CROP_PRESETS.find((p) => p.id === presetId)?.ratio ?? 4 / 5;
-  const frameH = FRAME_WIDTH / ratio;
+  const frameHeightCap = 340;
+  const frameH = Math.min(FRAME_WIDTH / ratio, frameHeightCap);
+  const frameW = frameH * ratio;
 
   // "cover": a menor escala que ainda cobre o quadro inteiro. O zoom multiplica a partir daí, então
   // nunca sobra borda vazia por mais que se arraste.
-  const baseScale = img ? Math.max(FRAME_WIDTH / img.naturalWidth, frameH / img.naturalHeight) : 1;
+  const baseScale = img ? Math.max(frameW / img.naturalWidth, frameH / img.naturalHeight) : 1;
   const scale = baseScale * zoom;
   const dispW = img ? img.naturalWidth * scale : 0;
   const dispH = img ? img.naturalHeight * scale : 0;
 
   const clamp = useMemo(
     () => (x: number, y: number) => ({
-      x: Math.min(0, Math.max(FRAME_WIDTH - dispW, x)),
+      x: Math.min(0, Math.max(frameW - dispW, x)),
       y: Math.min(0, Math.max(frameH - dispH, y)),
     }),
-    [dispW, dispH, frameH]
+    [dispW, dispH, frameW, frameH]
   );
 
   // Trocar de proporção ou de zoom pode deixar o recorte fora da imagem — recentra no que sobrou.
@@ -104,7 +119,7 @@ export function MediaCropDialog({
     // Do quadro de volta pros pixels do original: o que está visível é exatamente esta janela.
     const sx = -offset.x / scale;
     const sy = -offset.y / scale;
-    const sw = FRAME_WIDTH / scale;
+    const sw = frameW / scale;
     const sh = frameH / scale;
 
     const outW = Math.min(MAX_OUTPUT_WIDTH, Math.round(sw));
@@ -151,7 +166,7 @@ export function MediaCropDialog({
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerUp}
-              style={{ width: FRAME_WIDTH, height: frameH }}
+              style={{ width: frameW, height: frameH }}
               className="relative touch-none overflow-hidden rounded-lg bg-muted select-none cursor-grab active:cursor-grabbing"
             >
               {img && (

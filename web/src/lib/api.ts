@@ -134,6 +134,15 @@ export async function uploadMedia(
   });
 }
 
+// Baixa uma mídia já enviada como File, pela nossa origem (o domínio do R2 não manda CORS, e um
+// <img> de lá suja o canvas — o recorte no navegador não funcionaria).
+export async function fetchMediaFile(id: string, name: string): Promise<File> {
+  const res = await fetch(`/api/media/${id}/bytes`);
+  if (!res.ok) throw new Error('não consegui baixar a mídia para recortar');
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type });
+}
+
 export interface FeedItem {
   id: string;
   thumbnail_url: string | null;

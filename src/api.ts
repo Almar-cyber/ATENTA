@@ -44,6 +44,12 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   const feedMatch = /^\/api\/feed\/([^/]+)$/.exec(pathname);
   if (feedMatch && method === 'GET') return getAccountFeed(feedMatch[1], env);
 
+  // Bytes de uma mídia já no R2, servidos pela NOSSA origem. O domínio público do R2 é outro host
+  // e sem CORS: uma imagem carregada de lá suja o canvas e o recorte no navegador quebra. Por aqui
+  // é same-origin, então dá pra recortar mídia de post duplicado/editado igual a arquivo novo.
+  const mediaBytesMatch = /^\/api\/media\/([^/]+)\/bytes$/.exec(pathname);
+  if (mediaBytesMatch && method === 'GET') return getMediaBytes(mediaBytesMatch[1], env);
+
   // Prévias do planejador de grade (imagens sem post — só pra ver como o feed vai ficar).
   if (pathname === '/api/grid-previews' && method === 'GET') return listGridPreviews(url, env);
   if (pathname === '/api/grid-previews' && method === 'POST') return createGridPreview(request, env);
@@ -926,6 +932,24 @@ async function multipartComplete(request: Request, env: Env): Promise<Response> 
     },
     201
   );
+}
+
+async function getMediaBytes(id: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`select storage_key, mime_type from media_assets where id = ?`)
+    .bind(id)
+    .first<{ storage_key: string; mime_type: string }>();
+  if (!row) return jsonResponse({ error: 'mídia não encontrada' }, 404);
+
+  const obj = await env.MEDIA.get(row.storage_key);
+  if (!obj) return jsonResponse({ error: 'arquivo não está no bucket' }, 404);
+
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': row.mime_type || 'application/octet-stream',
+      // Imutável: o storage_key carrega o uuid, então o conteúdo daquele endereço nunca muda.
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    },
+  });
 }
 
 interface GridPreviewRow {

@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useScheduler } from '@/store';
 import { onPrefill, onPrefillDate, onEdit, onPrefillMedia } from '@/lib/composer-bus';
-import { createPost, updatePost, uploadMedia } from '@/lib/api';
+import { createPost, fetchMediaFile, updatePost, uploadMedia } from '@/lib/api';
 import type { CreatePostPayload } from '@/lib/api';
 import { fmtBytes, fmtDuration, isoToLocalInput, localToIso } from '@/lib/format';
 import { readMediaMetadata } from '@/lib/mediaMetadata';
@@ -240,6 +240,24 @@ export function PostComposer({
     setQueue((q) => q.map((item) => (item.key === key ? { key: newKey(), file, name: file.name, mime_type: file.type, ...meta } : item)));
   }
 
+  // Pedido de recorte. Item que veio de post duplicado/editado só tem o id da mídia no R2 — os
+  // bytes são baixados pela nossa origem e viram um File, senão o canvas do recorte fica sujo
+  // (o domínio público do R2 é outro host e não manda CORS) e o resultado não pode ser exportado.
+  async function requestCrop(key: string) {
+    const item = queue.find((i) => i.key === key);
+    if (!item) return;
+    if (!item.file && item.assetId) {
+      try {
+        const file = await fetchMediaFile(item.assetId, item.name || 'midia.jpg');
+        setQueue((q) => q.map((i) => (i.key === key ? { ...i, file } : i)));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
+    setCropQueue((c) => (c.includes(key) ? c : [key, ...c]));
+  }
+
   // Recorte confirmado: troca o arquivo do MESMO slot, preservando a key — assim a posição no
   // carrossel e a fila de recortes pendentes continuam válidas.
   async function applyCrop(key: string, cropped: File) {
@@ -282,6 +300,16 @@ export function PostComposer({
   const coverPreviewUrl = useMediaUrl(
     coverFile ? { key: 'cover', file: coverFile, name: coverFile.name, mime_type: coverFile.type } : undefined
   );
+
+  // Proporção pra qual a pessoa está recortando: a do formato escolhido (Reel 9:16, post 4:5).
+  // Sem isso o recorte abria sempre em 4:5, inclusive pra Reel — e nem oferecia 9:16.
+  const cropTargetRatio = (() => {
+    for (const a of selectedAccounts) {
+      const spec = findFormat(a.platform, formats[a.platform]);
+      if (spec) return spec.recommended.width / spec.recommended.height;
+    }
+    return undefined;
+  })();
 
   // Item do recorte em aberto (um por vez, na ordem em que entraram na fila).
   const cropTarget = queue.find((i) => i.key === cropQueue[0]) ?? null;
@@ -343,6 +371,21 @@ export function PostComposer({
           out.push({ field: 'media', problem: true, text: 'Carrossel do Instagram só aceita imagens — o vídeo vai sozinho' });
         }
       }
+      // Foto numa proporção diferente da do formato: publica, mas a rede corta sozinha e o
+      // enquadramento sai ao acaso. Não bloqueia — só aponta o ✂ que está ali no tile.
+      if (spec && spec.media !== 'video') {
+        const alvo = spec.recommended.width / spec.recommended.height;
+        for (const item of queue) {
+          if (isVideoMime(item.mime_type) || !item.width || !item.height) continue;
+          if (Math.abs(item.width / item.height - alvo) < 0.02) continue;
+          out.push({
+            field: 'media',
+            problem: false,
+            text: `Recorte pra ${spec.recommended.ratio} (✂ no arquivo) — senão o ${spec.label} corta sozinho`,
+          });
+        }
+      }
+
       // Só imagem: vídeo tem outra faixa e o corte aqui não se aplica.
       if (needsFeedRatio && ((a.platform === 'instagram' && formats.instagram === 'post') || a.platform === 'facebook')) {
         for (const item of queue) {
@@ -558,7 +601,7 @@ export function PostComposer({
               setCropQueue((c) => c.filter((k) => k !== key));
             }}
             onReplace={replaceMedia}
-            onCrop={(key) => setCropQueue((c) => (c.includes(key) ? c : [key, ...c]))}
+            onCrop={requestCrop}
             onAdd={() => fileRef.current?.click()}
           />
           <p className="text-xs text-muted-foreground">
@@ -759,6 +802,7 @@ export function PostComposer({
 
       <MediaCropDialog
         file={cropTarget?.file ?? null}
+        targetRatio={cropTargetRatio}
         onCancel={() => setCropQueue((c) => c.slice(1))}
         onDone={(cropped) => cropTarget && applyCrop(cropTarget.key, cropped)}
       />
