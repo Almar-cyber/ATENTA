@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
+import { ImageIcon, Layers, PenLine } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Post, Target } from '@/lib/types';
 import { isVideoMime } from '@/lib/platforms';
@@ -7,6 +8,7 @@ import { fmtDateTime } from '@/lib/format';
 import { reschedule } from '@/lib/api';
 import { useScheduler } from '@/store';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import type { DialogSelection } from './PostDialog';
 
 interface Entry {
@@ -86,7 +88,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
   }
 
   if (entries.length === 0) {
-    return <p className="py-10 text-center text-sm text-muted-foreground">Nenhum post do Instagram na fila para planejar.</p>;
+    return <EmptyState>Nenhum post do Instagram na fila para planejar.</EmptyState>;
   }
 
   return (
@@ -121,16 +123,18 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
                   <img src={m.public_url} alt="" className="size-full object-cover" />
                 )
               ) : (
-                <div className="grid size-full place-items-center text-lg text-muted-foreground">{target.media.length ? '🖼' : '✍'}</div>
+                <div className="grid size-full place-items-center text-muted-foreground">
+                  {target.media.length ? <ImageIcon className="size-5" /> : <PenLine className="size-5" />}
+                </div>
               )}
               {target.status === 'draft' && (
-                <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">rascunho</span>
+                <span className="absolute left-1 top-1 rounded-md bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">rascunho</span>
               )}
               {published && (
-                <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">publicado</span>
+                <span className="absolute left-1 top-1 rounded-md bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">publicado</span>
               )}
-              {target.media.length > 1 && <span className="absolute right-1 top-1 text-xs text-white drop-shadow">▣</span>}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 pb-0.5 pt-3 text-center text-[10px] text-white">
+              {target.media.length > 1 && <Layers className="absolute right-1 top-1 size-3.5 text-white drop-shadow" />}
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 pb-0.5 pt-3 text-center text-xs text-white">
                 {fmtDateTime(post.scheduled_for)}
               </div>
             </motion.div>

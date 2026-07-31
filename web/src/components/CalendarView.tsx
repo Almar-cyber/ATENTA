@@ -119,7 +119,7 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
 
       <div className="grid grid-cols-7 gap-1.5">
         {WEEKDAYS.map((w) => (
-          <div key={w} className="pb-1 text-center text-[11px] font-semibold uppercase text-muted-foreground">
+          <div key={w} className="pb-1 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {w}
           </div>
         ))}
@@ -151,11 +151,11 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
                       onOpen({ post, target });
                     }}
                     title={`${PLATFORM_LABELS[target.platform]} — ${target.account_name}`}
-                    className={`mb-0.5 flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[11px] ${failed ? 'bg-red-100 dark:bg-red-500/15' : 'bg-muted'} ${target.status === 'draft' ? 'opacity-70' : ''} ${movable ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                    className={`mb-0.5 flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs ${failed ? 'bg-destructive/15' : 'bg-muted'} ${target.status === 'draft' ? 'opacity-70' : ''} ${movable ? 'cursor-grab active:cursor-grabbing' : ''}`}
                     style={{ borderLeft: `3px ${target.status === 'draft' ? 'dashed' : 'solid'} ${PLATFORM_COLORS[target.platform]}` }}
                   >
                     {failed ? (
-                      <AlertTriangle className="size-2.5 shrink-0 text-red-600" />
+                      <AlertTriangle className="size-2.5 shrink-0 text-destructive" />
                     ) : (
                       <PlatformIcon platform={target.platform} className="size-2.5 shrink-0" style={{ color: PLATFORM_COLORS[target.platform] }} />
                     )}
@@ -163,7 +163,7 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
                   </span>
                 );
               })}
-              {entries.length > 3 && <span className="text-[11px] text-muted-foreground">+{entries.length - 3} mais</span>}
+              {entries.length > 3 && <span className="text-xs text-muted-foreground">+{entries.length - 3} mais</span>}
             </button>
           );
         })}

@@ -4,14 +4,14 @@ import { CheckCircle2, Link2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
-import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
+import { PLATFORM_LABELS } from '@/lib/platforms';
 import type { Post } from '@/lib/types';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PostComposer } from '@/components/PostComposer';
-import { PlatformIcon } from '@/components/PlatformIcon';
+import { PlatformAvatar } from '@/components/PlatformAvatar';
 import { AlertBanner } from '@/components/AlertBanner';
 import { ListView } from '@/components/ListView';
 import { WeekView } from '@/components/WeekView';
@@ -37,14 +37,16 @@ function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpe
             <span className="px-1.5 text-xs text-muted-foreground">Nenhuma conta conectada</span>
           ) : (
             accounts.map((a) => (
-              <span
+              <PlatformAvatar
                 key={a.id}
+                platform={a.platform}
+                size="md"
+                shape="circle"
+                tone="tint"
+                muted={a.status !== 'active'}
+                className="ring-2 ring-card"
                 title={`${PLATFORM_LABELS[a.platform]} — ${a.display_name}${a.status !== 'active' ? ' (precisa reautenticar)' : ''}`}
-                className={`grid size-8 place-items-center rounded-full ring-2 ring-card ${a.status === 'active' ? '' : 'opacity-40'}`}
-                style={{ backgroundColor: `${PLATFORM_COLORS[a.platform]}1f` }}
-              >
-                <PlatformIcon platform={a.platform} className="size-4" style={{ color: PLATFORM_COLORS[a.platform] }} />
-              </span>
+              />
             ))
           )}
         </button>

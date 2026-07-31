@@ -1,6 +1,7 @@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import type { Account } from '@/lib/types';
 import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
 import { PlatformIcon } from './PlatformIcon';
@@ -17,7 +18,7 @@ export function AccountPicker({
   onChange: (next: Set<string>) => void;
 }) {
   if (accounts.length === 0) {
-    return <p className="text-xs text-muted-foreground">Nenhuma conta autenticada ainda.</p>;
+    return <EmptyState size="sm">Nenhuma conta autenticada ainda.</EmptyState>;
   }
 
   const activeIds = accounts.filter((a) => a.status === 'active').map((a) => a.id);

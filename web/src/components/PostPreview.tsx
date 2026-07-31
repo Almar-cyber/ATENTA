@@ -56,7 +56,7 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   const safeIndex = Math.min(index, Math.max(0, media.length - 1));
 
   return (
-    <div className="w-full max-w-[300px] overflow-hidden rounded-2xl border bg-card shadow-md">
+    <div className="w-full max-w-[300px] overflow-hidden rounded-2xl bg-card shadow-soft ring-1 ring-foreground/5">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div
           className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white"
@@ -65,8 +65,8 @@ export function PostPreview({ input }: { input: PreviewInput }) {
           {accountName.charAt(0).toUpperCase()}
         </div>
         <div className="leading-tight">
-          <div className="text-[13px] font-semibold">{accountName}</div>
-          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <div className="text-sm font-semibold">{accountName}</div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <PlatformIcon platform={platform} className="size-3 shrink-0" style={{ color }} />
             {isStory ? `${label} · Story` : label}
           </div>
@@ -81,7 +81,7 @@ export function PostPreview({ input }: { input: PreviewInput }) {
           <MediaFrame item={media[safeIndex]} />
           {media.length > 1 && (
             <>
-              <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white">
+              <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white">
                 {safeIndex + 1}/{media.length}
               </div>
 
@@ -122,26 +122,26 @@ export function PostPreview({ input }: { input: PreviewInput }) {
           )}
         </div>
       ) : (
-        <div className="flex h-24 items-center justify-center border-y bg-muted/50 text-[11px] text-muted-foreground">
+        <div className="flex h-24 items-center justify-center border-y bg-muted/50 text-xs text-muted-foreground">
           sem mídia
         </div>
       )}
 
-      {platform === 'youtube' && title && <div className="px-3 pt-2.5 text-[13px] font-semibold">{title}</div>}
+      {platform === 'youtube' && title && <div className="px-3 pt-2.5 text-sm font-semibold">{title}</div>}
 
       {!isStory ? (
-        <div className="whitespace-pre-wrap break-words px-3 py-2.5 text-[13px] leading-snug">
+        <div className="whitespace-pre-wrap break-words px-3 py-2.5 text-sm leading-snug">
           {platform === 'instagram' && <span className="mr-1.5 font-semibold">{accountName}</span>}
           {shownCaption}
         </div>
       ) : caption ? (
-        <div className="px-3 py-2.5 text-[11px] text-red-600 dark:text-red-400">
+        <div className="px-3 py-2.5 text-xs text-destructive">
           a legenda não aparece num Story — a API só publica a imagem/vídeo
         </div>
       ) : null}
 
       {over && (
-        <div className="px-3 pb-2.5 text-[11px] text-red-600 dark:text-red-400">
+        <div className="px-3 pb-2.5 text-xs text-destructive">
           cortado em {limit} caracteres ({caption.length} escritos)
         </div>
       )}

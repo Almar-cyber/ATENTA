@@ -22,7 +22,7 @@ export function AlertBanner({ onSeeFailures }: { onSeeFailures: () => void }) {
           animate={{ opacity: 1, height: 'auto' }}
           exit={{ opacity: 0, height: 0 }}
           onClick={() => failed > 0 && onSeeFailures()}
-          className="mx-6 mt-4 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800 shadow-sm hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+          className="mx-6 mt-4 flex items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/15"
         >
           <AlertTriangle className="size-4" />
           {parts.join(' · ')}

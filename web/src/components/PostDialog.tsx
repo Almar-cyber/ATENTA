@@ -3,13 +3,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { Post, Target } from '@/lib/types';
-import { PLATFORM_COLORS, PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
+import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
 import { cancelTarget, queueTarget } from '@/lib/api';
 import { requestPrefill, requestEdit } from '@/lib/composer-bus';
 import { useScheduler } from '@/store';
 import { PostPreview } from './PostPreview';
-import { PlatformIcon } from './PlatformIcon';
+import { PlatformAvatar } from './PlatformAvatar';
+import { InlineAlert } from '@/components/ui/inline-alert';
 
 export interface DialogSelection {
   post: Post;
@@ -46,12 +47,7 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
             <div className="flex min-w-0 flex-1 flex-col">
               <DialogHeader className="border-b px-5 py-4">
                 <DialogTitle className="flex flex-wrap items-center gap-2">
-                  <span
-                    className="grid size-7 shrink-0 place-items-center rounded-md text-white"
-                    style={{ background: PLATFORM_COLORS[target.platform] }}
-                  >
-                    <PlatformIcon platform={target.platform} className="size-4" />
-                  </span>
+                  <PlatformAvatar platform={target.platform} size="sm" />
                   <span className="truncate">{PLATFORM_LABELS[target.platform]} — {target.account_name}</span>
                   <Badge className={status.className} variant="secondary">
                     {status.label}
@@ -78,9 +74,7 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                   </a>
                 )}
                 {target.last_error && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
-                    {target.last_error}
-                  </div>
+                  <InlineAlert>{target.last_error}</InlineAlert>
                 )}
               </div>
 

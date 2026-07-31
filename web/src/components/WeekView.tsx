@@ -90,7 +90,7 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
             const isToday = d.toDateString() === now.toDateString();
             return (
               <div key={d.toISOString()} className="border-l py-2 text-center">
-                <div className="text-[11px] font-semibold uppercase text-muted-foreground">{WEEKDAYS[d.getDay()]}</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{WEEKDAYS[d.getDay()]}</div>
                 <div
                   className={`mx-auto mt-0.5 grid size-6 place-items-center rounded-full text-xs font-semibold ${isToday ? 'bg-primary text-primary-foreground' : ''}`}
                 >
@@ -104,7 +104,7 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
         {/* Hour rows */}
         {hours.map((hour) => (
           <div key={hour} className="grid grid-cols-[56px_repeat(7,1fr)] border-b last:border-b-0">
-            <div className="py-1 pr-2 text-right text-[11px] text-muted-foreground">{pad(hour)}:00</div>
+            <div className="py-1 pr-2 text-right text-xs text-muted-foreground">{pad(hour)}:00</div>
             {days.map((d, di) => {
               const entries = byCell.get(`${di}-${hour}`) ?? [];
               const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(hour)}:00`;
@@ -125,12 +125,12 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
                           onOpen({ post, target });
                         }}
                         title={`${pad(hour)}:${pad(minute)} — ${target.account_name}`}
-                        className={`block cursor-pointer truncate rounded-md px-1.5 py-1 text-[11px] leading-tight ${target.status === 'draft' ? 'opacity-70' : ''}`}
+                        className={`block cursor-pointer truncate rounded-md px-1.5 py-1 text-xs leading-tight ${target.status === 'draft' ? 'opacity-70' : ''}`}
                         style={{ backgroundColor: `${color}1f`, borderLeft: `3px solid ${color}` }}
                       >
                         <span className="flex items-center gap-1">
                           {failed ? (
-                            <AlertTriangle className="size-2.5 shrink-0 text-red-600" />
+                            <AlertTriangle className="size-2.5 shrink-0 text-destructive" />
                           ) : (
                             <PlatformIcon platform={target.platform} className="size-2.5 shrink-0" style={{ color }} />
                           )}

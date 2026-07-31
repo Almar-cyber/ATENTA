@@ -33,6 +33,7 @@ import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
 import { ComposerHints } from './ComposerHints';
+import { EmptyState } from '@/components/ui/empty-state';
 import { PlatformIcon } from './PlatformIcon';
 
 function newKey() {
@@ -306,7 +307,7 @@ export function PostComposer({
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         <div className="min-h-0 flex-1 space-y-4 px-5 py-4 md:overflow-y-auto">
         {editingPostId && (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm dark:border-sky-500/30 dark:bg-sky-500/10">
+          <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted px-3 py-2 text-sm">
             <span>Editando post agendado</span>
             <Button
               type="button"
@@ -329,9 +330,9 @@ export function PostComposer({
         </div>
 
         {selectedAccounts.length === 0 && (
-          <p className="rounded-lg border border-dashed px-4 py-6 text-center text-xs text-muted-foreground">
+          <EmptyState size="sm" bordered>
             Escolha ao menos uma conta acima para preencher o restante do post.
-          </p>
+          </EmptyState>
         )}
 
         {selectedAccounts.length > 0 && (
@@ -476,9 +477,9 @@ export function PostComposer({
               ))}
             </div>
           ) : (
-            <p className="pt-8 text-center text-xs text-muted-foreground">
+            <EmptyState size="sm">
               Selecione ao menos uma conta para ver como o post vai ficar.
-            </p>
+            </EmptyState>
           )}
         </div>
       </div>

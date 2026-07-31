@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertCircle } from 'lucide-react';
+import { InlineAlert } from '@/components/ui/inline-alert';
 
 // Dicas de validação do compositor. Antes era um <p> solto por mensagem, com as classes decididas
 // por `includes()` no meio do JSX — o que destoava do resto (parecia texto sem estilo).
@@ -28,18 +28,12 @@ export function ComposerHints({ hints }: { hints: string[] }) {
 
       <AnimatePresence>
         {problems.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
-          >
-            <AlertCircle className="mt-px size-3.5 shrink-0" />
-            <div className="space-y-0.5">
+          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            <InlineAlert>
               {problems.map((h) => (
                 <p key={h}>{h}</p>
               ))}
-            </div>
+            </InlineAlert>
           </motion.div>
         )}
       </AnimatePresence>
