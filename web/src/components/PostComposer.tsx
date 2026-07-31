@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
@@ -8,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useScheduler } from '@/store';
 import { onPrefill, onPrefillDate, onEdit } from '@/lib/composer-bus';
 import { createPost, updatePost, uploadMedia } from '@/lib/api';
@@ -32,6 +32,7 @@ import type { PreviewInput } from './PostPreview';
 import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
+import { ComposerHints } from './ComposerHints';
 import { PlatformIcon } from './PlatformIcon';
 
 function newKey() {
@@ -363,27 +364,20 @@ export function PostComposer({
             legenda daquela conta (e o preview à direita acompanha). Substitui a lista empilhada de
             "Personalizar legenda", que ficava confusa com várias contas. */}
         {selectedAccounts.length >= 2 && (
-          <div className="flex flex-wrap gap-1 border-b pb-2">
-            <button
-              type="button"
-              onClick={() => setActiveTab('all')}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${activeTab === 'all' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-            >
-              Todas
-            </button>
-            {selectedAccounts.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => setActiveTab(a.id)}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${activeTab === a.id ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-              >
-                <PlatformIcon platform={a.platform} className="size-3 shrink-0" style={{ color: PLATFORM_COLORS[a.platform] }} />
-                {a.display_name}
-                {captionOverrides[a.id] !== undefined && <span className="size-1.5 rounded-full bg-primary" title="legenda própria" />}
-              </button>
-            ))}
-          </div>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="h-auto flex-wrap">
+              <TabsTrigger value="all">Todas</TabsTrigger>
+              {selectedAccounts.map((a) => (
+                <TabsTrigger key={a.id} value={a.id} className="gap-1.5">
+                  <PlatformIcon platform={a.platform} className="size-3 shrink-0" style={{ color: PLATFORM_COLORS[a.platform] }} />
+                  {a.display_name}
+                  {captionOverrides[a.id] !== undefined && (
+                    <span className="size-1.5 rounded-full bg-primary" title="legenda própria" />
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         )}
 
         {activeAccount ? (
@@ -416,37 +410,13 @@ export function PostComposer({
               onChange={(e) => setCaptionOverrides((prev) => ({ ...prev, [activeAccount.id]: e.target.value }))}
               className="min-h-24"
             />
-            <AnimatePresence>
-              {hints.map((h) => (
-                <motion.p
-                  key={h}
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className={`text-xs ${h.includes('⚠') || h.includes('exige') || h.includes('máximo') || h.includes('apenas') || h.includes('muito') ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}
-                >
-                  {h}
-                </motion.p>
-              ))}
-            </AnimatePresence>
+            <ComposerHints hints={hints} />
           </div>
         ) : (
         <div className="space-y-1.5">
           <Label htmlFor="f-body">Legenda</Label>
           <Textarea id="f-body" value={body} onChange={(e) => setBody(e.target.value)} className="min-h-24" />
-          <AnimatePresence>
-            {hints.map((h) => (
-              <motion.p
-                key={h}
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className={`text-xs ${h.includes('⚠') || h.includes('exige') || h.includes('máximo') || h.includes('apenas') || h.includes('muito') ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}
-              >
-                {h}
-              </motion.p>
-            ))}
-          </AnimatePresence>
+          <ComposerHints hints={hints} />
         </div>
         )}
 
@@ -513,8 +483,8 @@ export function PostComposer({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-t px-5 py-4">
-        <Button size="lg" className="flex-1" onClick={() => submit(false)} disabled={submitting}>
+      <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-4">
+        <Button size="lg" onClick={() => submit(false)} disabled={submitting}>
           {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
         </Button>
         <Button variant="outline" onClick={() => submit(true)} disabled={submitting}>
