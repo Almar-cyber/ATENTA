@@ -31,6 +31,11 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   if (pathname === '/api/posts' && method === 'POST') return createPost(request, env);
   if (pathname === '/api/posts/reschedule' && method === 'POST') return reschedulePosts(request, env);
   if (pathname === '/api/media' && method === 'POST') return uploadMedia(request, env);
+  // Upload em partes: o navegador fatia o arquivo, então nem o limite de corpo da requisição
+  // (100MB no plano free) nem a memória do Worker (128MB) são atingidos por vídeos grandes.
+  if (pathname === '/api/media/multipart/start' && method === 'POST') return multipartStart(request, env);
+  if (pathname === '/api/media/multipart/part' && method === 'PUT') return multipartPart(request, url, env);
+  if (pathname === '/api/media/multipart/complete' && method === 'POST') return multipartComplete(request, env);
 
   const cancelMatch = /^\/api\/post-targets\/([^/]+)\/cancel$/.exec(pathname);
   if (cancelMatch && method === 'POST') return cancelTarget(cancelMatch[1], env);
@@ -662,6 +667,94 @@ async function uploadMedia(request: Request, env: Env): Promise<Response> {
       duration_seconds: durationSeconds,
       width,
       height,
+    },
+    201
+  );
+}
+
+interface MultipartStartBody {
+  name?: string;
+  mime_type?: string;
+}
+
+async function multipartStart(request: Request, env: Env): Promise<Response> {
+  let body: MultipartStartBody;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+  const mimeType = body.mime_type ?? '';
+  if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+    return jsonResponse({ error: `formato não suportado (${mimeType || 'tipo desconhecido'})` }, 400);
+  }
+  const id = crypto.randomUUID();
+  const safeName = (body.name ?? 'upload').replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload';
+  const storageKey = `${id}-${safeName}`;
+  const upload = await env.MEDIA.createMultipartUpload(storageKey, { httpMetadata: { contentType: mimeType } });
+  return jsonResponse({ id, storage_key: storageKey, upload_id: upload.uploadId }, 201);
+}
+
+async function multipartPart(request: Request, url: URL, env: Env): Promise<Response> {
+  const storageKey = url.searchParams.get('key');
+  const uploadId = url.searchParams.get('upload_id');
+  const partNumber = Number(url.searchParams.get('part'));
+  if (!storageKey || !uploadId || !Number.isInteger(partNumber) || partNumber < 1) {
+    return jsonResponse({ error: 'parâmetros key/upload_id/part obrigatórios' }, 400);
+  }
+  if (!request.body) return jsonResponse({ error: 'corpo vazio' }, 400);
+  const upload = env.MEDIA.resumeMultipartUpload(storageKey, uploadId);
+  // O corpo vai direto pro R2 como stream — nada é acumulado na memória do Worker.
+  const part = await upload.uploadPart(partNumber, request.body);
+  return jsonResponse({ part_number: part.partNumber, etag: part.etag });
+}
+
+interface MultipartCompleteBody {
+  id?: string;
+  storage_key?: string;
+  upload_id?: string;
+  mime_type?: string;
+  size_bytes?: number;
+  parts?: Array<{ part_number: number; etag: string }>;
+  duration_seconds?: number | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+async function multipartComplete(request: Request, env: Env): Promise<Response> {
+  let body: MultipartCompleteBody;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+  const { id, storage_key: storageKey, upload_id: uploadId, parts } = body;
+  if (!id || !storageKey || !uploadId || !Array.isArray(parts) || parts.length === 0) {
+    return jsonResponse({ error: 'id/storage_key/upload_id/parts obrigatórios' }, 400);
+  }
+
+  const upload = env.MEDIA.resumeMultipartUpload(storageKey, uploadId);
+  await upload.complete(parts.map((p) => ({ partNumber: p.part_number, etag: p.etag })));
+
+  const mimeType = body.mime_type || 'application/octet-stream';
+  const publicUrl = env.MEDIA_PUBLIC_BASE_URL ? `${env.MEDIA_PUBLIC_BASE_URL}/${storageKey}` : null;
+
+  await env.DB.prepare(
+    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, duration_seconds, width, height) values (?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(id, storageKey, publicUrl, mimeType, body.size_bytes ?? 0, body.duration_seconds ?? null, body.width ?? null, body.height ?? null)
+    .run();
+
+  return jsonResponse(
+    {
+      id,
+      storage_key: storageKey,
+      public_url: publicUrl,
+      mime_type: mimeType,
+      size_bytes: body.size_bytes ?? 0,
+      duration_seconds: body.duration_seconds ?? null,
+      width: body.width ?? null,
+      height: body.height ?? null,
     },
     201
   );

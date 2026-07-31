@@ -57,16 +57,79 @@ export function updatePost(id: string, payload: Partial<CreatePostPayload>): Pro
   });
 }
 
-export function uploadMedia(
+export interface UploadedMedia {
+  id: string;
+  public_url: string | null;
+  mime_type: string;
+  duration_seconds: number | null;
+  width: number | null;
+  height: number | null;
+}
+
+// Acima disso o upload vai em partes. O Worker tem limite de corpo por requisição (100MB no plano
+// free) e de memória (128MB); mandar um vídeo inteiro numa requisição só estourava os dois e a
+// criação do post falhava antes de chegar ao banco.
+const MULTIPART_THRESHOLD_BYTES = 60 * 1024 * 1024;
+// R2 exige que toda parte, menos a última, tenha o mesmo tamanho — e no mínimo 5MB.
+const PART_SIZE_BYTES = 10 * 1024 * 1024;
+
+export async function uploadMedia(
   file: File,
-  meta: MediaMetadata = {}
-): Promise<{ id: string; public_url: string | null; mime_type: string; duration_seconds: number | null; width: number | null; height: number | null }> {
-  const form = new FormData();
-  form.append('file', file);
-  if (meta.duration_seconds != null) form.append('duration_seconds', String(meta.duration_seconds));
-  if (meta.width != null) form.append('width', String(meta.width));
-  if (meta.height != null) form.append('height', String(meta.height));
-  return req('/api/media', { method: 'POST', body: form });
+  meta: MediaMetadata = {},
+  onProgress?: (fraction: number) => void
+): Promise<UploadedMedia> {
+  if (file.size <= MULTIPART_THRESHOLD_BYTES) {
+    const form = new FormData();
+    form.append('file', file);
+    if (meta.duration_seconds != null) form.append('duration_seconds', String(meta.duration_seconds));
+    if (meta.width != null) form.append('width', String(meta.width));
+    if (meta.height != null) form.append('height', String(meta.height));
+    const res = await req<UploadedMedia>('/api/media', { method: 'POST', body: form });
+    onProgress?.(1);
+    return res;
+  }
+
+  const started = await req<{ id: string; storage_key: string; upload_id: string }>(
+    '/api/media/multipart/start',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: file.name, mime_type: file.type }),
+    }
+  );
+
+  const parts: Array<{ part_number: number; etag: string }> = [];
+  const total = Math.ceil(file.size / PART_SIZE_BYTES);
+  for (let i = 0; i < total; i++) {
+    const chunk = file.slice(i * PART_SIZE_BYTES, (i + 1) * PART_SIZE_BYTES);
+    const query = new URLSearchParams({
+      key: started.storage_key,
+      upload_id: started.upload_id,
+      part: String(i + 1),
+    });
+    const part = await req<{ part_number: number; etag: string }>(`/api/media/multipart/part?${query}`, {
+      method: 'PUT',
+      body: chunk,
+    });
+    parts.push(part);
+    onProgress?.((i + 1) / total);
+  }
+
+  return req<UploadedMedia>('/api/media/multipart/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: started.id,
+      storage_key: started.storage_key,
+      upload_id: started.upload_id,
+      mime_type: file.type,
+      size_bytes: file.size,
+      parts,
+      duration_seconds: meta.duration_seconds ?? null,
+      width: meta.width ?? null,
+      height: meta.height ?? null,
+    }),
+  });
 }
 
 export function cancelTarget(id: string): Promise<{ ok: true }> {
