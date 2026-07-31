@@ -302,11 +302,23 @@ async function handleOAuthCallback(platform: OAuthCallbackPlatform, request: Req
     return new Response('missing ?code=', { status: 400 });
   }
 
-  if (platform === 'linkedin') return handleLinkedinCallback(code, request, url, env);
-  if (platform === 'meta') return handleMetaCallback(code, request, url, env);
-  if (platform === 'pinterest') return handlePinterestCallback(code, request, url, env);
-  if (platform === 'tiktok') return handleTiktokCallback(code, request, url, env);
-  if (platform === 'youtube') return handleYoutubeCallback(code, request, url, env);
+  // Sem isto, qualquer exceção aqui vira a página "Error 1101 — Worker threw exception" da
+  // Cloudflare, que não diz nada e ainda por cima aparece DEPOIS do consentimento, quando a pessoa
+  // já autorizou. Devolve o motivo.
+  try {
+    if (platform === 'linkedin') return await handleLinkedinCallback(code, request, url, env);
+    if (platform === 'meta') return await handleMetaCallback(code, request, url, env);
+    if (platform === 'pinterest') return await handlePinterestCallback(code, request, url, env);
+    if (platform === 'tiktok') return await handleTiktokCallback(code, request, url, env);
+    if (platform === 'youtube') return await handleYoutubeCallback(code, request, url, env);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`oauth callback ${platform} falhou:`, detail);
+    return new Response(`Falha ao conectar ${platform}: ${detail}`, {
+      status: 500,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
 
   return new Response(`${platform} OAuth callback not implemented yet — see phased roadmap`, { status: 501 });
 }
@@ -458,9 +470,17 @@ async function upsertAccount(
   extra: Record<string, unknown> = {},
   expiresAt: string | null = null
 ): Promise<void> {
-  const existing = await env.DB.prepare(`select id from accounts where platform = ? and external_account_id = ?`)
-    .bind(platform, externalAccountId)
-    .first<{ id: string }>();
+  const existing =
+    (await env.DB.prepare(`select id from accounts where platform = ? and external_account_id = ?`)
+      .bind(platform, externalAccountId)
+      .first<{ id: string }>()) ??
+    // Linha antiga criada por CLI, que gravava a conta sem o external id (o YouTube via
+    // `npm run youtube-auth` é assim). É a MESMA conta — adota a linha e preenche o id, em vez de
+    // tentar inserir uma segunda, que esbarraria no `unique(platform)` de 0001 e derrubava o
+    // callback com exceção não tratada (Cloudflare 1101) no meio do fluxo de consentimento.
+    (await env.DB.prepare(`select id from accounts where platform = ? and external_account_id is null`)
+      .bind(platform)
+      .first<{ id: string }>());
   const extraJson = JSON.stringify(extra);
   if (existing) {
     await env.DB.prepare(
