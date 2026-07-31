@@ -49,9 +49,9 @@ export default {
 
     // Unauthenticated: these are cross-site redirects landing here straight from each platform's
     // consent screen, not a browser tab that's already presented dashboard credentials.
-    const oauthMatch = /^\/oauth\/callback\/(linkedin|meta|pinterest|tiktok)$/.exec(url.pathname);
+    const oauthMatch = /^\/oauth\/callback\/(linkedin|meta|pinterest|tiktok|youtube)$/.exec(url.pathname);
     if (oauthMatch) {
-      return handleOAuthCallback(oauthMatch[1] as 'linkedin' | 'meta' | 'pinterest' | 'tiktok', request, url, env);
+      return handleOAuthCallback(oauthMatch[1] as OAuthCallbackPlatform, request, url, env);
     }
 
     // Unauthenticated: platform app-review processes (Pinterest, TikTok, ...) fetch this
@@ -294,7 +294,9 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
 // OAuth callback — LinkedIn, Meta, Pinterest, TikTok only (their dev consoles require a
 // registered HTTPS redirect_uri with no loopback exception). YouTube uses the local loopback
 // flow instead (see adapters/youtube.ts + cli/youtube-auth.ts), so it never hits this Worker.
-async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' | 'tiktok', request: Request, url: URL, env: Env): Promise<Response> {
+type OAuthCallbackPlatform = 'linkedin' | 'meta' | 'pinterest' | 'tiktok' | 'youtube';
+
+async function handleOAuthCallback(platform: OAuthCallbackPlatform, request: Request, url: URL, env: Env): Promise<Response> {
   const code = url.searchParams.get('code');
   if (!code) {
     return new Response('missing ?code=', { status: 400 });
@@ -304,6 +306,7 @@ async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' |
   if (platform === 'meta') return handleMetaCallback(code, request, url, env);
   if (platform === 'pinterest') return handlePinterestCallback(code, request, url, env);
   if (platform === 'tiktok') return handleTiktokCallback(code, request, url, env);
+  if (platform === 'youtube') return handleYoutubeCallback(code, request, url, env);
 
   return new Response(`${platform} OAuth callback not implemented yet — see phased roadmap`, { status: 501 });
 }
@@ -564,4 +567,59 @@ async function handleTiktokCallback(code: string, request: Request, url: URL, en
   await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt);
 
   return connectedRedirect(url, 'tiktok');
+}
+
+// YouTube pelo navegador. O CLI (cli/youtube-auth.ts) usa credencial "Desktop app" com redirect
+// loopback, que só funciona na máquina do dono; aqui o app é do tipo "Web application" e o redirect
+// aponta pro próprio Worker, igual às outras redes. Grava o mesmo formato de token que o adapter
+// espera ({access_token, refresh_token}) e puxa o nome do canal da API.
+async function handleYoutubeCallback(code: string, request: Request, url: URL, env: Env): Promise<Response> {
+  const checked = checkState(request, url);
+  if (checked instanceof Response) return checked;
+
+  const redirectUri = `${url.origin}${url.pathname}`;
+
+  const tokenRes = await fetchWithRetry('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: env.YOUTUBE_CLIENT_ID,
+      client_secret: env.YOUTUBE_CLIENT_SECRET,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+    }),
+  });
+  if (!tokenRes.ok) {
+    return new Response(`youtube token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
+  }
+  const tokenJson = (await tokenRes.json()) as { access_token: string; refresh_token?: string; expires_in: number };
+
+  // Sem refresh_token o poller não consegue renovar e a conta morre em 1h. Acontece quando essa
+  // conta Google já autorizou o app antes — o jeito é revogar e reconectar.
+  if (!tokenJson.refresh_token) {
+    return new Response(
+      'O Google não devolveu refresh_token. Revogue o acesso em https://myaccount.google.com/permissions e conecte de novo.',
+      { status: 400 }
+    );
+  }
+
+  // Nome e id do canal (o escopo youtube.readonly cobre esta chamada).
+  const chRes = await fetchWithRetry('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+  });
+  const chJson = chRes.ok
+    ? ((await chRes.json()) as { items?: Array<{ id: string; snippet?: { title?: string } }> })
+    : {};
+  const channel = chJson.items?.[0];
+  const displayName = channel?.snippet?.title || checked.fallbackName || 'YouTube';
+
+  const { ciphertext, iv } = await encryptJSON(
+    { access_token: tokenJson.access_token, refresh_token: tokenJson.refresh_token },
+    env.TOKEN_ENCRYPTION_KEY
+  );
+  const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
+  await upsertAccount(env, 'youtube', displayName, channel?.id ?? '', ciphertext, iv, nowIso(), {}, expiresAt);
+
+  return connectedRedirect(url, 'youtube');
 }

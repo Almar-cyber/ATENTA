@@ -13,10 +13,8 @@ const STATUS_PILL: Record<Account['status'], { label: string; cls: string }> = {
   disabled: { label: 'Desativada', cls: 'bg-muted text-muted-foreground' },
 };
 
-// Instagram e Facebook são autenticados juntos pelo mesmo consentimento da Meta; YouTube ainda não
-// tem login web (usa CLI local), então fica desabilitado por enquanto.
-function connectHref(platform: Platform): string | null {
-  if (platform === 'youtube') return null;
+// Instagram e Facebook são autenticados juntos pelo mesmo consentimento da Meta.
+function connectHref(platform: Platform): string {
   if (platform === 'instagram' || platform === 'facebook') return '/api/connect/meta';
   return `/api/connect/${platform}`;
 }
@@ -67,21 +65,15 @@ export function ConnectionsView({ onBack }: { onBack: () => void }) {
                     {(platform === 'instagram' || platform === 'facebook') && (
                       <p className="text-xs text-muted-foreground">Instagram e Facebook conectam juntos pela Meta.</p>
                     )}
-                    {href ? (
-                      <Button
-                        variant={hasAccounts ? 'outline' : 'default'}
-                        className="w-full"
-                        onClick={() => {
-                          window.location.href = href;
-                        }}
-                      >
-                        {hasAccounts ? 'Conectar outra' : 'Conectar'}
-                      </Button>
-                    ) : (
-                      <Button variant="outline" className="w-full" disabled>
-                        Em breve (login web)
-                      </Button>
-                    )}
+                    <Button
+                      variant={hasAccounts ? 'outline' : 'default'}
+                      className="w-full"
+                      onClick={() => {
+                        window.location.href = href;
+                      }}
+                    >
+                      {hasAccounts ? 'Conectar outra' : 'Conectar'}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>

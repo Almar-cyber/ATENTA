@@ -4,9 +4,9 @@
 //
 // YouTube fica de fora: usa fluxo loopback local (cli/youtube-auth.ts), não passa pelo Worker.
 
-export type OAuthPlatform = 'linkedin' | 'meta' | 'pinterest' | 'tiktok';
+export type OAuthPlatform = 'linkedin' | 'meta' | 'pinterest' | 'tiktok' | 'youtube';
 
-export const OAUTH_PLATFORMS: readonly OAuthPlatform[] = ['linkedin', 'meta', 'pinterest', 'tiktok'];
+export const OAUTH_PLATFORMS: readonly OAuthPlatform[] = ['linkedin', 'meta', 'pinterest', 'tiktok', 'youtube'];
 
 export function isOAuthPlatform(p: string): p is OAuthPlatform {
   return (OAUTH_PLATFORMS as readonly string[]).includes(p);
@@ -18,6 +18,7 @@ export const OAUTH_CLIENT_ID_ENV: Record<OAuthPlatform, string> = {
   meta: 'META_APP_ID',
   pinterest: 'PINTEREST_CLIENT_ID',
   tiktok: 'TIKTOK_CLIENT_KEY',
+  youtube: 'YOUTUBE_CLIENT_ID',
 };
 
 export interface AuthUrlParams {
@@ -55,6 +56,18 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
       u.searchParams.set('redirect_uri', redirectUri);
       u.searchParams.set('state', state);
       u.searchParams.set('scope', 'boards:read,pins:read,pins:write');
+      return u.toString();
+    }
+    case 'youtube': {
+      const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      u.searchParams.set('client_id', clientId);
+      u.searchParams.set('redirect_uri', redirectUri);
+      u.searchParams.set('response_type', 'code');
+      u.searchParams.set('scope', 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly');
+      // offline + consent garantem que venha refresh_token (o adapter precisa dele pra renovar).
+      u.searchParams.set('access_type', 'offline');
+      u.searchParams.set('prompt', 'consent');
+      u.searchParams.set('state', state);
       return u.toString();
     }
     case 'tiktok': {
