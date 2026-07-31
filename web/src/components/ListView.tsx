@@ -61,7 +61,7 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: Math.min(i * 0.015, 0.3) }}
-            className={`flex items-center gap-3 rounded-lg px-3 py-3 transition-colors ${target.status === 'failed' || target.status === 'ambiguous' ? 'bg-destructive/10 hover:bg-destructive/15' : 'bg-muted/60 hover:bg-muted'}`}
+            className={`group/row flex items-center gap-3 rounded-lg px-3 py-3 transition-colors ${target.status === 'failed' || target.status === 'ambiguous' ? 'bg-destructive/10 hover:bg-destructive/15' : 'bg-muted/60 hover:bg-muted'}`}
           >
             <PlatformAvatar platform={target.platform} />
             <div className="min-w-0 flex-1">
@@ -82,23 +82,31 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
               ))}
               {target.media.length > 1 && <span className="text-xs text-muted-foreground">+{target.media.length - 1}</span>}
             </div>
-            <Badge className={`${STATUS_META[target.status].className} w-24 shrink-0 justify-center`} variant="secondary">
+            <Badge className={`${STATUS_META[target.status].className} shrink-0`} variant="secondary">
               {STATUS_META[target.status].label}
             </Badge>
-            <div className="flex w-40 shrink-0 justify-end gap-1">
+            {/* Ações são terciárias: ficam discretas e só ganham cor no hover da linha. Antes o
+                "Cancelar" (destrutivo, raro) era o elemento mais pesado da linha e o "Duplicar"
+                (comum) quase sumia — hierarquia invertida. */}
+            <div className="flex shrink-0 justify-end gap-1 opacity-60 transition-opacity group-hover/row:opacity-100">
               {target.status === 'draft' && (
                 <Button size="sm" variant="ghost" onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
                   p/ fila
                 </Button>
               )}
-              {(target.status === 'draft' || target.status === 'queued') && (
-                <Button size="sm" variant="destructive" onClick={() => act(() => cancelTarget(target.id), 'Cancelado.')}>
-                  Cancelar
-                </Button>
-              )}
               <Button size="sm" variant="ghost" onClick={() => requestPrefill({ post, target })}>
                 Duplicar
               </Button>
+              {(target.status === 'draft' || target.status === 'queued') && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => act(() => cancelTarget(target.id), 'Cancelado.')}
+                >
+                  Cancelar
+                </Button>
+              )}
             </div>
           </motion.div>
         </Fragment>

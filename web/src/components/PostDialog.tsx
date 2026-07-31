@@ -89,16 +89,20 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                     Editar
                   </Button>
                 )}
-                <Button variant="outline" onClick={() => requestPrefill({ post, target })}>
+                <Button variant="ghost" onClick={() => requestPrefill({ post, target })}>
                   Duplicar
                 </Button>
                 {target.status === 'draft' && (
-                  <Button variant="secondary" onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
+                  <Button variant="ghost" onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
                     Mover para fila
                   </Button>
                 )}
                 {(target.status === 'draft' || target.status === 'queued') && (
-                  <Button variant="destructive" onClick={() => act(() => cancelTarget(target.id), 'Post cancelado.')}>
+                  <Button
+                    variant="ghost"
+                    className="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => act(() => cancelTarget(target.id), 'Post cancelado.')}
+                  >
                     Cancelar
                   </Button>
                 )}
