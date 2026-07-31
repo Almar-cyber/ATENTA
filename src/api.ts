@@ -465,7 +465,12 @@ async function createPost(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ error: 'JSON inválido' }, 400);
   }
 
-  if (!payload.body?.trim()) return jsonResponse({ error: 'Legenda (body) é obrigatória' }, 400);
+  // Legenda NÃO é obrigatória: Instagram publica sem legenda e Story sequer a exibe. O que não faz
+  // sentido é um post vazio — então exige conteúdo: legenda OU mídia.
+  const hasMediaOnCreate = (payload.media_asset_ids?.length ?? 0) > 0 || !!payload.media_asset_id;
+  if (!payload.body?.trim() && !hasMediaOnCreate) {
+    return jsonResponse({ error: 'Escreva uma legenda ou anexe um arquivo' }, 400);
+  }
   if (!payload.scheduled_for || Number.isNaN(Date.parse(payload.scheduled_for))) {
     return jsonResponse({ error: 'scheduled_for inválido' }, 400);
   }
@@ -510,11 +515,11 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
   if (payload.scheduled_for !== undefined && (!payload.scheduled_for || Number.isNaN(Date.parse(payload.scheduled_for)))) {
     return jsonResponse({ error: 'scheduled_for inválido' }, 400);
   }
-  // Same rule createPost enforces on `body` — an edit that clears the caption to blank must be
-  // rejected too, otherwise a post could end up in the same "no caption" state createPost has
-  // always refused to create.
-  if (payload.body !== undefined && !payload.body.trim()) {
-    return jsonResponse({ error: 'Legenda (body) é obrigatória' }, 400);
+  // Mesma regra do createPost: limpar a legenda é permitido desde que sobre mídia — o que não pode
+  // é o post ficar sem nada.
+  const hasMediaOnUpdate = (payload.media_asset_ids?.length ?? 0) > 0 || !!payload.media_asset_id;
+  if (payload.body !== undefined && !payload.body.trim() && !hasMediaOnUpdate) {
+    return jsonResponse({ error: 'Escreva uma legenda ou anexe um arquivo' }, 400);
   }
 
   const post = await env.DB.prepare(`select id from scheduled_posts where id = ?`).bind(id).first<{ id: string }>();
