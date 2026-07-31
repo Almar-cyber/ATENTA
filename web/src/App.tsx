@@ -50,7 +50,7 @@ function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpe
             ))
           )}
         </button>
-        <Button variant="outline" onClick={onOpenConnections}>
+        <Button size="lg" variant="outline" onClick={onOpenConnections}>
           <Link2 className="size-4" />
           Conexões
         </Button>
