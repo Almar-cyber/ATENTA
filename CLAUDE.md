@@ -1,8 +1,9 @@
 # Social Scheduler
 
 Cloudflare Worker (poller + OAuth) + dashboard Vite/React em `web/`.
-Ver @README.md (setup e OAuth por plataforma) e @web/design.md (design system —
-leia antes de criar ou restilizar telas).
+Ver @README.md (setup e OAuth por plataforma), @design.md (specs do produto: modelo de dados,
+ciclo de vida, formatos e limites por rede, API) e @web/design.md (design system — leia antes de
+criar ou restilizar telas).
 
 ## Comandos
 
