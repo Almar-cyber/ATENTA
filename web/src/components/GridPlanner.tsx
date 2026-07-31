@@ -93,7 +93,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         </Button>
       </div>
 
-      <div className="grid max-w-2xl grid-cols-3 gap-1.5">
+      <div className="grid max-w-md grid-cols-3 gap-0.5">
         {entries.map(({ post, target }) => {
           const m = target.media[0];
           const video = isVideoMime(m?.mime_type);
@@ -107,7 +107,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(post.id)}
               onClick={() => onOpen({ post, target })}
-              className="group relative aspect-square cursor-grab overflow-hidden bg-muted active:cursor-grabbing"
+              className="group relative aspect-[3/4] cursor-grab overflow-hidden bg-muted active:cursor-grabbing"
             >
               {m?.public_url ? (
                 video ? (
