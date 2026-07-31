@@ -131,7 +131,7 @@ O que dá pra fazer:
   de detalhe de qualquer post agendado ("Como vai ficar").
 - **Consultar** — três visões, alternáveis por aba (inspirado no calendário editorial de
   ferramentas como mLabs/Buffer/Later): **lista** agrupada por dia, com thumbnail real da mídia; um
-  **calendário mensal** com um chip por post em cada dia (cor da borda = plataforma); e um **Grid
+  **calendário mensal** com um chip por post em cada dia (cor da borda = plataforma; passar o mouse abre um cartão com a thumbnail, a legenda, a conta e o status); e um **Grid
   IG** — a grade 3-colunas do perfil do Instagram, mais novo no canto superior esquerdo, que dá pra
   **arrastar e reordenar** antes de decidir a ordem final (ver abaixo). O status aparece na própria
   peça, não só na coluna de badge: borda tracejada = rascunho, ⚠ + fundo vermelho = falhou. Clicar

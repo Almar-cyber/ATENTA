@@ -6,6 +6,7 @@ import { dayKey } from '@/lib/format';
 import { requestPrefillDate } from '@/lib/composer-bus';
 import { Button } from '@/components/ui/button';
 import { PlatformIcon } from './PlatformIcon';
+import { PostHoverCard } from './PostHoverCard';
 import type { DialogSelection } from './PostDialog';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -118,13 +119,12 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
                     const failed = target.status === 'failed' || target.status === 'ambiguous';
                     const color = PLATFORM_COLORS[target.platform];
                     return (
+                      <PostHoverCard key={target.id} post={post} target={target}>
                       <span
-                        key={target.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpen({ post, target });
                         }}
-                        title={`${pad(hour)}:${pad(minute)} — ${target.account_name}`}
                         className={`block cursor-pointer truncate rounded-md px-1.5 py-1 text-xs leading-tight ${target.status === 'draft' ? 'opacity-70' : ''}`}
                         style={{ backgroundColor: `${color}1f`, borderLeft: `3px solid ${color}` }}
                       >
@@ -138,6 +138,7 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
                         </span>
                         <span className="truncate text-muted-foreground">{target.account_name}</span>
                       </span>
+                      </PostHoverCard>
                     );
                   })}
                 </button>

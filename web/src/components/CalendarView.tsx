@@ -2,13 +2,14 @@ import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Post, Target } from '@/lib/types';
-import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
+import { PLATFORM_COLORS } from '@/lib/platforms';
 import { dayKey } from '@/lib/format';
 import { requestPrefillDate } from '@/lib/composer-bus';
 import { updatePost } from '@/lib/api';
 import { useScheduler } from '@/store';
 import { Button } from '@/components/ui/button';
 import { PlatformIcon } from './PlatformIcon';
+import { PostHoverCard } from './PostHoverCard';
 import type { DialogSelection } from './PostDialog';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -142,25 +143,25 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
                 const failed = target.status === 'failed' || target.status === 'ambiguous';
                 const movable = target.status === 'draft' || target.status === 'queued';
                 return (
-                  <span
-                    key={target.id}
-                    draggable={movable ? true : undefined}
-                    onDragStart={movable ? () => (dragId.current = post.id) : undefined}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpen({ post, target });
-                    }}
-                    title={`${PLATFORM_LABELS[target.platform]} — ${target.account_name}`}
-                    className={`mb-0.5 flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs ${failed ? 'bg-destructive/15' : 'bg-muted'} ${target.status === 'draft' ? 'opacity-70' : ''} ${movable ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                    style={{ borderLeft: `3px ${target.status === 'draft' ? 'dashed' : 'solid'} ${PLATFORM_COLORS[target.platform]}` }}
-                  >
-                    {failed ? (
-                      <AlertTriangle className="size-2.5 shrink-0 text-destructive" />
-                    ) : (
-                      <PlatformIcon platform={target.platform} className="size-2.5 shrink-0" style={{ color: PLATFORM_COLORS[target.platform] }} />
-                    )}
-                    <span className="truncate">{target.account_name}</span>
-                  </span>
+                  <PostHoverCard key={target.id} post={post} target={target}>
+                    <span
+                      draggable={movable ? true : undefined}
+                      onDragStart={movable ? () => (dragId.current = post.id) : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpen({ post, target });
+                      }}
+                      className={`mb-0.5 flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs ${failed ? 'bg-destructive/15' : 'bg-muted'} ${target.status === 'draft' ? 'opacity-70' : ''} ${movable ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                      style={{ borderLeft: `3px ${target.status === 'draft' ? 'dashed' : 'solid'} ${PLATFORM_COLORS[target.platform]}` }}
+                    >
+                      {failed ? (
+                        <AlertTriangle className="size-2.5 shrink-0 text-destructive" />
+                      ) : (
+                        <PlatformIcon platform={target.platform} className="size-2.5 shrink-0" style={{ color: PLATFORM_COLORS[target.platform] }} />
+                      )}
+                      <span className="truncate">{target.account_name}</span>
+                    </span>
+                  </PostHoverCard>
                 );
               })}
               {entries.length > 3 && <span className="text-xs text-muted-foreground">+{entries.length - 3} mais</span>}

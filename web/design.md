@@ -50,6 +50,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `WeekView` | Vista "Semana": grade horas × 7 dias, cada post na sua hora agendada; clique em slot vazio pré-preenche data/hora. |
 | `CalendarView` | Vista "Mês": grade mensal; chip por post (cor = plataforma, tracejado = rascunho, ⚠ = falhou). Clique em dia vazio pré-preenche a data. |
 | `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer. Três espécies de tile — **agendado**, **publicado** (registro nosso + feed real, âncoras) e **prévia** (imagem sem post, borda tracejada dourada). A matemática de reordenação fica em `src/lib/gridOrder.ts`, fora do componente. |
+| `PostHoverCard` | Cartão que aparece ao passar o mouse num chip do calendário (Mês e Semana): thumbnail da peça na proporção do formato, legenda/título, conta, horário e status. Substitui o `title=` do navegador — o chip só cabe o nome da conta, e é a imagem que faz reconhecer o post. |
 | `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). |
 | `ConnectionsView` | Tela "Conexões" (botão no header): grid de cards por rede com as contas conectadas + status e botão "Conectar" que navega pra `/api/connect/:rede` (OAuth). Várias contas por rede aparecem como linhas separadas. |
 | `PlatformIcon` | Logo oficial de cada rede (SVG inline), colorido por `PLATFORM_COLORS`. Use onde a rede precisa ficar clara (lista, semana, chips, header, preview, dialog). |
