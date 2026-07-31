@@ -19,6 +19,7 @@ import {
   ALLOWED_MIME_TYPES,
   INSTAGRAM_STORY_VIDEO_LIMITS,
   PLATFORM_CAPTION_LIMITS,
+  PLATFORM_COLORS,
   PLATFORM_LABELS,
   PLATFORM_MEDIA_MAX,
   PLATFORM_MULTI_IMAGE_ONLY,
@@ -31,6 +32,7 @@ import type { PreviewInput } from './PostPreview';
 import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
+import { PlatformIcon } from './PlatformIcon';
 
 function newKey() {
   return crypto.randomUUID();
@@ -63,6 +65,7 @@ export function PostComposer({
   const [pinBoard, setPinBoard] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('all');
   // Per-account caption customization (Feature B): presence of a key means that account diverges
   // from the shared `body`; absence means it uses `body` as-is.
   const [captionOverrides, setCaptionOverrides] = useState<Record<string, string>>({});
@@ -183,12 +186,17 @@ export function PostComposer({
     [selected, accountsById]
   );
 
+  // Aba ativa do compositor: 'all' edita a legenda compartilhada, ou o id de uma conta pra editar
+  // só ela. Se a conta da aba for desmarcada, cai de volta pra 'all'.
+  const activeAccount = activeTab === 'all' ? null : (selectedAccounts.find((a) => a.id === activeTab) ?? null);
+  const tabAccounts = activeAccount ? [activeAccount] : selectedAccounts;
+
   const hints = useMemo(() => {
     const out: string[] = [];
-    if (selectedAccounts.length === 0) return out;
+    if (tabAccounts.length === 0) return out;
     const count = queue.length;
     const hasVideo = queue.some((q) => isVideoMime(q.mime_type));
-    for (const a of selectedAccounts) {
+    for (const a of tabAccounts) {
       const name = PLATFORM_LABELS[a.platform];
       const effectiveCaption = captionOverrides[a.id] ?? body;
       const limit = PLATFORM_CAPTION_LIMITS[a.platform];
@@ -221,12 +229,14 @@ export function PostComposer({
         }
       }
     }
-    return out;
-  }, [selectedAccounts, body, queue, isStory, captionOverrides]);
+    // Duas contas da mesma rede geravam a mesma dica duas vezes ("Instagram: 0/2200" repetido).
+    return Array.from(new Set(out));
+  }, [tabAccounts, body, queue, isStory, captionOverrides]);
 
+  // O preview segue a aba: 'all' mostra todas as contas, uma aba de conta mostra só ela.
   const previewItems: KeyedPreviewInput[] = useMemo(
     () =>
-      selectedAccounts.map((a) => ({
+      tabAccounts.map((a) => ({
         accountId: a.id,
         input: {
           platform: a.platform,
@@ -237,7 +247,7 @@ export function PostComposer({
           isStory,
         },
       })),
-    [selectedAccounts, body, captionOverrides, title, queue, isStory]
+    [tabAccounts, body, captionOverrides, title, queue, isStory]
   );
 
   async function submit(asDraft: boolean) {
@@ -349,6 +359,78 @@ export function PostComposer({
           />
         </div>
 
+        {/* Abas por conta: 'Todas' edita a legenda compartilhada; cada aba de conta edita só a
+            legenda daquela conta (e o preview à direita acompanha). Substitui a lista empilhada de
+            "Personalizar legenda", que ficava confusa com várias contas. */}
+        {selectedAccounts.length >= 2 && (
+          <div className="flex flex-wrap gap-1 border-b pb-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('all')}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${activeTab === 'all' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+            >
+              Todas
+            </button>
+            {selectedAccounts.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setActiveTab(a.id)}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${activeTab === a.id ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+              >
+                <PlatformIcon platform={a.platform} className="size-3 shrink-0" style={{ color: PLATFORM_COLORS[a.platform] }} />
+                {a.display_name}
+                {captionOverrides[a.id] !== undefined && <span className="size-1.5 rounded-full bg-primary" title="legenda própria" />}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {activeAccount ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="f-body-account">Legenda de {activeAccount.display_name}</Label>
+              {captionOverrides[activeAccount.id] !== undefined ? (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="xs"
+                  className="h-auto p-0"
+                  onClick={() =>
+                    setCaptionOverrides((prev) => {
+                      const next = { ...prev };
+                      delete next[activeAccount.id];
+                      return next;
+                    })
+                  }
+                >
+                  Usar legenda padrão
+                </Button>
+              ) : (
+                <span className="text-xs text-muted-foreground">usando a legenda padrão</span>
+              )}
+            </div>
+            <Textarea
+              id="f-body-account"
+              value={captionOverrides[activeAccount.id] ?? body}
+              onChange={(e) => setCaptionOverrides((prev) => ({ ...prev, [activeAccount.id]: e.target.value }))}
+              className="min-h-24"
+            />
+            <AnimatePresence>
+              {hints.map((h) => (
+                <motion.p
+                  key={h}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className={`text-xs ${h.includes('⚠') || h.includes('exige') || h.includes('máximo') || h.includes('apenas') || h.includes('muito') ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}
+                >
+                  {h}
+                </motion.p>
+              ))}
+            </AnimatePresence>
+          </div>
+        ) : (
         <div className="space-y-1.5">
           <Label htmlFor="f-body">Legenda</Label>
           <Textarea id="f-body" value={body} onChange={(e) => setBody(e.target.value)} className="min-h-24" />
@@ -366,6 +448,7 @@ export function PostComposer({
             ))}
           </AnimatePresence>
         </div>
+        )}
 
         {selectedAccounts.some((a) => a.platform === 'youtube') && (
           <div className="space-y-1.5">
@@ -378,63 +461,6 @@ export function PostComposer({
           <Label htmlFor="f-when">Quando publicar</Label>
           <Input id="f-when" type="datetime-local" value={scheduledLocal} onChange={(e) => setScheduledLocal(e.target.value)} />
         </div>
-
-        {selectedAccounts.length >= 2 && (
-          <div className="space-y-2 border-t pt-3">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Legendas por conta (opcional)
-            </Label>
-            <div className="space-y-2">
-              {selectedAccounts.map((a) => {
-                const override = captionOverrides[a.id];
-                const hasOverride = override !== undefined;
-                return (
-                  <div key={a.id} className="space-y-1">
-                    <div className="flex items-center justify-between gap-2 text-sm">
-                      <span className="text-muted-foreground">
-                        {PLATFORM_LABELS[a.platform]} — {a.display_name}
-                      </span>
-                      {hasOverride ? (
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="xs"
-                          className="h-auto p-0"
-                          onClick={() =>
-                            setCaptionOverrides((prev) => {
-                              const next = { ...prev };
-                              delete next[a.id];
-                              return next;
-                            })
-                          }
-                        >
-                          Usar legenda padrão
-                        </Button>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="xs"
-                          className="h-auto p-0"
-                          onClick={() => setCaptionOverrides((prev) => ({ ...prev, [a.id]: body }))}
-                        >
-                          Personalizar legenda
-                        </Button>
-                      )}
-                    </div>
-                    {hasOverride && (
-                      <Textarea
-                        value={override}
-                        onChange={(e) => setCaptionOverrides((prev) => ({ ...prev, [a.id]: e.target.value }))}
-                        className="min-h-16 text-sm"
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {selectedAccounts.some((a) => a.platform === 'instagram') && (
           <label className="flex items-center gap-2 text-sm font-medium">
