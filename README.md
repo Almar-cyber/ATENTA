@@ -50,8 +50,12 @@ mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando
   `--local`/miniflare não replica o `defer_foreign_keys` usado pra recriar a tabela referenciada; o D1
   remoto sim, e faz rollback atômico se algo falhar). Na Meta, conecta todas as contas que você
   autorizar no consentimento; na hora de postar, você escolhe em qual conta no compositor.
-- **YouTube ainda é pelo CLI** (`npm run youtube-auth`) — usa OAuth loopback de "Desktop app", que não
-  roda no navegador; o login web dele fica pra um próximo passo. Por isso o card aparece "em breve".
+- **YouTube também conecta pelo navegador** — precisa de uma credencial OAuth do tipo **Web application**
+  no Google Cloud (a de "Desktop app" que o CLI usa só aceita redirect loopback), com o redirect
+  `…/oauth/callback/youtube` registrado. O CLI (`npm run youtube-auth`) continua valendo.
+  Se a conta Google já autorizou o app antes, o callback adota a linha que o CLI havia criado sem
+  `external_account_id` em vez de tentar inserir uma segunda — era isso que derrubava o Worker com
+  "Error 1101" no meio do consentimento.
 - Cada rede precisa ter o `redirect_uri` `…/oauth/callback/<rede>` registrado no console dela (o mesmo
   que os CLIs já usavam) e os `client_id`/secret setados como secrets do Worker.
 
