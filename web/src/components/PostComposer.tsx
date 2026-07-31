@@ -32,10 +32,20 @@ import type { PreviewInput } from './PostPreview';
 import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
+import { SchedulePicker } from './SchedulePicker';
 import { ComposerHints } from './ComposerHints';
 import type { Hint } from './ComposerHints';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PlatformIcon } from './PlatformIcon';
+
+// Data reservada pro rascunho salvo sem horário definido: amanhã, 09:00.
+function defaultDraftSlot(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`;
+}
 
 function newKey() {
   return crypto.randomUUID();
@@ -69,6 +79,7 @@ export function PostComposer({
   const [submitting, setSubmitting] = useState(false);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('all');
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Per-account caption customization (Feature B): presence of a key means that account diverges
   // from the shared `body`; absence means it uses `body` as-is.
   const [captionOverrides, setCaptionOverrides] = useState<Record<string, string>>({});
@@ -276,12 +287,18 @@ export function PostComposer({
   // Só habilita o que faz sentido no estado atual: agendar exige conta + data + nenhum problema
   // pendente; rascunho exige apenas a conta (rascunho pula a validação de mídia, por design).
   const hasBlockingProblem = hints.some((h) => h.problem);
-  const canDraft = selected.size > 0;
-  const canSchedule = canDraft && !!scheduledLocal && !hasBlockingProblem;
+  // Conta o que REALMENTE existe: `selected` pode guardar id de conta que sumiu (desconectada
+  // enquanto o compositor estava aberto), e aí o botão ficava habilitado com o form vazio.
+  const canDraft = selectedAccounts.length > 0;
+  const canSchedule = canDraft && !hasBlockingProblem;
 
-  async function submit(asDraft: boolean) {
-    if (selected.size === 0) return toast.error('Selecione ao menos uma conta de destino.');
-    if (!scheduledLocal) return toast.error('Informe data/hora do agendamento.');
+  async function submit(asDraft: boolean, whenLocal?: string) {
+    if (selectedAccounts.length === 0) return toast.error('Selecione ao menos uma conta de destino.');
+    // Rascunho pode não ter data ainda (é justamente capturar antes de decidir); nesse caso vai
+    // pro próximo dia às 09:00 como espaço reservado, e a data real se escolhe ao promover pra fila.
+    const when = whenLocal ?? scheduledLocal ?? '';
+    const effectiveWhen = when || (asDraft ? defaultDraftSlot() : '');
+    if (!effectiveWhen) return toast.error('Escolha quando publicar.');
 
     setSubmitting(true);
     try {
@@ -296,7 +313,7 @@ export function PostComposer({
       const payload: CreatePostPayload = {
         title: title || undefined,
         body,
-        scheduled_for: localToIso(scheduledLocal),
+        scheduled_for: localToIso(effectiveWhen),
         target_account_ids: Array.from(selected),
         media_asset_ids: mediaIds.length ? mediaIds : undefined,
         youtube_privacy_status: ytPrivacy || undefined,
@@ -456,11 +473,6 @@ export function PostComposer({
           </div>
         )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="f-when">Quando publicar</Label>
-          <Input id="f-when" type="datetime-local" value={scheduledLocal} onChange={(e) => setScheduledLocal(e.target.value)} />
-        </div>
-
         {selectedAccounts.some((a) => a.platform === 'instagram') && (
           <label className="flex items-center gap-2 text-sm font-medium">
             <Checkbox checked={isStory} onCheckedChange={(v) => setIsStory(!!v)} />
@@ -513,13 +525,25 @@ export function PostComposer({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-4">
-        <Button size="lg" onClick={() => submit(false)} disabled={submitting || !canSchedule}>
+        <Button size="lg" onClick={() => setPickerOpen(true)} disabled={submitting || !canSchedule}>
           {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
         </Button>
         <Button size="lg" variant="outline" onClick={() => submit(true)} disabled={submitting || !canDraft}>
           Salvar como rascunho
         </Button>
       </div>
+
+      <SchedulePicker
+        open={pickerOpen}
+        initial={scheduledLocal || undefined}
+        confirmLabel={editingPostId ? 'Salvar alterações' : 'Agendar post'}
+        onOpenChange={setPickerOpen}
+        onConfirm={(local) => {
+          setScheduledLocal(local);
+          setPickerOpen(false);
+          submit(false, local);
+        }}
+      />
     </div>
   );
 }
