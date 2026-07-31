@@ -2,13 +2,12 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Platform, QueuedMedia } from '@/lib/types';
 import {
-  INSTAGRAM_REELS_RECOMMENDED,
-  INSTAGRAM_STORY_RECOMMENDED,
   PLATFORM_CAPTION_LIMITS,
   PLATFORM_COLORS,
   PLATFORM_LABELS,
   PLATFORM_PREVIEW_SHAPE,
   PLATFORM_RECOMMENDED_MEDIA,
+  findFormat,
   isVideoMime,
 } from '@/lib/platforms';
 import { useMediaUrl, videoPosterUrl } from '@/lib/useMediaUrl';
@@ -20,7 +19,9 @@ export interface PreviewInput {
   caption: string;
   title?: string;
   media: QueuedMedia[];
-  isStory?: boolean;
+  /** Formato escolhido no compositor ('post' | 'reel' | 'story' | 'video' | 'short'). É ele que
+   *  define a proporção do preview e o rótulo — não o tipo do arquivo. */
+  format?: string;
   /** Imagem de capa escolhida no composer. É o que a rede mostra parado no feed, então tem
    *  prioridade sobre o frame do vídeo na pré-visualização. */
   cover?: File;
@@ -54,7 +55,7 @@ function MediaFrame({ item, cover }: { item: QueuedMedia | undefined; cover?: Fi
 }
 
 export function PostPreview({ input }: { input: PreviewInput }) {
-  const { platform, accountName, caption, title, media, isStory, cover } = input;
+  const { platform, accountName, caption, title, media, format, cover } = input;
   const color = PLATFORM_COLORS[platform];
   const limit = PLATFORM_CAPTION_LIMITS[platform];
   const over = limit != null && caption.length > limit;
@@ -65,19 +66,13 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   const safeIndex = Math.min(index, Math.max(0, media.length - 1));
   const current = media[safeIndex];
 
-  // Vídeo pro Instagram sai como **Reel** — a API não tem "vídeo de feed" separado. Então o preview
-  // mostra 9:16 e diz Reels, em vez de fingir um quadrado que não vai existir.
-  const isReel = platform === 'instagram' && !isStory && isVideoMime(current?.mime_type);
-  const label = isReel ? `${PLATFORM_LABELS[platform]} · Reels` : PLATFORM_LABELS[platform];
-  const shape = isStory || isReel ? 'story' : PLATFORM_PREVIEW_SHAPE[platform];
-
-  // Tamanho recomendado da rede + aviso quando o arquivo atual tem outra proporção (a plataforma
-  // corta pra caber). Só dá pra avaliar quando o upload capturou width/height.
-  const recommended = isStory
-    ? INSTAGRAM_STORY_RECOMMENDED
-    : isReel
-      ? INSTAGRAM_REELS_RECOMMENDED
-      : PLATFORM_RECOMMENDED_MEDIA[platform];
+  // Proporção, rótulo e tamanho ideal vêm do FORMATO escolhido (Reel é 9:16, post de feed é 4:5),
+  // não do arquivo — é o formato que decide onde a peça vai parar na rede.
+  const spec = findFormat(platform, format);
+  const isStory = spec?.id === 'story';
+  const label = spec && spec.id !== 'post' && spec.id !== 'video' ? `${PLATFORM_LABELS[platform]} · ${spec.label}` : PLATFORM_LABELS[platform];
+  const shape = spec?.shape ?? PLATFORM_PREVIEW_SHAPE[platform];
+  const recommended = spec?.recommended ?? PLATFORM_RECOMMENDED_MEDIA[platform];
   const willCrop = useMemo(() => {
     if (!current?.width || !current?.height) return false;
     const fileRatio = current.width / current.height;
@@ -100,7 +95,7 @@ export function PostPreview({ input }: { input: PreviewInput }) {
           <div className="text-sm font-semibold">{accountName}</div>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <PlatformIcon platform={platform} className="size-3 shrink-0" style={{ color }} />
-            {isStory ? `${label} · Story` : label}
+            {label}
           </div>
         </div>
       </div>

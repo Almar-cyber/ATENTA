@@ -151,3 +151,87 @@ export function isFeedRatioOk(width?: number | null, height?: number | null): bo
   const ratio = width / height;
   return ratio >= FEED_MIN_ASPECT_RATIO && ratio <= FEED_MAX_ASPECT_RATIO;
 }
+
+// ---------------------------------------------------------------------------
+// Formato do post dentro da rede
+//
+// Uma mesma conta publica coisas diferentes, e a diferença é real na API: no Instagram o
+// `media_type` do container muda (VIDEO / REELS / STORIES) e cada um tem regra e capa própria.
+// Por isso o formato é ESCOLHIDO no compositor, não adivinhado a partir do arquivo.
+//
+// No YouTube não há escolha na API: ele classifica como Short sozinho (vertical, até 3min). A
+// opção aqui só ajusta a pré-visualização e os avisos.
+export interface PostFormat {
+  id: string;
+  label: string;
+  hint: string;
+  shape: PreviewShape;
+  recommended: MediaSpec;
+  /** Vídeo obrigatório, imagem proibida, ou tanto faz. */
+  media: 'video' | 'image' | 'any';
+  /** Aceita mais de um arquivo (carrossel). */
+  multiple: boolean;
+  /** Aceita imagem de capa própria. */
+  coverImage: boolean;
+}
+
+export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
+  instagram: [
+    {
+      id: 'post',
+      label: 'Post',
+      hint: 'Feed. Foto, carrossel de até 10, ou vídeo — sem capa própria.',
+      shape: 'square',
+      recommended: { width: 1080, height: 1350, ratio: '4:5' },
+      media: 'any',
+      multiple: true,
+      coverImage: false,
+    },
+    {
+      id: 'reel',
+      label: 'Reel',
+      hint: 'Vertical, um vídeo só, entra na aba de Reels. Aceita capa.',
+      shape: 'story',
+      recommended: { width: 1080, height: 1920, ratio: '9:16' },
+      media: 'video',
+      multiple: false,
+      coverImage: true,
+    },
+    {
+      id: 'story',
+      label: 'Story',
+      hint: 'Some em 24h. Um arquivo, até 60s, e a legenda não aparece.',
+      shape: 'story',
+      recommended: { width: 1080, height: 1920, ratio: '9:16' },
+      media: 'any',
+      multiple: false,
+      coverImage: false,
+    },
+  ],
+  youtube: [
+    {
+      id: 'video',
+      label: 'Vídeo',
+      hint: 'Horizontal, sem limite de duração.',
+      shape: 'wide',
+      recommended: { width: 1920, height: 1080, ratio: '16:9' },
+      media: 'video',
+      multiple: false,
+      coverImage: true,
+    },
+    {
+      id: 'short',
+      label: 'Short',
+      hint: 'Vertical e até 3min. O YouTube classifica sozinho — aqui é só a previsão.',
+      shape: 'story',
+      recommended: { width: 1080, height: 1920, ratio: '9:16' },
+      media: 'video',
+      multiple: false,
+      coverImage: true,
+    },
+  ],
+};
+
+export function findFormat(platform: Platform, id: string | undefined): PostFormat | undefined {
+  return PLATFORM_FORMATS[platform]?.find((f) => f.id === id);
+}

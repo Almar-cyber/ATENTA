@@ -40,9 +40,10 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 
 | Componente | Papel |
 | --- | --- |
-| `PostComposer` | Formulário de criação, aberto num **modal amplo em split** (form à esquerda, preview ao vivo à direita) pelo botão "Novo post". Campos em **cascata**: só mostra Contas de destino no início; o resto (legenda, quando, mídia) aparece após escolher ≥1 conta, e os específicos são gated por rede (Título só YouTube, Story só Instagram, board só Pinterest). |
+| `PostComposer` | Formulário de criação, aberto num **modal amplo em split** (form à esquerda, preview ao vivo à direita) pelo botão "Novo post". Campos em **cascata**: só mostra Contas de destino no início; o resto (legenda, quando, mídia) aparece após escolher ≥1 conta, e os específicos são gated por rede (Título só YouTube, board só Pinterest). O **formato** (`FormatPicker`) vem logo depois das contas, antes da mídia. |
 | `MediaCropDialog` | Recorte com arrastar: a imagem entra em "cover" no quadro, a pessoa arrasta/aproxima e escolhe entre 4:5, 1:1 e 1.91:1 (as proporções que a API da Meta publica). Devolve um `File` novo — o original não é enviado. Abre sozinho quando uma foto fora da faixa entra na fila com Instagram/Facebook selecionados, e manualmente pelo ✂ no tile. |
 | `MediaQueueGrid` | Grade de thumbnails da fila de mídia do composer — arrastar reordena (mesmo padrão de DnD do `GridPlanner`), hover revela trocar/remover. Trocar substitui só aquele slot (mesma posição), sem desmontar a ordem dos outros. |
+| `FormatPicker` | Escolha do formato dentro da rede (Post/Reel/Story no Instagram, Vídeo/Short no YouTube). Vem **antes da mídia** no composer: é o formato que define o que a rede aceita e, no Instagram, o `media_type` do container. Os formatos ficam em `PLATFORM_FORMATS` (`lib/platforms.ts`) — não hard-code plataforma no componente. |
 | `AccountPicker` | Seletor de contas de destino do composer — chips (`ToggleGroup` multi-seleção do shadcn) em vez de lista de checkbox; conta inativa fica desabilitada com `Tooltip` explicando o motivo. |
 | `PostPreview` | Card que imita o formato de cada rede (IG quadrado, YouTube 16:9, Story 9:16, Pinterest 3:4). Reusado no composer e no dialog. |
 | `ListView` | Lista agrupada por dia, thumbnail real, badge de status, ações inline. |
@@ -50,7 +51,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `CalendarView` | Vista "Mês": grade mensal; chip por post (cor = plataforma, tracejado = rascunho, ⚠ = falhou). Clique em dia vazio pré-preenche a data. |
 | `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer. Três espécies de tile — **agendado**, **publicado** (registro nosso + feed real, âncoras) e **prévia** (imagem sem post, borda tracejada dourada). A matemática de reordenação fica em `src/lib/gridOrder.ts`, fora do componente. |
 | `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). |
-| `ConnectionsView` | Tela "Conexões" (botão no header): grid de cards por rede com as contas conectadas + status e botão "Conectar" que navega pra `/api/connect/:rede` (OAuth). Várias contas por rede aparecem como linhas separadas. YouTube fica "em breve" (ainda usa CLI). |
+| `ConnectionsView` | Tela "Conexões" (botão no header): grid de cards por rede com as contas conectadas + status e botão "Conectar" que navega pra `/api/connect/:rede` (OAuth). Várias contas por rede aparecem como linhas separadas. |
 | `PlatformIcon` | Logo oficial de cada rede (SVG inline), colorido por `PLATFORM_COLORS`. Use onde a rede precisa ficar clara (lista, semana, chips, header, preview, dialog). |
 | `AlertBanner` | Card recuado de falhas/reautenticação no topo. |
 | `Thumb` | Thumbnail pequeno com fallback pra glyph quando a URL não resolve. |
@@ -75,7 +76,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   abre o modal de sucesso. Meta cobre Instagram+Facebook juntos; várias contas por rede convivem
   (o schema é `unique(platform, external_account_id)`, ver migração 0002).
 - **Toasts**: `sonner` (`toast.success/error`) pra todo feedback de ação; nunca `alert()`.
-- **Aspects do preview**: `PLATFORM_PREVIEW_SHAPE` mapeia plataforma → proporção. Story sempre 9:16.
+- **Aspects do preview**: quem manda é o **formato** (`PLATFORM_FORMATS[p].shape`) — Reel/Story/Short são 9:16, post de feed é 4:5. `PLATFORM_PREVIEW_SHAPE` é só o fallback de quem não tem formatos.
 - **Motion**: entradas de lista com stagger sutil (`delay: i*0.015`, teto 0.3s); troca de view com
   fade+slide de 150ms (evite `AnimatePresence mode="wait"` numa view que também sofre poll —
   já causou um freeze real, ver `App.tsx`: prefira remount-and-fade via `key`); itens da fila de

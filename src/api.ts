@@ -254,6 +254,9 @@ interface CreatePostBody {
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
   instagram_as_story?: boolean;
+  /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
+   *  continua aceito pra não quebrar chamadas antigas do CLI. */
+  instagram_format?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   save_as?: string;
@@ -275,6 +278,9 @@ interface UpdatePostBody {
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
   instagram_as_story?: boolean;
+  /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
+   *  continua aceito pra não quebrar chamadas antigas do CLI. */
+  instagram_format?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   target_caption_overrides?: Record<string, string>;
@@ -306,6 +312,7 @@ interface ValidateAccountsAndMediaParams {
   youtubePrivacyStatus?: string;
   pinterestBoardId?: string;
   instagramAsStory?: boolean;
+  instagramFormat?: string;
   coverMediaId?: string;
   coverTimestampMs?: number;
   // createPost uses one status for every target (from save_as); updatePost's full-replace uses a
@@ -385,8 +392,14 @@ async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMed
     if (platform === 'pinterest' && params.pinterestBoardId) {
       options.board_id = params.pinterestBoardId;
     }
-    if (platform === 'instagram' && params.instagramAsStory) {
-      options.as_story = true;
+    if (platform === 'instagram') {
+      // O formato define o media_type do container (VIDEO / REELS / STORIES). `as_story` fica
+      // gravado junto só pra compatibilidade com o que lê o campo antigo.
+      const format = params.instagramFormat ?? (params.instagramAsStory ? 'story' : undefined);
+      if (format) {
+        options.format = format;
+        if (format === 'story') options.as_story = true;
+      }
     }
     // Capa do vídeo. YouTube e Instagram aceitam uma IMAGEM própria; o TikTok só deixa escolher um
     // frame do próprio vídeo (timestamp). Guarda os dois e cada adapter usa o que sua API suporta.
@@ -562,6 +575,7 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
       youtubePrivacyStatus: payload.youtube_privacy_status,
       pinterestBoardId: payload.pinterest_board_id,
       instagramAsStory: payload.instagram_as_story,
+      instagramFormat: payload.instagram_format,
       coverMediaId: payload.cover_media_id,
       coverTimestampMs: payload.cover_timestamp_ms,
       // An account not previously targeted (newly added during this edit) defaults to 'queued' —

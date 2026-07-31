@@ -36,7 +36,7 @@ export interface CreatePostPayload {
   media_asset_ids?: string[];
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
-  instagram_as_story?: boolean;
+  instagram_format?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   save_as?: 'draft';

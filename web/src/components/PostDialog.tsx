@@ -14,6 +14,14 @@ import { PostPreview } from './PostPreview';
 import { PlatformAvatar } from './PlatformAvatar';
 import { InlineAlert } from '@/components/ui/inline-alert';
 
+// Formato gravado no target. Posts anteriores ao seletor de formato não têm `format` — vale o
+// `as_story` antigo e, na falta dele, a regra de então (vídeo virava Reel).
+function igFormatOf(options: Record<string, unknown> | undefined): string | undefined {
+  const format = options?.format;
+  if (typeof format === 'string') return format;
+  return options?.as_story ? 'story' : undefined;
+}
+
 export interface DialogSelection {
   post: Post;
   target: Target;
@@ -153,7 +161,7 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                       mime_type: m.mime_type,
                       public_url: m.public_url,
                     })),
-                    isStory: !!target.options?.as_story,
+                    format: igFormatOf(target.options),
                   }}
                 />
               </div>

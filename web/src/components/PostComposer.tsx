@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useScheduler } from '@/store';
@@ -20,6 +19,7 @@ import {
   ALLOWED_MIME_TYPES,
   INSTAGRAM_STORY_VIDEO_LIMITS,
   PLATFORM_CAPTION_LIMITS,
+  PLATFORM_FORMATS,
   PLATFORM_COLORS,
   PLATFORM_LABELS,
   PLATFORM_MEDIA_MAX,
@@ -27,10 +27,12 @@ import {
   PLATFORM_REQUIRES_MEDIA,
   PLATFORM_VIDEO_LIMITS,
   YOUTUBE_LONG_VIDEO_WARN_SECONDS,
+  findFormat,
   isFeedRatioOk,
   isVideoMime,
 } from '@/lib/platforms';
 import { MediaCropDialog } from './MediaCropDialog';
+import { FormatPicker } from './FormatPicker';
 import type { PreviewInput } from './PostPreview';
 import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
@@ -48,6 +50,14 @@ function defaultDraftSlot(): string {
   d.setHours(9, 0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`;
+}
+
+// Formato gravado num target já existente (editar/duplicar). Posts anteriores ao seletor não têm
+// `format` — aí vale o `as_story` antigo e, na falta dele, a regra de então: vídeo era Reel.
+function igFormatOf(options: Record<string, unknown> | undefined): string {
+  const format = options?.format;
+  if (format === 'post' || format === 'reel' || format === 'story') return format;
+  return options?.as_story ? 'story' : 'post';
 }
 
 function newKey() {
@@ -76,7 +86,11 @@ export function PostComposer({
   const [scheduledLocal, setScheduledLocal] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [queue, setQueue] = useState<QueuedMedia[]>([]);
-  const [isStory, setIsStory] = useState(false);
+  // Formato escolhido por rede (Instagram: post/reel/story; YouTube: video/short). `formatTouched`
+  // guarda se a pessoa já mexeu — só enquanto não mexeu é que anexar um vídeo muda o padrão pra Reel.
+  const [formats, setFormats] = useState<Record<string, string>>({ instagram: 'post', youtube: 'video' });
+  const [formatTouched, setFormatTouched] = useState(false);
+  const isStory = formats.instagram === 'story';
   const [ytPrivacy, setYtPrivacy] = useState('');
   const [pinBoard, setPinBoard] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -103,7 +117,8 @@ export function PostComposer({
       setSelected(new Set([target.account_id]));
       setYtPrivacy((target.options?.privacyStatus as string) ?? '');
       setPinBoard((target.options?.board_id as string) ?? '');
-      setIsStory(!!target.options?.as_story);
+      setFormats((f) => ({ ...f, instagram: igFormatOf(target.options) }));
+      setFormatTouched(true);
       setQueue(
         (target.media ?? []).map((m) => ({
           key: newKey(),
@@ -132,7 +147,8 @@ export function PostComposer({
       setSelected(new Set(post.targets.map((t) => t.account_id)));
       setYtPrivacy((post.targets.find((t) => t.platform === 'youtube')?.options?.privacyStatus as string) ?? '');
       setPinBoard((post.targets.find((t) => t.platform === 'pinterest')?.options?.board_id as string) ?? '');
-      setIsStory(post.targets.some((t) => !!t.options?.as_story));
+      setFormats((f) => ({ ...f, instagram: igFormatOf(post.targets.find((t) => t.platform === 'instagram')?.options) }));
+      setFormatTouched(true);
       setQueue(
         (post.targets[0]?.media ?? []).map((m) => ({
           key: newKey(),
@@ -203,6 +219,12 @@ export function PostComposer({
     );
     setQueue((q) => [...q, ...add]);
 
+    // Anexou vídeo sem ter tocado no seletor: assume Reel/Short, que é o que quase sempre se quer
+    // — mas o seletor está logo acima, visível, pra trocar pra Post.
+    if (!formatTouched && add.some((i) => isVideoMime(i.mime_type))) {
+      setFormats((f) => ({ ...f, instagram: f.instagram === 'story' ? 'story' : 'reel', youtube: 'video' }));
+    }
+
     // Foto fora da faixa que a Meta publica: em vez de recusar no envio (o erro só aparecia lá na
     // frente, sem saída), já abre o recorte. A pessoa escolhe o que fica visível arrastando.
     if (needsFeedRatio) {
@@ -240,7 +262,8 @@ export function PostComposer({
     setScheduledLocal('');
     setSelected(new Set());
     setQueue([]);
-    setIsStory(false);
+    setFormats({ instagram: 'post', youtube: 'video' });
+    setFormatTouched(false);
     setYtPrivacy('');
     setPinBoard('');
     setCaptionOverrides({});
@@ -265,7 +288,9 @@ export function PostComposer({
 
   // Instagram/Facebook publicam foto de feed só entre 4:5 e 1.91:1 (Story tem regra própria, 9:16,
   // e não passa por aqui).
-  const needsFeedRatio = !isStory && selectedAccounts.some((a) => a.platform === 'instagram' || a.platform === 'facebook');
+  const needsFeedRatio = selectedAccounts.some(
+    (a) => (a.platform === 'instagram' && formats.instagram === 'post') || a.platform === 'facebook'
+  );
 
   // Aba ativa do compositor: 'all' edita a legenda compartilhada, ou o id de uma conta pra editar
   // só ela. Se a conta da aba for desmarcada, cai de volta pra 'all'.
@@ -304,16 +329,22 @@ export function PostComposer({
       if (count > 1 && hasVideo && PLATFORM_MULTI_IMAGE_ONLY[a.platform]) {
         out.push({ field: 'media', problem: true, text: `Use só imagens no carrossel do ${name} (vídeo vai sozinho)` });
       }
-      if (count > 1 && a.platform === 'instagram' && isStory) {
-        out.push({ field: 'media', problem: true, text: 'Deixe só um arquivo para publicar como Story' });
-      }
-      // Vídeo no Instagram não tem "post de vídeo no feed": a API publica como Reel. Diz isso antes
-      // de agendar, senão a pessoa descobre olhando o perfil.
-      if (a.platform === 'instagram' && !isStory && hasVideo && count === 1) {
-        out.push({ field: 'media', problem: false, text: 'Vídeo no Instagram é publicado como Reel (9:16)' });
+      // Regras do FORMATO escolhido (Reel só vídeo, Story um arquivo só, ...), espelhando o
+      // validate() do adapter — que continua sendo a autoridade.
+      const spec = findFormat(a.platform, formats[a.platform]);
+      if (spec && count > 0) {
+        if (!spec.multiple && count > 1) {
+          out.push({ field: 'media', problem: true, text: `Deixe um arquivo só — ${spec.label} não aceita carrossel` });
+        }
+        if (spec.media === 'video' && !hasVideo) {
+          out.push({ field: 'media', problem: true, text: `${spec.label} precisa de um vídeo` });
+        }
+        if (spec.id === 'post' && hasVideo && count > 1) {
+          out.push({ field: 'media', problem: true, text: 'Carrossel do Instagram só aceita imagens — o vídeo vai sozinho' });
+        }
       }
       // Só imagem: vídeo tem outra faixa e o corte aqui não se aplica.
-      if (needsFeedRatio && (a.platform === 'instagram' || a.platform === 'facebook')) {
+      if (needsFeedRatio && ((a.platform === 'instagram' && formats.instagram === 'post') || a.platform === 'facebook')) {
         for (const item of queue) {
           if (isVideoMime(item.mime_type) || isFeedRatioOk(item.width, item.height)) continue;
           out.push({
@@ -348,7 +379,7 @@ export function PostComposer({
     // Duas contas da mesma rede geravam a mesma dica duas vezes ("Instagram: 0/2200" repetido).
     const seen = new Set<string>();
     return out.filter((h) => (seen.has(h.text) ? false : (seen.add(h.text), true)));
-  }, [tabAccounts, body, queue, isStory, captionOverrides, needsFeedRatio]);
+  }, [tabAccounts, body, queue, formats, captionOverrides, needsFeedRatio]);
 
   // O preview segue a aba: 'all' mostra todas as contas, uma aba de conta mostra só ela.
   const previewItems: KeyedPreviewInput[] = useMemo(
@@ -361,13 +392,13 @@ export function PostComposer({
           caption: captionOverrides[a.id] ?? body,
           title,
           media: queue,
-          isStory,
+          format: formats[a.platform],
           // A capa é o que a rede mostra parado no feed — então é ela que o preview deve mostrar,
           // não um frame do vídeo. Só pra quem aceita imagem de capa (YouTube/Instagram).
           cover: coverFile && (a.platform === 'youtube' || a.platform === 'instagram') ? coverFile : undefined,
         },
       })),
-    [tabAccounts, body, captionOverrides, title, queue, isStory, coverFile]
+    [tabAccounts, body, captionOverrides, title, queue, formats, coverFile]
   );
 
   // Só habilita o que faz sentido no estado atual: agendar exige conta + data + nenhum problema
@@ -381,6 +412,11 @@ export function PostComposer({
   );
   const acceptsCoverImage = coverImageNetworks.length > 0;
   const acceptsCoverFrame = coverFrameNetworks.length > 0;
+
+  // Redes das contas escolhidas que têm mais de um formato possível.
+  const formatPlatforms = Array.from(new Set(selectedAccounts.map((a) => a.platform))).filter(
+    (p) => (PLATFORM_FORMATS[p]?.length ?? 0) > 1
+  );
 
   const hasBlockingProblem = hints.some((h) => h.problem);
   // Conta o que REALMENTE existe: `selected` pode guardar id de conta que sumiu (desconectada
@@ -419,7 +455,7 @@ export function PostComposer({
         media_asset_ids: mediaIds.length ? mediaIds : undefined,
         youtube_privacy_status: ytPrivacy || undefined,
         pinterest_board_id: pinBoard || undefined,
-        instagram_as_story: isStory || undefined,
+        instagram_format: formats.instagram,
         cover_media_id: coverMediaId,
         cover_timestamp_ms: Number.isFinite(coverMs) ? coverMs : undefined,
         save_as: asDraft ? 'draft' : undefined,
@@ -484,6 +520,21 @@ export function PostComposer({
 
         {selectedAccounts.length > 0 && (
           <div className="space-y-4">
+        {/* Formato antes de tudo: é ele que define o que a rede aceita como mídia (Reel é um vídeo
+            só, carrossel é só imagem) e onde a peça vai parar. Antes isso era adivinhado do arquivo,
+            e não dava pra publicar vídeo no feed nem saber, antes de agendar, se ia virar Reel. */}
+        {formatPlatforms.map((platform) => (
+          <FormatPicker
+            key={platform}
+            platform={platform}
+            value={formats[platform]}
+            onChange={(id) => {
+              setFormatTouched(true);
+              setFormats((f) => ({ ...f, [platform]: id }));
+            }}
+          />
+        ))}
+
         {/* Mídia vem antes da legenda: você escolhe o material e escreve olhando pra ele (é a ordem
             do próprio Instagram, e casa com o princípio "a pré-visualização é o herói"). */}
         <div className="space-y-1.5">
@@ -636,12 +687,7 @@ export function PostComposer({
           </div>
         )}
 
-        {selectedAccounts.some((a) => a.platform === 'instagram') && (
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <Checkbox checked={isStory} onCheckedChange={(v) => setIsStory(!!v)} />
-            Publicar como Story (Instagram)
-          </label>
-        )}
+
 
         {selectedAccounts.some((a) => a.platform === 'youtube') && (
           <div className="space-y-1.5">

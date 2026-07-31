@@ -239,13 +239,28 @@ filtro `image/*` e sobe pro R2 sem erro, mas toda plataforma recusa na hora de p
 `POST /api/media` (e o input do dashboard) rejeitam esses formatos na entrada, com a mensagem
 mandando exportar antes. A allowlist fica em `ALLOWED_MIME_TYPES` (`src/api.ts`).
 
-**Reels (Instagram)** — vídeo pro Instagram **é Reel**: a API de publicação não tem "vídeo de
-feed" separado (o adapter manda `media_type: 'REELS'`). O dashboard mostra isso — a
-pré-visualização vira 9:16 e diz "Instagram · Reels", e a capa passa a ser a capa do Reel.
+### Formato do post
 
-**Stories (Instagram)** — checkbox no formulário. Aceita exatamente um arquivo (imagem ou vídeo);
-a API da Meta não publica Stories em carrossel nem elementos interativos (stickers, links, música),
-só a imagem/vídeo base.
+O formato **é escolhido** no compositor, logo abaixo das contas — antes ele era adivinhado do
+arquivo (anexou vídeo, virava Reel), e não havia como publicar vídeo no feed nem como saber, antes
+de agendar, onde a peça ia parar. A escolha muda o `media_type` do container na Meta, então é uma
+diferença real de API, não só de preview:
+
+| Instagram | `media_type` | Mídia | Capa |
+| --- | --- | --- | --- |
+| **Post** | `VIDEO` (ou nenhum, se for imagem) | foto, carrossel de até 10, ou um vídeo | só frame do vídeo |
+| **Reel** | `REELS` | um vídeo, vertical | imagem própria (`cover_url`) ou frame |
+| **Story** | `STORIES` | um arquivo, até 60s | — |
+
+Story some em 24h e **não exibe legenda**; a API também não publica Story em carrossel nem
+elementos interativos (stickers, links, música), só a imagem/vídeo base.
+
+No **YouTube** a escolha (Vídeo / Short) é só previsão: a API não tem flag de Short — o YouTube
+classifica sozinho quando o vídeo é vertical e tem até 3min. A opção ajusta a pré-visualização e os
+avisos. As demais redes têm um formato só e nem mostram o seletor.
+
+Posts criados antes disso não têm o campo `format` gravado; o adapter cai na regra antiga
+(`as_story`, e vídeo = Reel), então nada muda pra eles.
 
 ## Enfileirando um post (via CLI, alternativa ao dashboard)
 

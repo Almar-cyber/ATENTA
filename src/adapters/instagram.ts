@@ -20,7 +20,8 @@ interface AdapterState {
 const CAROUSEL_MAX_ITEMS = 10;
 
 const MIN_VIDEO_DURATION_SECONDS = 3;
-const MAX_REELS_DURATION_SECONDS = 900;
+// Reel e vídeo de feed compartilham o mesmo teto documentado (15min); o Story é bem menor.
+const MAX_VIDEO_DURATION_SECONDS = 900;
 const MAX_STORY_DURATION_SECONDS = 60;
 
 // Feed/carousel photo aspect-ratio range Meta documents for Content Publishing
@@ -36,6 +37,18 @@ const MAX_FEED_ASPECT_RATIO = 1.91;
 // media container, then poll it via checkStatus() until Meta finishes processing before calling
 // media_publish. image_url/video_url must be publicly fetchable (Meta pulls the bytes itself),
 // which is why this is the one adapter that actually needs the R2 custom domain.
+// O formato é escolhido no compositor e gravado em `options.format`. Posts criados antes do
+// seletor existir não têm esse campo — aí vale o `as_story` antigo e, na falta dele, a regra que
+// valia então: vídeo virava Reel, imagem virava post de feed.
+type IgFormat = 'post' | 'reel' | 'story';
+
+function igFormat(rawOptions: unknown, media: MediaAsset[]): IgFormat {
+  const options = (rawOptions ?? {}) as { format?: string; as_story?: boolean };
+  if (options.format === 'post' || options.format === 'reel' || options.format === 'story') return options.format;
+  if (options.as_story) return 'story';
+  return media.some((m) => m.mime_type.startsWith('video/')) ? 'reel' : 'post';
+}
+
 export const instagramAdapter: PlatformAdapter = {
   platform: 'instagram',
 
@@ -52,10 +65,20 @@ export const instagramAdapter: PlatformAdapter = {
     if (media.length > CAROUSEL_MAX_ITEMS) {
       throw new Error(`instagram: carousel supports at most ${CAROUSEL_MAX_ITEMS} items (got ${media.length})`);
     }
-    const options = target.options as { as_story?: boolean };
-    if (options.as_story && media.length > 1) {
-      throw new Error('instagram: a Story takes exactly one image or video (no carousel Stories via the API)');
+    const format = igFormat(target.options, media);
+    const hasVideo = media.some((m) => m.mime_type.startsWith('video/'));
+
+    if (format === 'story' && media.length > 1) {
+      throw new Error('instagram: um Story leva exatamente uma imagem ou vídeo (a API não publica Story em carrossel)');
     }
+    if (format === 'reel') {
+      if (media.length > 1) throw new Error('instagram: um Reel leva um vídeo só — para vários arquivos, use o formato Post');
+      if (!hasVideo) throw new Error('instagram: Reel precisa de um vídeo — para publicar imagem, use o formato Post');
+    }
+    if (format === 'post' && hasVideo && media.length > 1) {
+      throw new Error('instagram: carrossel só aceita imagens — o vídeo tem que ir sozinho');
+    }
+
     for (const asset of media) {
       if (!asset.public_url) {
         throw new Error('instagram: media needs a public_url (custom R2 domain) — see README Pendências');
@@ -65,9 +88,9 @@ export const instagramAdapter: PlatformAdapter = {
           'instagram',
           asset,
           MIN_VIDEO_DURATION_SECONDS,
-          options.as_story ? MAX_STORY_DURATION_SECONDS : MAX_REELS_DURATION_SECONDS
+          format === 'story' ? MAX_STORY_DURATION_SECONDS : MAX_VIDEO_DURATION_SECONDS
         );
-      } else if (!options.as_story && asset.width != null && asset.height != null) {
+      } else if (format === 'post' && asset.width != null && asset.height != null) {
         const ratio = asset.width / asset.height;
         if (ratio < MIN_FEED_ASPECT_RATIO || ratio > MAX_FEED_ASPECT_RATIO) {
           throw new Error(`instagram: proporção da imagem fora do permitido (${asset.width}x${asset.height}) — use entre 4:5 e 1.91:1`);
@@ -83,7 +106,7 @@ export const instagramAdapter: PlatformAdapter = {
 
     const igUserId = account.external_account_id;
     const caption = target.caption_override ?? '';
-    const options = target.options as { as_story?: boolean };
+    const format = igFormat(target.options, media);
 
     let containerId: string;
     if (media.length > 1) {
@@ -115,13 +138,13 @@ export const instagramAdapter: PlatformAdapter = {
       // Same container+publish flow for feed posts, Reels, and Stories — only media_type differs.
       // Meta doesn't support interactive Story elements (stickers, links, music) via the API
       // regardless — this only ever posts the base image/video.
-      if (options.as_story) {
+      const cover = target.options as { cover_media_id?: string; cover_timestamp_ms?: number };
+      if (format === 'story') {
         body.set('media_type', 'STORIES');
-      } else if (asset.mime_type.startsWith('video/')) {
+      } else if (format === 'reel') {
         body.set('media_type', 'REELS');
         // Capa do Reel: a Meta aceita uma imagem hospedada (cover_url) OU um frame do vídeo
         // (thumb_offset, em ms). cover_url tem prioridade quando as duas vierem preenchidas.
-        const cover = target.options as { cover_media_id?: string; cover_timestamp_ms?: number };
         if (cover.cover_media_id) {
           const row = await env.DB.prepare(`select public_url from media_assets where id = ?`)
             .bind(cover.cover_media_id)
@@ -130,6 +153,12 @@ export const instagramAdapter: PlatformAdapter = {
         } else if (cover.cover_timestamp_ms != null) {
           body.set('thumb_offset', String(cover.cover_timestamp_ms));
         }
+      } else if (asset.mime_type.startsWith('video/')) {
+        // Vídeo no feed (formato Post) é `VIDEO`, não `REELS` — vira um post normal do feed em vez
+        // de entrar na aba de Reels. `cover_url` é exclusivo de Reels aqui; capa, se houver, só via
+        // frame do próprio vídeo.
+        body.set('media_type', 'VIDEO');
+        if (cover.cover_timestamp_ms != null) body.set('thumb_offset', String(cover.cover_timestamp_ms));
       }
       setMediaUrl(body, asset);
       containerId = await createContainer(igUserId, body);
