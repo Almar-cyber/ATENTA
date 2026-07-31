@@ -240,6 +240,8 @@ interface CreatePostBody {
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
   instagram_as_story?: boolean;
+  cover_media_id?: string;
+  cover_timestamp_ms?: number;
   save_as?: string;
   // Keyed by account_id; overrides the shared `body` for just that one target's caption.
   target_caption_overrides?: Record<string, string>;
@@ -259,6 +261,8 @@ interface UpdatePostBody {
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
   instagram_as_story?: boolean;
+  cover_media_id?: string;
+  cover_timestamp_ms?: number;
   target_caption_overrides?: Record<string, string>;
 }
 
@@ -288,6 +292,8 @@ interface ValidateAccountsAndMediaParams {
   youtubePrivacyStatus?: string;
   pinterestBoardId?: string;
   instagramAsStory?: boolean;
+  coverMediaId?: string;
+  coverTimestampMs?: number;
   // createPost uses one status for every target (from save_as); updatePost's full-replace uses a
   // per-account status (from each target's OLD status) — so the caller decides, not this helper.
   getTargetStatus: (accountId: string) => NewTargetStatus;
@@ -367,6 +373,14 @@ async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMed
     }
     if (platform === 'instagram' && params.instagramAsStory) {
       options.as_story = true;
+    }
+    // Capa do vídeo. YouTube e Instagram aceitam uma IMAGEM própria; o TikTok só deixa escolher um
+    // frame do próprio vídeo (timestamp). Guarda os dois e cada adapter usa o que sua API suporta.
+    if (params.coverMediaId && (platform === 'youtube' || platform === 'instagram')) {
+      options.cover_media_id = params.coverMediaId;
+    }
+    if (params.coverTimestampMs != null && (platform === 'tiktok' || platform === 'instagram')) {
+      options.cover_timestamp_ms = params.coverTimestampMs;
     }
 
     const status = params.getTargetStatus(account.id);
@@ -459,6 +473,8 @@ async function createPost(request: Request, env: Env): Promise<Response> {
     youtubePrivacyStatus: payload.youtube_privacy_status,
     pinterestBoardId: payload.pinterest_board_id,
     instagramAsStory: payload.instagram_as_story,
+    coverMediaId: payload.cover_media_id,
+    coverTimestampMs: payload.cover_timestamp_ms,
     getTargetStatus: () => targetStatus,
   });
   if (!result.ok) return result.response;
@@ -527,6 +543,8 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
       youtubePrivacyStatus: payload.youtube_privacy_status,
       pinterestBoardId: payload.pinterest_board_id,
       instagramAsStory: payload.instagram_as_story,
+      coverMediaId: payload.cover_media_id,
+      coverTimestampMs: payload.cover_timestamp_ms,
       // An account not previously targeted (newly added during this edit) defaults to 'queued' —
       // matching what a non-draft createPost call would do.
       getTargetStatus: (accountId) => oldStatusMap.get(accountId) ?? 'queued',

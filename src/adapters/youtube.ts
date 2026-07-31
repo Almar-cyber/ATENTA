@@ -122,6 +122,36 @@ export const youtubeAdapter: PlatformAdapter = {
     }
     const result = (await uploadRes.json()) as { id: string };
 
+    // Capa personalizada (opcional). Falhar aqui não invalida o vídeo já publicado — canais sem
+    // verificação não podem definir thumbnail, e isso não deve derrubar o post.
+    const coverId = (target.options as { cover_media_id?: string }).cover_media_id;
+    if (coverId) {
+      try {
+        const cover = await env.DB.prepare(`select storage_key, mime_type, size_bytes from media_assets where id = ?`)
+          .bind(coverId)
+          .first<{ storage_key: string; mime_type: string; size_bytes: number }>();
+        if (cover) {
+          const obj = await env.MEDIA.get(cover.storage_key);
+          if (obj) {
+            await fetchWithRetry(
+              `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(result.id)}`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${tokens.access_token}`,
+                  'Content-Type': cover.mime_type,
+                  'Content-Length': String(cover.size_bytes),
+                },
+                body: toFixedLengthBody(obj.body, cover.size_bytes),
+              }
+            );
+          }
+        }
+      } catch (err) {
+        console.error('youtube: falha ao definir a capa (vídeo publicado mesmo assim):', err);
+      }
+    }
+
     return { state: 'published', externalId: result.id, externalUrl: `https://youtu.be/${result.id}` };
   },
 

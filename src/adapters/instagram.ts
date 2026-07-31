@@ -119,6 +119,17 @@ export const instagramAdapter: PlatformAdapter = {
         body.set('media_type', 'STORIES');
       } else if (asset.mime_type.startsWith('video/')) {
         body.set('media_type', 'REELS');
+        // Capa do Reel: a Meta aceita uma imagem hospedada (cover_url) OU um frame do vídeo
+        // (thumb_offset, em ms). cover_url tem prioridade quando as duas vierem preenchidas.
+        const cover = target.options as { cover_media_id?: string; cover_timestamp_ms?: number };
+        if (cover.cover_media_id) {
+          const row = await env.DB.prepare(`select public_url from media_assets where id = ?`)
+            .bind(cover.cover_media_id)
+            .first<{ public_url: string | null }>();
+          if (row?.public_url) body.set('cover_url', row.public_url);
+        } else if (cover.cover_timestamp_ms != null) {
+          body.set('thumb_offset', String(cover.cover_timestamp_ms));
+        }
       }
       setMediaUrl(body, asset);
       containerId = await createContainer(igUserId, body);

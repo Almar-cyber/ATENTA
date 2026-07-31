@@ -89,7 +89,7 @@ export const tiktokAdapter: PlatformAdapter = {
       data: { privacy_level_options: string[]; max_video_post_duration_sec?: number };
     };
 
-    const options = target.options as { privacy_level?: string; disable_duet?: boolean; disable_comment?: boolean; disable_stitch?: boolean };
+    const options = target.options as { privacy_level?: string; disable_duet?: boolean; disable_comment?: boolean; disable_stitch?: boolean; cover_timestamp_ms?: number };
     const privacyLevel = options.privacy_level ?? creatorJson.data.privacy_level_options[0];
     if (!privacyLevel) throw new Error('tiktok: no privacy_level available from creator_info');
 
@@ -117,6 +117,8 @@ export const tiktokAdapter: PlatformAdapter = {
           disable_duet: options.disable_duet ?? false,
           disable_comment: options.disable_comment ?? false,
           disable_stitch: options.disable_stitch ?? false,
+          // TikTok não aceita imagem de capa: só escolher um frame do próprio vídeo.
+          ...(options.cover_timestamp_ms != null ? { video_cover_timestamp_ms: options.cover_timestamp_ms } : {}),
         },
         source_info: {
           source: 'FILE_UPLOAD',

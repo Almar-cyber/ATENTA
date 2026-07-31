@@ -80,6 +80,10 @@ export function PostComposer({
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('all');
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Capa do vídeo: imagem própria (YouTube/Instagram) ou frame do vídeo em segundos (TikTok/IG).
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverSeconds, setCoverSeconds] = useState('');
+  const coverRef = useRef<HTMLInputElement>(null);
   // Per-account caption customization (Feature B): presence of a key means that account diverges
   // from the shared `body`; absence means it uses `body` as-is.
   const [captionOverrides, setCaptionOverrides] = useState<Record<string, string>>({});
@@ -193,6 +197,8 @@ export function PostComposer({
     setYtPrivacy('');
     setPinBoard('');
     setCaptionOverrides({});
+    setCoverFile(null);
+    setCoverSeconds('');
   }
 
   const selectedAccounts = useMemo(
@@ -286,6 +292,16 @@ export function PostComposer({
 
   // Só habilita o que faz sentido no estado atual: agendar exige conta + data + nenhum problema
   // pendente; rascunho exige apenas a conta (rascunho pula a validação de mídia, por design).
+  // Quais formas de capa as contas escolhidas suportam.
+  const coverImageNetworks = Array.from(
+    new Set(selectedAccounts.filter((a) => a.platform === 'youtube' || a.platform === 'instagram').map((a) => PLATFORM_LABELS[a.platform]))
+  );
+  const coverFrameNetworks = Array.from(
+    new Set(selectedAccounts.filter((a) => a.platform === 'tiktok').map((a) => PLATFORM_LABELS[a.platform]))
+  );
+  const acceptsCoverImage = coverImageNetworks.length > 0;
+  const acceptsCoverFrame = coverFrameNetworks.length > 0;
+
   const hasBlockingProblem = hints.some((h) => h.problem);
   // Conta o que REALMENTE existe: `selected` pode guardar id de conta que sumiu (desconectada
   // enquanto o compositor estava aberto), e aí o botão ficava habilitado com o form vazio.
@@ -310,6 +326,11 @@ export function PostComposer({
           mediaIds.push((await uploadMedia(item.file, meta)).id);
         }
       }
+      // A capa é um upload próprio (não entra no carrossel do post).
+      let coverMediaId: string | undefined;
+      if (coverFile) coverMediaId = (await uploadMedia(coverFile)).id;
+      const coverMs = coverSeconds.trim() ? Math.round(Number(coverSeconds) * 1000) : undefined;
+
       const payload: CreatePostPayload = {
         title: title || undefined,
         body,
@@ -319,6 +340,8 @@ export function PostComposer({
         youtube_privacy_status: ytPrivacy || undefined,
         pinterest_board_id: pinBoard || undefined,
         instagram_as_story: isStory || undefined,
+        cover_media_id: coverMediaId,
+        cover_timestamp_ms: Number.isFinite(coverMs) ? coverMs : undefined,
         save_as: asDraft ? 'draft' : undefined,
         target_caption_overrides: Object.keys(captionOverrides).length ? captionOverrides : undefined,
       };
@@ -405,6 +428,43 @@ export function PostComposer({
           />
           <ComposerHints hints={hints} field="media" />
         </div>
+
+        {/* Capa: só faz sentido com vídeo, e cada rede aceita uma coisa — YouTube e Instagram
+            aceitam imagem própria; TikTok só deixa escolher um frame do próprio vídeo. */}
+        {queue.some((q) => isVideoMime(q.mime_type)) && (acceptsCoverImage || acceptsCoverFrame) && (
+          <div className="space-y-1.5">
+            <Label>Capa do vídeo (opcional)</Label>
+            {acceptsCoverImage && (
+              <>
+                <Input
+                  ref={coverRef}
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Imagem de capa para {coverImageNetworks.join(' e ')}.
+                </p>
+              </>
+            )}
+            {acceptsCoverFrame && (
+              <>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={coverSeconds}
+                  onChange={(e) => setCoverSeconds(e.target.value)}
+                  placeholder="ex.: 2.5"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Segundo do vídeo usado como capa em {coverFrameNetworks.join(' e ')} — essas redes não
+                  aceitam imagem própria.
+                </p>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Abas por conta: 'Todas' edita a legenda compartilhada; cada aba de conta edita só a
             legenda daquela conta (e o preview à direita acompanha). Substitui a lista empilhada de
