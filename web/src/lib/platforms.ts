@@ -131,3 +131,18 @@ export const STATUS_META: Record<PostStatus, { label: string; className: string 
 export function isVideoMime(mime: string | undefined | null): boolean {
   return !!mime && mime.indexOf('video/') === 0;
 }
+
+// Faixa de proporção que a API de publicação da Meta aceita para foto de feed/carrossel. Espelha
+// MIN/MAX_FEED_ASPECT_RATIO de `src/adapters/instagram.ts` — a autoridade continua sendo o
+// `validate()` do adapter; aqui é só pra oferecer o recorte antes do upload.
+//
+// Cuidado com a confusão fácil: a grade do PERFIL corta tudo em 3:4, mas isso é só o recorte da
+// capa. Quem recusa 2:3 é a API na hora de publicar, não a grade.
+export const FEED_MIN_ASPECT_RATIO = 4 / 5;
+export const FEED_MAX_ASPECT_RATIO = 1.91;
+
+export function isFeedRatioOk(width?: number | null, height?: number | null): boolean {
+  if (!width || !height) return true; // sem medida, deixa o servidor decidir
+  const ratio = width / height;
+  return ratio >= FEED_MIN_ASPECT_RATIO && ratio <= FEED_MAX_ASPECT_RATIO;
+}

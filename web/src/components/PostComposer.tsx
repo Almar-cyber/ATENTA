@@ -26,8 +26,10 @@ import {
   PLATFORM_REQUIRES_MEDIA,
   PLATFORM_VIDEO_LIMITS,
   YOUTUBE_LONG_VIDEO_WARN_SECONDS,
+  isFeedRatioOk,
   isVideoMime,
 } from '@/lib/platforms';
+import { MediaCropDialog } from './MediaCropDialog';
 import type { PreviewInput } from './PostPreview';
 import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
@@ -87,6 +89,8 @@ export function PostComposer({
   // Per-account caption customization (Feature B): presence of a key means that account diverges
   // from the shared `body`; absence means it uses `body` as-is.
   const [captionOverrides, setCaptionOverrides] = useState<Record<string, string>>({});
+  // Fila de recortes pendentes (keys da fila de mídia). Um por vez: o diálogo mostra o primeiro.
+  const [cropQueue, setCropQueue] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Prefill from a "duplicar" request coming out of any view.
@@ -197,6 +201,13 @@ export function PostComposer({
       accepted.map(async (file) => ({ key: newKey(), file, name: file.name, mime_type: file.type, ...(await readMediaMetadata(file)) }))
     );
     setQueue((q) => [...q, ...add]);
+
+    // Foto fora da faixa que a Meta publica: em vez de recusar no envio (o erro só aparecia lá na
+    // frente, sem saída), já abre o recorte. A pessoa escolhe o que fica visível arrastando.
+    if (needsFeedRatio) {
+      const toCrop = add.filter((i) => !isVideoMime(i.mime_type) && !isFeedRatioOk(i.width, i.height)).map((i) => i.key);
+      if (toCrop.length) setCropQueue((c) => [...c, ...toCrop]);
+    }
   }
 
   // Replaces the media in one carousel slot without disturbing the others' order — distinct
@@ -204,6 +215,22 @@ export function PostComposer({
   async function replaceMedia(key: string, file: File) {
     const meta = await readMediaMetadata(file);
     setQueue((q) => q.map((item) => (item.key === key ? { key: newKey(), file, name: file.name, mime_type: file.type, ...meta } : item)));
+  }
+
+  // Recorte confirmado: troca o arquivo do MESMO slot, preservando a key — assim a posição no
+  // carrossel e a fila de recortes pendentes continuam válidas.
+  async function applyCrop(key: string, cropped: File) {
+    const meta = await readMediaMetadata(cropped);
+    setQueue((q) =>
+      q.map((item) =>
+        item.key === key
+          ? // assetId sai: o arquivo agora é outro, e manter o id faria o post reaproveitar a
+            // mídia antiga do R2 em vez de subir o recorte.
+            { ...item, assetId: undefined, public_url: undefined, file: cropped, name: cropped.name, mime_type: cropped.type, ...meta }
+          : item
+      )
+    );
+    setCropQueue((c) => c.filter((k) => k !== key));
   }
 
   function resetForm() {
@@ -218,12 +245,20 @@ export function PostComposer({
     setCaptionOverrides({});
     setCoverFile(null);
     setCoverSeconds('');
+    setCropQueue([]);
   }
 
   const selectedAccounts = useMemo(
     () => Array.from(selected).map((id) => accountsById[id]).filter(Boolean),
     [selected, accountsById]
   );
+
+  // Item do recorte em aberto (um por vez, na ordem em que entraram na fila).
+  const cropTarget = queue.find((i) => i.key === cropQueue[0]) ?? null;
+
+  // Instagram/Facebook publicam foto de feed só entre 4:5 e 1.91:1 (Story tem regra própria, 9:16,
+  // e não passa por aqui).
+  const needsFeedRatio = !isStory && selectedAccounts.some((a) => a.platform === 'instagram' || a.platform === 'facebook');
 
   // Aba ativa do compositor: 'all' edita a legenda compartilhada, ou o id de uma conta pra editar
   // só ela. Se a conta da aba for desmarcada, cai de volta pra 'all'.
@@ -265,6 +300,17 @@ export function PostComposer({
       if (count > 1 && a.platform === 'instagram' && isStory) {
         out.push({ field: 'media', problem: true, text: 'Deixe só um arquivo para publicar como Story' });
       }
+      // Só imagem: vídeo tem outra faixa e o corte aqui não se aplica.
+      if (needsFeedRatio && (a.platform === 'instagram' || a.platform === 'facebook')) {
+        for (const item of queue) {
+          if (isVideoMime(item.mime_type) || isFeedRatioOk(item.width, item.height)) continue;
+          out.push({
+            field: 'media',
+            problem: true,
+            text: `Recorte a foto ${item.width}×${item.height} — o ${name} publica entre 4:5 e 1.91:1`,
+          });
+        }
+      }
 
       const videoLimits = a.platform === 'instagram' && isStory ? INSTAGRAM_STORY_VIDEO_LIMITS : PLATFORM_VIDEO_LIMITS[a.platform];
       if (videoLimits) {
@@ -290,7 +336,7 @@ export function PostComposer({
     // Duas contas da mesma rede geravam a mesma dica duas vezes ("Instagram: 0/2200" repetido).
     const seen = new Set<string>();
     return out.filter((h) => (seen.has(h.text) ? false : (seen.add(h.text), true)));
-  }, [tabAccounts, body, queue, isStory, captionOverrides]);
+  }, [tabAccounts, body, queue, isStory, captionOverrides, needsFeedRatio]);
 
   // O preview segue a aba: 'all' mostra todas as contas, uma aba de conta mostra só ela.
   const previewItems: KeyedPreviewInput[] = useMemo(
@@ -442,8 +488,12 @@ export function PostComposer({
           <MediaQueueGrid
             items={queue}
             onReorder={setQueue}
-            onRemove={(key) => setQueue((q) => q.filter((i) => i.key !== key))}
+            onRemove={(key) => {
+              setQueue((q) => q.filter((i) => i.key !== key));
+              setCropQueue((c) => c.filter((k) => k !== key));
+            }}
             onReplace={replaceMedia}
+            onCrop={(key) => setCropQueue((c) => (c.includes(key) ? c : [key, ...c]))}
           />
           <ComposerHints hints={hints} field="media" />
         </div>
@@ -622,6 +672,12 @@ export function PostComposer({
           setPickerOpen(false);
           submit(false, local);
         }}
+      />
+
+      <MediaCropDialog
+        file={cropTarget?.file ?? null}
+        onCancel={() => setCropQueue((c) => c.slice(1))}
+        onDone={(cropped) => cropTarget && applyCrop(cropTarget.key, cropped)}
       />
     </div>
   );

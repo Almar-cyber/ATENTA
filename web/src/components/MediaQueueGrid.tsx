@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { RefreshCw, X, ImageIcon, Film } from 'lucide-react';
+import { Crop, RefreshCw, X, ImageIcon, Film } from 'lucide-react';
 import { toast } from 'sonner';
 import type { QueuedMedia } from '@/lib/types';
 import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
@@ -12,6 +12,7 @@ function Tile({
   onDrop,
   onRemove,
   onReplaceClick,
+  onCropClick,
 }: {
   item: QueuedMedia;
   index: number;
@@ -19,6 +20,7 @@ function Tile({
   onDrop: () => void;
   onRemove: () => void;
   onReplaceClick: () => void;
+  onCropClick?: () => void;
 }) {
   const url = useMediaUrl(item);
   const [broken, setBroken] = useState(false);
@@ -58,6 +60,18 @@ function Tile({
       </span>
 
       <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        {/* Só imagem já escolhida do disco: recortar exige os bytes locais (o que veio do R2 é de
+            outro domínio e sujaria o canvas). */}
+        {!video && item.file && onCropClick && (
+          <button
+            type="button"
+            title="Recortar"
+            onClick={onCropClick}
+            className="grid size-6 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80"
+          >
+            <Crop className="size-3.5" />
+          </button>
+        )}
         <button
           type="button"
           title="Trocar mídia deste slot"
@@ -84,11 +98,13 @@ export function MediaQueueGrid({
   onReorder,
   onRemove,
   onReplace,
+  onCrop,
 }: {
   items: QueuedMedia[];
   onReorder: (next: QueuedMedia[]) => void;
   onRemove: (key: string) => void;
   onReplace: (key: string, file: File) => void;
+  onCrop?: (key: string) => void;
 }) {
   const dragKey = useRef<string | null>(null);
   const replaceKey = useRef<string | null>(null);
@@ -144,6 +160,7 @@ export function MediaQueueGrid({
           onDrop={() => handleDrop(item.key)}
           onRemove={() => onRemove(item.key)}
           onReplaceClick={() => handleReplaceClick(item.key)}
+          onCropClick={onCrop ? () => onCrop(item.key) : undefined}
         />
       ))}
     </div>

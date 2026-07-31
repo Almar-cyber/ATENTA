@@ -41,6 +41,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | Componente | Papel |
 | --- | --- |
 | `PostComposer` | Formulário de criação, aberto num **modal amplo em split** (form à esquerda, preview ao vivo à direita) pelo botão "Novo post". Campos em **cascata**: só mostra Contas de destino no início; o resto (legenda, quando, mídia) aparece após escolher ≥1 conta, e os específicos são gated por rede (Título só YouTube, Story só Instagram, board só Pinterest). |
+| `MediaCropDialog` | Recorte com arrastar: a imagem entra em "cover" no quadro, a pessoa arrasta/aproxima e escolhe entre 4:5, 1:1 e 1.91:1 (as proporções que a API da Meta publica). Devolve um `File` novo — o original não é enviado. Abre sozinho quando uma foto fora da faixa entra na fila com Instagram/Facebook selecionados, e manualmente pelo ✂ no tile. |
 | `MediaQueueGrid` | Grade de thumbnails da fila de mídia do composer — arrastar reordena (mesmo padrão de DnD do `GridPlanner`), hover revela trocar/remover. Trocar substitui só aquele slot (mesma posição), sem desmontar a ordem dos outros. |
 | `AccountPicker` | Seletor de contas de destino do composer — chips (`ToggleGroup` multi-seleção do shadcn) em vez de lista de checkbox; conta inativa fica desabilitada com `Tooltip` explicando o motivo. |
 | `PostPreview` | Card que imita o formato de cada rede (IG quadrado, YouTube 16:9, Story 9:16, Pinterest 3:4). Reusado no composer e no dialog. |

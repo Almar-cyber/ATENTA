@@ -218,6 +218,15 @@ publicar) — o dashboard também avisa antes de enviar:
 Vídeo sozinho continua funcionando em todas. A ordem dos arquivos na fila do dashboard (setas ↑/↓)
 é a ordem em que aparecem no carrossel — ela é gravada em `post_target_media.position`.
 
+**Proporção da imagem (Instagram/Facebook):** a API de publicação da Meta só aceita foto de feed
+entre **4:5 e 1.91:1** — e não corta nada por conta própria, ela recusa. (No app do Instagram é
+diferente: ele te oferece o corte na hora. E a grade 3:4 do perfil é só recorte de capa, não tem a
+ver com isso.) Por isso, ao anexar uma foto fora da faixa com Instagram/Facebook selecionados, o
+dashboard abre o **recorte**: arrasta a imagem pra escolher o que aparece, aproxima se quiser, e
+escolhe entre 4:5, 1:1 ou 1.91:1. O arquivo original não é alterado — o post leva só o recorte
+(JPEG, no máximo 1440px de largura, que é o que a Meta serve). O ✂ no tile da fila abre o mesmo
+recorte a qualquer momento.
+
 **Formatos aceitos:** JPEG, PNG, MP4 e MOV. RAW de câmera (`.ARW`, `.CR2`, `.NEF`) passa num
 filtro `image/*` e sobe pro R2 sem erro, mas toda plataforma recusa na hora de publicar — então
 `POST /api/media` (e o input do dashboard) rejeitam esses formatos na entrada, com a mensagem
