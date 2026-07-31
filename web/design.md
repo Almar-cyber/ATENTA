@@ -76,6 +76,10 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   redireciona pra `/?connected=<rede>` e o `Dashboard` (efeito no mount) lê o param, dá `reload()` e
   abre o modal de sucesso. Meta cobre Instagram+Facebook juntos; várias contas por rede convivem
   (o schema é `unique(platform, external_account_id)`, ver migração 0002).
+- **Superfícies flutuantes** (`Tooltip`, `HoverCard`, `DropdownMenu`, `Select`): mesma linguagem
+  dos botões e cards — `border-2 border-foreground` + `shadow-[3px_3px_0_0_var(--foreground)]`, sem
+  sombra difusa nem `ring`. O tooltip é claro (`bg-card`), não a pílula escura do preset, e não tem
+  seta: um losango girado não carrega a borda de 2px sem emendar torto.
 - **Toasts**: `sonner` (`toast.success/error`) pra todo feedback de ação; nunca `alert()`.
 - **Aspects do preview**: quem manda é o **formato** (`PLATFORM_FORMATS[p].shape`) — Reel/Story/Short são 9:16, post de feed é 4:5. `PLATFORM_PREVIEW_SHAPE` é só o fallback de quem não tem formatos.
 - **Motion**: entradas de lista com stagger sutil (`delay: i*0.015`, teto 0.3s); troca de view com

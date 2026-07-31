@@ -60,6 +60,11 @@ function igFormatOf(options: Record<string, unknown> | undefined): string {
   return options?.as_story ? 'story' : 'post';
 }
 
+// Intervalo entre os Stories de uma sequência. O poller varre a cada 10min e publica em lote; sem
+// um espaçamento no `scheduled_for`, a ordem em que apareceriam no perfil seria a da consulta, não
+// a da fila de mídia.
+const STORY_GAP_MINUTES = 1;
+
 function newKey() {
   return crypto.randomUUID();
 }
@@ -301,6 +306,13 @@ export function PostComposer({
     coverFile ? { key: 'cover', file: coverFile, name: coverFile.name, mime_type: coverFile.type } : undefined
   );
 
+  // Vários arquivos com formato Story: cada um vira um Story separado (a API publica um arquivo
+  // por Story). As contas de Instagram levam a sequência; as outras redes, se houver, ficam com um
+  // post normal contendo a fila inteira.
+  const storyAccountIds = selectedAccounts.filter((a) => a.platform === 'instagram').map((a) => a.id);
+  const nonStoryAccountIds = selectedAccounts.filter((a) => a.platform !== 'instagram').map((a) => a.id);
+  const storySequence = isStory && queue.length > 1 && storyAccountIds.length > 0 && !editingPostId;
+
   // Proporção pra qual a pessoa está recortando: a do formato escolhido (Reel 9:16, post 4:5).
   // Sem isso o recorte abria sempre em 4:5, inclusive pra Reel — e nem oferecia 9:16.
   const cropTargetRatio = (() => {
@@ -362,7 +374,13 @@ export function PostComposer({
       const spec = findFormat(a.platform, formats[a.platform]);
       if (spec && count > 0) {
         if (!spec.multiple && count > 1) {
-          out.push({ field: 'media', problem: true, text: `Deixe um arquivo só — ${spec.label} não aceita carrossel` });
+          // Story é a exceção: não existe Story em carrossel, mas dá pra publicar vários seguidos —
+          // então em vez de barrar, o compositor divide em uma sequência (ver storySequence).
+          if (spec.id === 'story') {
+            out.push({ field: 'media', problem: false, text: `Vão sair ${count} Stories, um a cada ${STORY_GAP_MINUTES}min` });
+          } else {
+            out.push({ field: 'media', problem: true, text: `Deixe um arquivo só — ${spec.label} não aceita carrossel` });
+          }
         }
         if (spec.media === 'video' && !hasVideo) {
           out.push({ field: 'media', problem: true, text: `${spec.label} precisa de um vídeo` });
@@ -490,12 +508,9 @@ export function PostComposer({
       if (coverFile) coverMediaId = (await uploadMedia(coverFile)).id;
       const coverMs = coverSeconds.trim() ? Math.round(Number(coverSeconds) * 1000) : undefined;
 
-      const payload: CreatePostPayload = {
+      const base: Omit<CreatePostPayload, 'scheduled_for' | 'target_account_ids'> = {
         title: title || undefined,
         body,
-        scheduled_for: localToIso(effectiveWhen),
-        target_account_ids: Array.from(selected),
-        media_asset_ids: mediaIds.length ? mediaIds : undefined,
         youtube_privacy_status: ytPrivacy || undefined,
         pinterest_board_id: pinBoard || undefined,
         instagram_format: formats.instagram,
@@ -504,12 +519,53 @@ export function PostComposer({
         save_as: asDraft ? 'draft' : undefined,
         target_caption_overrides: Object.keys(captionOverrides).length ? captionOverrides : undefined,
       };
+      const startedAt = new Date(localToIso(effectiveWhen)).getTime();
+
       if (editingPostId) {
-        await updatePost(editingPostId, payload);
+        await updatePost(editingPostId, {
+          ...base,
+          scheduled_for: localToIso(effectiveWhen),
+          target_account_ids: Array.from(selected),
+          media_asset_ids: mediaIds.length ? mediaIds : undefined,
+        });
+      } else if (storySequence) {
+        // Sequência de Stories: a API da Meta publica UM arquivo por Story (não existe Story em
+        // carrossel), então cada arquivo vira um post próprio, espaçado — o intervalo é o que
+        // garante que saiam na ordem da fila, já que o poller varre em lote.
+        for (let i = 0; i < mediaIds.length; i++) {
+          await createPost({
+            ...base,
+            scheduled_for: new Date(startedAt + i * STORY_GAP_MINUTES * 60_000).toISOString(),
+            target_account_ids: storyAccountIds,
+            media_asset_ids: [mediaIds[i]],
+          });
+        }
+        // As demais redes não têm Story: recebem um post só, com a fila inteira.
+        if (nonStoryAccountIds.length) {
+          await createPost({
+            ...base,
+            scheduled_for: localToIso(effectiveWhen),
+            target_account_ids: nonStoryAccountIds,
+            media_asset_ids: mediaIds,
+          });
+        }
       } else {
-        await createPost(payload);
+        await createPost({
+          ...base,
+          scheduled_for: localToIso(effectiveWhen),
+          target_account_ids: Array.from(selected),
+          media_asset_ids: mediaIds.length ? mediaIds : undefined,
+        });
       }
-      toast.success(editingPostId ? 'Post atualizado.' : asDraft ? 'Rascunho salvo.' : 'Post agendado com sucesso.');
+      toast.success(
+        editingPostId
+          ? 'Post atualizado.'
+          : storySequence
+            ? `${mediaIds.length} Stories agendados, um a cada ${STORY_GAP_MINUTES}min.`
+            : asDraft
+              ? 'Rascunho salvo.'
+              : 'Post agendado com sucesso.'
+      );
       resetForm();
       setEditingPostId(null);
       onDone?.();

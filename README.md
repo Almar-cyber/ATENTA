@@ -259,6 +259,11 @@ diferença real de API, não só de preview:
 | **Reel** | `REELS` | um vídeo, vertical | imagem própria (`cover_url`) ou frame |
 | **Story** | `STORIES` | um arquivo, até 60s | — |
 
+**Vários Stories de uma vez**: a API publica um arquivo por Story (não existe Story em carrossel),
+mas nada impede publicar vários seguidos. Escolhendo Story com 2+ arquivos, o compositor cria **um
+post por arquivo**, espaçados de 1 minuto — o espaçamento é o que garante a ordem, já que o poller
+varre em lote. Cada Story aparece separado na lista e pode ser cancelado sozinho.
+
 Story some em 24h e **não exibe legenda**; a API também não publica Story em carrossel nem
 elementos interativos (stickers, links, música), só a imagem/vídeo base.
 
