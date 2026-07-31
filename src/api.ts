@@ -44,6 +44,13 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   const feedMatch = /^\/api\/feed\/([^/]+)$/.exec(pathname);
   if (feedMatch && method === 'GET') return getAccountFeed(feedMatch[1], env);
 
+  // Prévias do planejador de grade (imagens sem post — só pra ver como o feed vai ficar).
+  if (pathname === '/api/grid-previews' && method === 'GET') return listGridPreviews(url, env);
+  if (pathname === '/api/grid-previews' && method === 'POST') return createGridPreview(request, env);
+  const previewMatch = /^\/api\/grid-previews\/([^/]+)$/.exec(pathname);
+  if (previewMatch && method === 'PATCH') return updateGridPreview(previewMatch[1], request, env);
+  if (previewMatch && method === 'DELETE') return deleteGridPreview(previewMatch[1], env);
+
   const cancelMatch = /^\/api\/post-targets\/([^/]+)\/cancel$/.exec(pathname);
   if (cancelMatch && method === 'POST') return cancelTarget(cancelMatch[1], env);
 
@@ -892,6 +899,85 @@ async function multipartComplete(request: Request, env: Env): Promise<Response> 
     },
     201
   );
+}
+
+interface GridPreviewRow {
+  id: string;
+  platform: Platform;
+  media_asset_id: string;
+  sort_at: string;
+  public_url: string | null;
+  mime_type: string;
+  width: number | null;
+  height: number | null;
+}
+
+const GRID_PREVIEW_SELECT = `select p.id, p.platform, p.media_asset_id, p.sort_at,
+       m.public_url, m.mime_type, m.width, m.height
+  from grid_previews p
+  join media_assets m on m.id = p.media_asset_id`;
+
+async function listGridPreviews(url: URL, env: Env): Promise<Response> {
+  const platform = url.searchParams.get('platform');
+  if (platform && !PLATFORMS.includes(platform as Platform)) {
+    return jsonResponse({ error: `plataforma inválida: ${platform}` }, 400);
+  }
+  const stmt = platform
+    ? env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.platform = ? order by p.sort_at desc`).bind(platform)
+    : env.DB.prepare(`${GRID_PREVIEW_SELECT} order by p.sort_at desc`);
+  const { results } = await stmt.all<GridPreviewRow>();
+  return jsonResponse({ previews: results ?? [] });
+}
+
+async function createGridPreview(request: Request, env: Env): Promise<Response> {
+  let payload: { platform?: string; media_asset_id?: string; sort_at?: string };
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+  const { platform, media_asset_id: mediaAssetId } = payload;
+  if (!platform || !PLATFORMS.includes(platform as Platform)) {
+    return jsonResponse({ error: 'platform obrigatória' }, 400);
+  }
+  if (!mediaAssetId) return jsonResponse({ error: 'media_asset_id obrigatório' }, 400);
+
+  const asset = await env.DB.prepare(`select id from media_assets where id = ?`).bind(mediaAssetId).first<{ id: string }>();
+  if (!asset) return jsonResponse({ error: 'mídia não encontrada' }, 404);
+
+  const id = crypto.randomUUID();
+  await env.DB.prepare(`insert into grid_previews (id, platform, media_asset_id, sort_at) values (?, ?, ?, ?)`)
+    .bind(id, platform, mediaAssetId, payload.sort_at || nowIso())
+    .run();
+
+  const row = await env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.id = ?`).bind(id).first<GridPreviewRow>();
+  return jsonResponse(row, 201);
+}
+
+async function updateGridPreview(id: string, request: Request, env: Env): Promise<Response> {
+  let payload: { sort_at?: string };
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+  if (!payload.sort_at) return jsonResponse({ error: 'sort_at obrigatório' }, 400);
+
+  const { results } = await env.DB.prepare(`update grid_previews set sort_at = ? where id = ? returning id`)
+    .bind(payload.sort_at, id)
+    .all<{ id: string }>();
+  if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'prévia não encontrada' }, 404);
+  return jsonResponse({ ok: true });
+}
+
+// Só apaga a linha da grade — o media_asset (e o objeto no R2) fica, porque a mesma mídia pode já
+// ter sido reaproveitada num post agendado.
+async function deleteGridPreview(id: string, env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(`delete from grid_previews where id = ? returning id`)
+    .bind(id)
+    .all<{ id: string }>();
+  if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'prévia não encontrada' }, 404);
+  return jsonResponse({ ok: true });
 }
 
 function parseOptionalFloat(value: FormDataEntryValue | null): number | null {

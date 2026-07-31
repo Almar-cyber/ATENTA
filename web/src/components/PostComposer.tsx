@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useScheduler } from '@/store';
-import { onPrefill, onPrefillDate, onEdit } from '@/lib/composer-bus';
+import { onPrefill, onPrefillDate, onEdit, onPrefillMedia } from '@/lib/composer-bus';
 import { createPost, updatePost, uploadMedia } from '@/lib/api';
 import type { CreatePostPayload } from '@/lib/api';
 import { fmtBytes, fmtDuration, isoToLocalInput, localToIso } from '@/lib/format';
@@ -146,6 +146,25 @@ export function PostComposer({
         )
       );
       toast.success('Editando post — altere e salve.');
+      onRequestOpen?.();
+    });
+  }, []);
+
+  // "Agendar" numa prévia da grade: só a mídia entra na fila (a prévia não tem data nem conta).
+  useEffect(() => {
+    return onPrefillMedia((m) => {
+      setQueue([
+        {
+          key: newKey(),
+          assetId: m.assetId,
+          name: m.name,
+          mime_type: m.mime_type,
+          public_url: m.public_url,
+          width: m.width,
+          height: m.height,
+        },
+      ]);
+      toast.success('Mídia da prévia carregada — escolha conta e data.');
       onRequestOpen?.();
     });
   }, []);

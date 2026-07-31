@@ -54,6 +54,19 @@ export interface Post {
   targets: Target[];
 }
 
+// Uma imagem colocada na grade sem virar post: serve só pra ver como o feed vai ficar. Ocupa uma
+// posição no mesmo eixo de tempo dos posts (`sort_at`), mas não é publicada por ninguém.
+export interface GridPreview {
+  id: string;
+  platform: Platform;
+  media_asset_id: string;
+  sort_at: string;
+  public_url: string | null;
+  mime_type: string;
+  width: number | null;
+  height: number | null;
+}
+
 // A media item queued in the composer: either a File not yet uploaded, or an already-uploaded
 // asset (reused when duplicating a post) identified by assetId.
 export interface QueuedMedia {

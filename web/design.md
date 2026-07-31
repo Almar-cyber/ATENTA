@@ -47,7 +47,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `ListView` | Lista agrupada por dia, thumbnail real, badge de status, ações inline. |
 | `WeekView` | Vista "Semana": grade horas × 7 dias, cada post na sua hora agendada; clique em slot vazio pré-preenche data/hora. |
 | `CalendarView` | Vista "Mês": grade mensal; chip por post (cor = plataforma, tracejado = rascunho, ⚠ = falhou). Clique em dia vazio pré-preenche a data. |
-| `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer. |
+| `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer. Três espécies de tile — **agendado**, **publicado** (registro nosso + feed real, âncoras) e **prévia** (imagem sem post, borda tracejada dourada). A matemática de reordenação fica em `src/lib/gridOrder.ts`, fora do componente. |
 | `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). |
 | `ConnectionsView` | Tela "Conexões" (botão no header): grid de cards por rede com as contas conectadas + status e botão "Conectar" que navega pra `/api/connect/:rede` (OAuth). Várias contas por rede aparecem como linhas separadas. YouTube fica "em breve" (ainda usa CLI). |
 | `PlatformIcon` | Logo oficial de cada rede (SVG inline), colorido por `PLATFORM_COLORS`. Use onde a rede precisa ficar clara (lista, semana, chips, header, preview, dialog). |
@@ -59,8 +59,9 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 - **Estado global**: `SchedulerProvider` (`src/store.tsx`) expõe `accounts`, `posts`, `filters`,
   `reload`. Poll de 30s. Componentes chamam `reload()` após mutações.
 - **Comunicação composer ⇄ views**: bus pub-sub minúsculo (`src/lib/composer-bus.ts`) —
-  `requestPrefill` (duplicar), `requestEdit` (editar o post inteiro) e `requestPrefillDate` (clicar
-  num dia/slot vazio). O modal do composer fica sempre montado (translate/opacity, não desmonta) pra
+  `requestPrefill` (duplicar), `requestEdit` (editar o post inteiro), `requestPrefillDate` (clicar
+  num dia/slot vazio) e `requestPrefillMedia` (agendar uma prévia do grid — só a mídia). O modal do
+  composer fica sempre montado (translate/opacity, não desmonta) pra
   manter as assinaturas vivas e abrir já com o payload aplicado. Evita prop-drilling.
 - **Modais em split**: prefira layout horizontal (dados/form à esquerda, preview à direita) a scroll
   vertical longo; limite a altura de mídia/preview (`PostPreview` corta em ~340px e mostra faixa

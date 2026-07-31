@@ -28,6 +28,7 @@ wrangler login
 wrangler d1 create social-scheduler          # database_id já no wrangler.toml
 wrangler d1 execute social-scheduler --remote --file=migrations/0001_init.sql
 wrangler d1 execute social-scheduler --remote --file=migrations/0002_accounts_multi.sql  # multi-conta por rede (ver nota abaixo)
+wrangler d1 execute social-scheduler --remote --file=migrations/0003_grid_previews.sql   # prévias do Grid IG
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
 npm run deploy                               # builda o front (web/ → dist/) e faz wrangler deploy
@@ -137,14 +138,36 @@ O que dá pra fazer:
 
 ### Grid IG (planejador arrastável)
 
-A aba **Grid IG** mostra os posts de Instagram ainda não publicados (`draft`/`queued`/`processing`)
-na grade 3-colunas do perfil, mais novo primeiro. Arrastar um tile pra outra posição reordena a
-sequência: os **horários já agendados não mudam de valor** — o conjunto de `scheduled_for` é o
-mesmo, só é redistribuído na nova ordem (o tile que passou a ser o mais antigo fica com o horário
-mais cedo, e assim por diante). Ou seja, dá pra decidir a estética do feed sem inventar datas
-novas nem deixar buracos. `POST /api/posts/reschedule` faz essa permutação no servidor; o botão
-**Desfazer** restaura a ordem anterior (um passo). Posts publicados/cancelados não aparecem —
-não dá pra reordenar o que já saiu.
+A aba **Grid IG** monta a grade 3-colunas do perfil, mais novo no canto superior esquerdo, com as
+**três** coisas que compõem a aparência do feed:
+
+| Peça | De onde vem | Arrasta? |
+| --- | --- | --- |
+| **Agendado** (`draft`/`queued`/`processing`) | seus posts | ✅ |
+| **Publicado** | seu registro + o feed real da conta (`GET /api/feed/:accountId`, ao vivo na API do Instagram) | ❌ é âncora, já saiu |
+| **Prévia** | imagem solta que você joga na grade só pra ver a capa — não é post, não tem legenda, conta nem data | ✅ |
+
+Arrastar reordena, e cada espécie se move de um jeito:
+
+- **Agendado**: os **horários não mudam de valor** — o conjunto de `scheduled_for` é o mesmo, só é
+  redistribuído na nova ordem (o tile que passou a ser o mais antigo fica com o horário mais cedo).
+  Dá pra decidir a estética sem inventar data nem deixar buraco. `POST /api/posts/reschedule` faz
+  essa permutação no servidor.
+- **Prévia**: não tem horário de publicação, só um `sort_at` que é interpolado entre os agendados
+  vizinhos — ela cabe entre dois posts sem empurrar nenhum.
+
+O botão **Desfazer** restaura o arranjo anterior (um passo). O que já foi publicado nunca entra na
+permutação; arrastar pra cima de um explica isso em vez de não fazer nada.
+
+**Prévias** (`grid_previews`, migração `0003`): "Adicionar prévia" (ou o tile `+` no fim da grade)
+sobe a imagem pro R2 como qualquer mídia e a coloca no topo. Passando o mouse, dá pra **remover** ou
+**agendar** — que abre o compositor já com aquela mídia na fila, faltando só conta e data (a prévia
+continua na grade até você removê-la). Posts cancelados/falhos não aparecem, e o que a API do
+Instagram devolve como já publicado é deduplicado contra o nosso próprio registro (`external_post_id`)
+pra não aparecer duas vezes.
+
+Lembrando que a grade do perfil **corta tudo em 3:4** — é só o recorte da capa; no feed o post
+mantém a proporção original com que foi publicado.
 
 ### Autenticação (opcional, hoje DESLIGADA)
 

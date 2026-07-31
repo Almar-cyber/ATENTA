@@ -50,3 +50,26 @@ export function onEdit(fn: EditListener): () => void {
 export function requestEdit(payload: EditPayload): void {
   for (const fn of editListeners) fn(payload);
 }
+
+// Canal do planejador de grade: "esta prévia vira post". Só carrega a mídia (já no R2) — data,
+// contas e legenda são escolhidas no compositor, porque uma prévia não tem nada disso.
+export interface PrefillMediaPayload {
+  assetId: string;
+  name: string;
+  mime_type: string;
+  public_url: string | null;
+  width?: number;
+  height?: number;
+}
+
+type MediaListener = (p: PrefillMediaPayload) => void;
+const mediaListeners = new Set<MediaListener>();
+
+export function onPrefillMedia(fn: MediaListener): () => void {
+  mediaListeners.add(fn);
+  return () => mediaListeners.delete(fn);
+}
+
+export function requestPrefillMedia(payload: PrefillMediaPayload): void {
+  for (const fn of mediaListeners) fn(payload);
+}

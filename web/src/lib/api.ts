@@ -1,4 +1,4 @@
-import type { Account, Post } from './types';
+import type { Account, GridPreview, Platform, Post } from './types';
 import type { MediaMetadata } from './mediaMetadata';
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -146,6 +146,31 @@ export interface FeedItem {
 // Feed real da conta (busca ao vivo na API da rede). Só Instagram e YouTube.
 export function getAccountFeed(accountId: string): Promise<{ items: FeedItem[]; error?: string }> {
   return req(`/api/feed/${accountId}`);
+}
+
+// Prévias da grade: imagens que ocupam um lugar no planejamento sem virar post agendado.
+export function getGridPreviews(platform: Platform): Promise<{ previews: GridPreview[] }> {
+  return req(`/api/grid-previews?platform=${platform}`);
+}
+
+export function createGridPreview(payload: { platform: Platform; media_asset_id: string; sort_at: string }): Promise<GridPreview> {
+  return req('/api/grid-previews', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateGridPreview(id: string, sortAt: string): Promise<{ ok: true }> {
+  return req(`/api/grid-previews/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sort_at: sortAt }),
+  });
+}
+
+export function deleteGridPreview(id: string): Promise<{ ok: true }> {
+  return req(`/api/grid-previews/${id}`, { method: 'DELETE' });
 }
 
 export function cancelTarget(id: string): Promise<{ ok: true }> {
