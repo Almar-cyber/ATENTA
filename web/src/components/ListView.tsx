@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import type { Post, Target } from '@/lib/types';
 import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
 import { fmtDateTime, fmtDayHeader, dayKey } from '@/lib/format';
-import { cancelTarget, queueTarget } from '@/lib/api';
+import { cancelTarget, deleteTarget, queueTarget, reactivateTarget } from '@/lib/api';
 import { requestPrefill } from '@/lib/composer-bus';
 import { useScheduler } from '@/store';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,10 @@ import { Thumb } from './Thumb';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PlatformAvatar } from './PlatformAvatar';
 import type { DialogSelection } from './PostDialog';
+
+// Status que dá pra trazer de volta pra rascunho. 'ambiguous' entra porque é exatamente o caso em
+// que não se sabe se publicou: a pessoa confere na rede e decide reativar ou excluir.
+const REVIVABLE = new Set<Target['status']>(['canceled', 'failed', 'ambiguous']);
 
 export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogSelection) => void }) {
   const { reload } = useScheduler();
@@ -105,6 +109,23 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
                   onClick={() => act(() => cancelTarget(target.id), 'Cancelado.')}
                 >
                   Cancelar
+                </Button>
+              )}
+              {/* Cancelado/falhou não é fim de linha: dá pra trazer de volta como rascunho, ou
+                  apagar de vez — antes ficava parado na lista sem nenhuma das duas saídas. */}
+              {REVIVABLE.has(target.status) && (
+                <Button size="sm" variant="ghost" onClick={() => act(() => reactivateTarget(target.id), 'De volta como rascunho.')}>
+                  Reativar
+                </Button>
+              )}
+              {target.status !== 'publishing' && target.status !== 'processing' && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => act(() => deleteTarget(target.id), 'Excluído.')}
+                >
+                  Excluir
                 </Button>
               )}
             </div>

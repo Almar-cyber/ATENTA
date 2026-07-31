@@ -181,6 +181,16 @@ export function queueTarget(id: string): Promise<{ ok: true }> {
   return req(`/api/post-targets/${id}/queue`, { method: 'POST' });
 }
 
+// Cancelado/falhou volta pra rascunho (não pra fila — a data original pode já ter passado).
+export function reactivateTarget(id: string): Promise<{ ok: true }> {
+  return req(`/api/post-targets/${id}/reactivate`, { method: 'POST' });
+}
+
+// Apaga o destino; se era o último do post, o post some junto (`post_deleted`).
+export function deleteTarget(id: string): Promise<{ ok: true; post_deleted: boolean }> {
+  return req(`/api/post-targets/${id}`, { method: 'DELETE' });
+}
+
 export function reschedule(orderedPostIds: string[]): Promise<{ ok: true; reordered: number }> {
   return req('/api/posts/reschedule', {
     method: 'POST',

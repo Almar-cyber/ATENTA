@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import type { Post, Target } from '@/lib/types';
 import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
-import { cancelTarget, queueTarget } from '@/lib/api';
+import { cancelTarget, deleteTarget, queueTarget, reactivateTarget } from '@/lib/api';
 import { requestPrefill, requestEdit } from '@/lib/composer-bus';
 import { useScheduler } from '@/store';
 import { PostPreview } from './PostPreview';
@@ -27,6 +27,11 @@ export interface DialogSelection {
   target: Target;
 }
 
+// Espelha o guard do PATCH no servidor: cancelado e falhou continuam editáveis de propósito — é o
+// caso de reaproveitar a peça em vez de refazer.
+const EDITABLE = new Set<Target['status']>(['draft', 'queued', 'canceled', 'failed']);
+const REVIVABLE = new Set<Target['status']>(['canceled', 'failed', 'ambiguous']);
+
 export function PostDialog({ selection, onClose }: { selection: DialogSelection | null; onClose: () => void }) {
   const { reload } = useScheduler();
   const open = selection !== null;
@@ -35,7 +40,8 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
   const status = target ? STATUS_META[target.status] : null;
   // Same status logic as the server's PATCH guard — never show an edit affordance for a post
   // the server would reject anyway (one target past 'queued' locks the whole post).
-  const canEdit = post ? post.targets.every((t) => t.status === 'draft' || t.status === 'queued') : false;
+  const canEdit = post ? post.targets.every((t) => EDITABLE.has(t.status)) : false;
+  const revivable = target ? REVIVABLE.has(target.status) : false;
 
   async function act(fn: () => Promise<unknown>, ok: string) {
     try {
@@ -92,7 +98,11 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                 {/* Hierarquia: UMA ação principal à esquerda (a que faz sentido no estado do
                     post), e as raras/destrutivas num menu "⋯" à direita — antes eram quatro botões
                     concorrendo e quebrando em duas linhas. */}
-                {target.status === 'draft' ? (
+                {revivable ? (
+                  <Button onClick={() => act(() => reactivateTarget(target.id), 'De volta como rascunho.')}>
+                    Reativar
+                  </Button>
+                ) : target.status === 'draft' ? (
                   <Button onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
                     Mover para fila
                   </Button>
@@ -109,7 +119,7 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                   <Button onClick={() => requestPrefill({ post, target })}>Duplicar</Button>
                 )}
 
-                {target.status === 'draft' && canEdit && (
+                {(target.status === 'draft' || revivable) && canEdit && (
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -137,6 +147,14 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                         onClick={() => act(() => cancelTarget(target.id), 'Post cancelado.')}
                       >
                         Cancelar post
+                      </DropdownMenuItem>
+                    )}
+                    {target.status !== 'publishing' && target.status !== 'processing' && (
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => act(() => deleteTarget(target.id), 'Excluído.')}
+                      >
+                        Excluir de vez
                       </DropdownMenuItem>
                     )}
                   </DropdownMenuContent>

@@ -142,6 +142,13 @@ O que dá pra fazer:
   automático dos Cron Triggers (ver Pendências), mas só enquanto o dashboard estiver aberto.
 - **Cancelar** — enquanto o post ainda está `draft`/`queued` (antes do poller pegar pra publicar),
   tanto na lista quanto no modal de detalhe do calendário.
+- **Reativar / Excluir** — cancelado e falhou não são fim de linha. **Reativar** devolve o post pra
+  `draft` (não pra fila: a data original já pode ter passado, e voltar direto pra fila publicaria na
+  varredura seguinte), limpando o erro e a contagem de tentativas; de rascunho, você escolhe a nova
+  data e manda pra fila. **Excluir** apaga o destino de vez — e o post junto, se era o último destino
+  dele. Só não dá enquanto está `publishing`/`processing`, que é quando o poller já está falando com
+  a plataforma. Editar também passou a valer pra cancelado/falhou (é o caso de reaproveitar a peça);
+  ao salvar, esses destinos voltam como rascunho.
 
 ### Grid IG (planejador arrastável)
 

@@ -57,6 +57,14 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   const queueMatch = /^\/api\/post-targets\/([^/]+)\/queue$/.exec(pathname);
   if (queueMatch && method === 'POST') return queueTarget(queueMatch[1], env);
 
+  // Cancelado/falhou não é fim de linha: reativar devolve pra rascunho (não pra fila — a data
+  // original já pode ter passado, e voltar direto pra fila publicaria na hora seguinte).
+  const reactivateMatch = /^\/api\/post-targets\/([^/]+)\/reactivate$/.exec(pathname);
+  if (reactivateMatch && method === 'POST') return reactivateTarget(reactivateMatch[1], env);
+
+  const deleteTargetMatch = /^\/api\/post-targets\/([^/]+)$/.exec(pathname);
+  if (deleteTargetMatch && method === 'DELETE') return deleteTarget(deleteTargetMatch[1], env);
+
   const updatePostMatch = /^\/api\/posts\/([^/]+)$/.exec(pathname);
   if (updatePostMatch && method === 'PATCH') return updatePost(updatePostMatch[1], request, env);
 
@@ -553,7 +561,11 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
     .all<{ account_id: string; status: string }>();
   const existingTargets = targetRows ?? [];
 
-  const locked = existingTargets.some((t) => t.status !== 'draft' && t.status !== 'queued');
+  // Editável enquanto nada foi publicado de fato. Cancelado e falhou entram aqui de propósito: é
+  // justamente o caso de reaproveitar a peça (mudar a data, corrigir o que quebrou) em vez de
+  // refazer do zero. Publicando/processando/publicado seguem trancados.
+  const EDITABLE = new Set(['draft', 'queued', 'canceled', 'failed']);
+  const locked = existingTargets.some((t) => !EDITABLE.has(t.status));
   if (locked) {
     return jsonResponse({ error: 'não é possível editar: um ou mais destinos já estão publicando/publicados' }, 409);
   }
@@ -561,10 +573,11 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
   // target_account_ids present signals "full replace": the caller is editing accounts/media/
   // options, not just nudging the date, so every target is validated and rebuilt from scratch.
   if (payload.target_account_ids !== undefined) {
-    // Guaranteed 'draft' | 'queued' — every row here just passed the guard above.
+    // Um destino que estava cancelado/falho volta como RASCUNHO, nunca direto pra fila: a data
+    // que ele carregava já pode ter passado, e aí o poller publicaria no minuto seguinte à edição.
     const oldStatusMap = new Map<string, NewTargetStatus>();
     for (const t of existingTargets) {
-      oldStatusMap.set(t.account_id, t.status as NewTargetStatus);
+      oldStatusMap.set(t.account_id, t.status === 'draft' || t.status === 'queued' ? (t.status as NewTargetStatus) : 'draft');
     }
 
     const result = await validateAccountsAndMedia(env, {
@@ -1016,6 +1029,50 @@ async function cancelTarget(targetId: string, env: Env): Promise<Response> {
     return jsonResponse({ error: 'não é possível cancelar: já está publicando/publicado, ou o post não existe' }, 409);
   }
   return jsonResponse({ ok: true });
+}
+
+// Cancelado/falhou volta pra rascunho, e não pra fila: a data original pode já ter passado e o
+// poller publicaria na próxima varredura. De rascunho, a pessoa escolhe a data e manda pra fila.
+async function reactivateTarget(targetId: string, env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `update post_targets set status = 'draft', last_error = null, attempt_count = 0, updated_at = ?
+       where id = ? and status in ('canceled','failed','ambiguous') returning id`
+  )
+    .bind(nowIso(), targetId)
+    .all<{ id: string }>();
+
+  if ((results?.length ?? 0) === 0) {
+    return jsonResponse({ error: 'só dá pra reativar o que foi cancelado ou falhou' }, 409);
+  }
+  return jsonResponse({ ok: true });
+}
+
+// Apaga um destino de vez. Se era o último do post, o post vai junto — senão sobra uma linha em
+// scheduled_posts sem destino nenhum, invisível na interface e impossível de limpar depois.
+async function deleteTarget(targetId: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`select scheduled_post_id, status from post_targets where id = ?`)
+    .bind(targetId)
+    .first<{ scheduled_post_id: string; status: string }>();
+  if (!row) return jsonResponse({ error: 'destino não encontrado' }, 404);
+
+  // Em voo não dá: o poller já está falando com a plataforma e apagar aqui perderia o rastro do
+  // que foi publicado (ou está sendo).
+  if (row.status === 'publishing' || row.status === 'processing') {
+    return jsonResponse({ error: 'não é possível excluir enquanto está publicando — espere terminar' }, 409);
+  }
+
+  // post_target_media tem `on delete cascade` pro destino (0001), então some junto.
+  await env.DB.prepare(`delete from post_targets where id = ?`).bind(targetId).run();
+
+  const remaining = await env.DB.prepare(`select count(*) as n from post_targets where scheduled_post_id = ?`)
+    .bind(row.scheduled_post_id)
+    .first<{ n: number }>();
+  const postDeleted = (remaining?.n ?? 0) === 0;
+  if (postDeleted) {
+    await env.DB.prepare(`delete from scheduled_posts where id = ?`).bind(row.scheduled_post_id).run();
+  }
+
+  return jsonResponse({ ok: true, post_deleted: postDeleted });
 }
 
 async function queueTarget(targetId: string, env: Env): Promise<Response> {
