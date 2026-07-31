@@ -538,19 +538,18 @@ export function PostComposer({
         {/* Mídia vem antes da legenda: você escolhe o material e escreve olhando pra ele (é a ordem
             do próprio Instagram, e casa com o princípio "a pré-visualização é o herói"). */}
         <div className="space-y-1.5">
-          <Label htmlFor="f-media">Mídia (imagem ou vídeo, opcional)</Label>
-          <Input
-            id="f-media"
+          <Label>Mídia</Label>
+          {/* O `<input type=file>` cru ocupava uma linha inteira do formulário — texto do sistema,
+              largura toda — pra fazer o que um tile do tamanho do thumbnail faz. Ele continua aqui,
+              escondido, disparado pelo tile pontilhado no fim da grade. */}
+          <input
             ref={fileRef}
             type="file"
+            hidden
             multiple
             accept="image/jpeg,image/png,video/mp4,video/quicktime"
             onChange={(e) => onPickFiles(e.target.files)}
           />
-          <p className="text-xs text-muted-foreground">
-            Selecione 2+ imagens para criar um carrossel. JPEG, PNG, MP4 ou MOV. Arraste pra
-            reordenar, ou passe o mouse num item pra trocar/remover.
-          </p>
           <MediaQueueGrid
             items={queue}
             onReorder={setQueue}
@@ -560,7 +559,11 @@ export function PostComposer({
             }}
             onReplace={replaceMedia}
             onCrop={(key) => setCropQueue((c) => (c.includes(key) ? c : [key, ...c]))}
+            onAdd={() => fileRef.current?.click()}
           />
+          <p className="text-xs text-muted-foreground">
+            {queue.length > 1 ? 'Arraste pra reordenar. ' : '2+ imagens viram carrossel. '}JPEG, PNG, MP4 ou MOV.
+          </p>
           <ComposerHints hints={hints} field="media" />
         </div>
 

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Crop, RefreshCw, X, ImageIcon, Film } from 'lucide-react';
+import { Crop, ImagePlus, RefreshCw, X, ImageIcon, Film } from 'lucide-react';
 import { toast } from 'sonner';
 import type { QueuedMedia } from '@/lib/types';
 import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
@@ -99,12 +99,16 @@ export function MediaQueueGrid({
   onRemove,
   onReplace,
   onCrop,
+  onAdd,
 }: {
   items: QueuedMedia[];
   onReorder: (next: QueuedMedia[]) => void;
   onRemove: (key: string) => void;
   onReplace: (key: string, file: File) => void;
   onCrop?: (key: string) => void;
+  /** Abre o seletor de arquivos. Vem como um tile pontilhado no fim da grade — o `<input type=file>`
+   *  cru ocupava uma linha inteira do formulário pra fazer a mesma coisa. */
+  onAdd?: () => void;
 }) {
   const dragKey = useRef<string | null>(null);
   const replaceKey = useRef<string | null>(null);
@@ -140,7 +144,7 @@ export function MediaQueueGrid({
     onReplace(key, file);
   }
 
-  if (items.length === 0) return null;
+  if (items.length === 0 && !onAdd) return null;
 
   return (
     <div className="grid grid-cols-4 gap-2">
@@ -163,6 +167,16 @@ export function MediaQueueGrid({
           onCropClick={onCrop ? () => onCrop(item.key) : undefined}
         />
       ))}
+      {onAdd && (
+        <button
+          type="button"
+          onClick={onAdd}
+          title="Adicionar mídia"
+          className="grid aspect-square place-items-center rounded-xl border-2 border-dashed border-border bg-muted/40 text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+        >
+          <ImagePlus className="size-5" />
+        </button>
+      )}
     </div>
   );
 }

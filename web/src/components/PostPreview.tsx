@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import type { Platform, QueuedMedia } from '@/lib/types';
 import {
   PLATFORM_CAPTION_LIMITS,
@@ -38,19 +38,73 @@ function MediaFrame({ item, cover }: { item: QueuedMedia | undefined; cover?: Fi
   const url = useMediaUrl(item);
   const coverUrl = useMediaUrl(cover ? { key: 'cover', file: cover, name: cover.name, mime_type: cover.type } : undefined);
   const [broken, setBroken] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const video = isVideoMime(item?.mime_type);
 
-  // Vídeo com capa escolhida: mostra a capa, que é exatamente o que vai aparecer no feed.
-  if (video && coverUrl) {
-    return <img src={coverUrl} alt="" className="h-full w-full object-cover" />;
+  // Trocar de item no carrossel reaproveita este componente — sem isto, o próximo vídeo já
+  // apareceria "tocando" (com controles e sem capa) por causa do estado do anterior.
+  useEffect(() => {
+    setPlaying(false);
+    setBroken(false);
+  }, [url]);
+
+  async function play() {
+    const el = videoRef.current;
+    if (!el) return;
+    setPlaying(true);
+    // O src carrega com #t=0.1 pra render um frame parado (ver videoPosterUrl); ao dar play, volta
+    // do começo. E com som: o clique é gesto do usuário, então o navegador permite desmutar.
+    el.muted = false;
+    el.currentTime = 0;
+    try {
+      await el.play();
+    } catch {
+      setPlaying(false);
+    }
   }
+
   if (!item || !url || broken) {
     return <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{video ? 'vídeo' : item ? 'imagem' : 'sem mídia'}</div>;
   }
-  return video ? (
-    <video src={videoPosterUrl(url)} muted playsInline preload="metadata" className="h-full w-full object-cover" onError={() => setBroken(true)} />
-  ) : (
-    <img src={url} alt="" className="h-full w-full object-cover" onError={() => setBroken(true)} />
+
+  if (!video) {
+    return <img src={url} alt="" className="h-full w-full object-cover" onError={() => setBroken(true)} />;
+  }
+
+  return (
+    <div className="relative h-full w-full">
+      <video
+        ref={videoRef}
+        src={videoPosterUrl(url)}
+        muted
+        playsInline
+        preload="metadata"
+        controls={playing}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        className="h-full w-full object-cover"
+        onError={() => setBroken(true)}
+      />
+
+      {/* Parado, o que aparece é a CAPA quando existe — é o que a rede vai mostrar no feed. O play
+          toca o vídeo de verdade por baixo dela. */}
+      {!playing && coverUrl && (
+        <img src={coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+      )}
+      {!playing && (
+        <button
+          type="button"
+          aria-label="Reproduzir vídeo"
+          onClick={play}
+          className="absolute inset-0 grid place-items-center bg-black/10 transition-colors hover:bg-black/25"
+        >
+          <span className="grid size-12 place-items-center rounded-full bg-black/60 text-white backdrop-blur-sm">
+            <Play className="ml-0.5 size-5 fill-current" />
+          </span>
+        </button>
+      )}
+    </div>
   );
 }
 

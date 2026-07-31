@@ -125,7 +125,7 @@ O que dá pra fazer:
 - **Duplicar** — copia um post existente pro formulário reaproveitando a mídia já no R2 (sem
   re-upload), pra republicar em outra data ou outra conta.
 - **Pré-visualização** — abaixo do formulário, um card por conta selecionada mostra como o post
-  vai ficar (mock do formato de cada rede: Instagram quadrado com @usuário, YouTube 16:9 com
+  vai ficar, com **play** no vídeo (som e controles; se houver capa, é ela que aparece parada) (mock do formato de cada rede: Instagram quadrado com @usuário, YouTube 16:9 com
   título, Story 9:16 sem legenda, etc.), já com a mídia que está na fila. Avisa quando a legenda
   passa do limite da plataforma e quando um Story ignora a legenda. O mesmo card aparece no modal
   de detalhe de qualquer post agendado ("Como vai ficar").
