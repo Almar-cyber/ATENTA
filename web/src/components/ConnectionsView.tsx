@@ -43,13 +43,16 @@ export function ConnectionsView({ onBack }: { onBack: () => void }) {
             const href = connectHref(platform);
             const hasAccounts = platformAccounts.length > 0;
             return (
-              <Card key={platform} size="sm" className="gap-3">
+              // h-full + flex-col fazem os cards da mesma linha terem a mesma altura, e o mt-auto
+              // do bloco de ação prende o botão no rodapé — sem isso ele flutua logo abaixo da
+              // lista e cada card alinha o botão numa altura diferente.
+              <Card key={platform} size="sm" className="flex h-full flex-col gap-3">
                 <CardHeader className="flex-row items-center gap-2 space-y-0">
                   <PlatformAvatar platform={platform} />
                   <CardTitle className="text-sm">{PLATFORM_LABELS[platform]}</CardTitle>
                 </CardHeader>
 
-                <CardContent className="space-y-2">
+                <CardContent className="flex flex-1 flex-col gap-2">
                   {hasAccounts &&
                     platformAccounts.map((a) => (
                       <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2">
@@ -60,25 +63,26 @@ export function ConnectionsView({ onBack }: { onBack: () => void }) {
                       </div>
                     ))}
 
-                  {href ? (
-                    <Button
-                      variant={hasAccounts ? 'outline' : 'default'}
-                      className="w-full"
-                      onClick={() => {
-                        window.location.href = href;
-                      }}
-                    >
-                      {hasAccounts ? 'Conectar outra' : 'Conectar'}
-                    </Button>
-                  ) : (
-                    <Button variant="outline" className="w-full" disabled>
-                      Em breve (login web)
-                    </Button>
-                  )}
-
-                  {(platform === 'instagram' || platform === 'facebook') && (
-                    <p className="text-xs text-muted-foreground">Instagram e Facebook conectam juntos pela Meta.</p>
-                  )}
+                  <div className="mt-auto space-y-2 pt-1">
+                    {(platform === 'instagram' || platform === 'facebook') && (
+                      <p className="text-xs text-muted-foreground">Instagram e Facebook conectam juntos pela Meta.</p>
+                    )}
+                    {href ? (
+                      <Button
+                        variant={hasAccounts ? 'outline' : 'default'}
+                        className="w-full"
+                        onClick={() => {
+                          window.location.href = href;
+                        }}
+                      >
+                        {hasAccounts ? 'Conectar outra' : 'Conectar'}
+                      </Button>
+                    ) : (
+                      <Button variant="outline" className="w-full" disabled>
+                        Em breve (login web)
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             );
