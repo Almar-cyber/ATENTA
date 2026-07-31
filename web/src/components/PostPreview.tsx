@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Platform, QueuedMedia } from '@/lib/types';
 import {
   PLATFORM_CAPTION_LIMITS,
@@ -49,6 +50,10 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   const limit = PLATFORM_CAPTION_LIMITS[platform];
   const over = limit != null && caption.length > limit;
   const shownCaption = useMemo(() => (over ? caption.slice(0, limit) : caption), [over, caption, limit]);
+  // Índice do carrossel. Clampado na renderização porque a fila de mídia pode encolher (remover um
+  // item) enquanto o índice ainda aponta pro slot antigo.
+  const [index, setIndex] = useState(0);
+  const safeIndex = Math.min(index, Math.max(0, media.length - 1));
 
   return (
     <div className="w-full max-w-[300px] overflow-hidden rounded-2xl border bg-card shadow-md">
@@ -70,18 +75,47 @@ export function PostPreview({ input }: { input: PreviewInput }) {
 
       {media.length > 0 ? (
         <div
-          className="relative w-full overflow-hidden bg-muted"
+          className="group/carousel relative w-full overflow-hidden bg-muted"
           style={{ aspectRatio: SHAPE_ASPECT[shape], maxHeight: 340 }}
         >
-          <MediaFrame item={media[0]} />
+          <MediaFrame item={media[safeIndex]} />
           {media.length > 1 && (
             <>
               <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white">
-                1/{media.length}
+                {safeIndex + 1}/{media.length}
               </div>
+
+              {/* Navegação do carrossel: dá pra conferir cada arquivo sem sair da pré-visualização. */}
+              {safeIndex > 0 && (
+                <button
+                  type="button"
+                  aria-label="Anterior"
+                  onClick={() => setIndex(safeIndex - 1)}
+                  className="absolute left-1.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full bg-black/50 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover/carousel:opacity-100"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+              )}
+              {safeIndex < media.length - 1 && (
+                <button
+                  type="button"
+                  aria-label="Próximo"
+                  onClick={() => setIndex(safeIndex + 1)}
+                  className="absolute right-1.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full bg-black/50 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover/carousel:opacity-100"
+                >
+                  <ChevronRight className="size-4" />
+                </button>
+              )}
+
               <div className="absolute inset-x-0 bottom-2 flex justify-center gap-1">
                 {media.map((m, i) => (
-                  <span key={m.key} className={`size-1.5 rounded-full ${i === 0 ? 'bg-white' : 'bg-white/55'}`} />
+                  <button
+                    key={m.key}
+                    type="button"
+                    aria-label={`Ir para o item ${i + 1}`}
+                    onClick={() => setIndex(i)}
+                    className={`size-1.5 rounded-full transition-colors ${i === safeIndex ? 'bg-white' : 'bg-white/55 hover:bg-white/80'}`}
+                  />
                 ))}
               </div>
             </>

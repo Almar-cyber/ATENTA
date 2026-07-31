@@ -284,15 +284,16 @@ export function PostComposer({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b px-5 py-4">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b px-5 py-4">
         <h2 className="text-lg font-semibold">{editingPostId ? 'Editar post' : 'Novo post'}</h2>
         <Button type="button" variant="ghost" size="icon-sm" onClick={() => onDone?.()} aria-label="Fechar">
           <X className="size-4" />
         </Button>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      {/* Estreito: rola tudo junto (uma barra só). Largo: duas colunas com scroll independente. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+        <div className="min-h-0 flex-1 space-y-4 px-5 py-4 md:overflow-y-auto">
         {editingPostId && (
           <div className="flex items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm dark:border-sky-500/30 dark:bg-sky-500/10">
             <span>Editando post agendado</span>
@@ -324,6 +325,30 @@ export function PostComposer({
 
         {selectedAccounts.length > 0 && (
           <div className="space-y-4">
+        {/* Mídia vem antes da legenda: você escolhe o material e escreve olhando pra ele (é a ordem
+            do próprio Instagram, e casa com o princípio "a pré-visualização é o herói"). */}
+        <div className="space-y-1.5">
+          <Label htmlFor="f-media">Mídia (imagem ou vídeo, opcional)</Label>
+          <Input
+            id="f-media"
+            ref={fileRef}
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,video/mp4,video/quicktime"
+            onChange={(e) => onPickFiles(e.target.files)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Selecione 2+ imagens para criar um carrossel. JPEG, PNG, MP4 ou MOV. Arraste pra
+            reordenar, ou passe o mouse num item pra trocar/remover.
+          </p>
+          <MediaQueueGrid
+            items={queue}
+            onReorder={setQueue}
+            onRemove={(key) => setQueue((q) => q.filter((i) => i.key !== key))}
+            onReplace={replaceMedia}
+          />
+        </div>
+
         <div className="space-y-1.5">
           <Label htmlFor="f-body">Legenda</Label>
           <Textarea id="f-body" value={body} onChange={(e) => setBody(e.target.value)} className="min-h-24" />
@@ -410,28 +435,6 @@ export function PostComposer({
             </div>
           </div>
         )}
-
-        <div className="space-y-1.5">
-          <Label htmlFor="f-media">Mídia (imagem ou vídeo, opcional)</Label>
-          <Input
-            id="f-media"
-            ref={fileRef}
-            type="file"
-            multiple
-            accept="image/jpeg,image/png,video/mp4,video/quicktime"
-            onChange={(e) => onPickFiles(e.target.files)}
-          />
-          <p className="text-xs text-muted-foreground">
-            Selecione 2+ imagens para criar um carrossel. JPEG, PNG, MP4 ou MOV. Arraste pra
-            reordenar, ou passe o mouse num item pra trocar/remover.
-          </p>
-          <MediaQueueGrid
-            items={queue}
-            onReorder={setQueue}
-            onRemove={(key) => setQueue((q) => q.filter((i) => i.key !== key))}
-            onReplace={replaceMedia}
-          />
-        </div>
 
         {selectedAccounts.some((a) => a.platform === 'instagram') && (
           <label className="flex items-center gap-2 text-sm font-medium">

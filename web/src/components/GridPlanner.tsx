@@ -74,7 +74,12 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
     const order = entries.filter((e) => e.target.status !== 'published').map((e) => e.post.id);
     const from = order.indexOf(fromId);
     const to = order.indexOf(toId);
-    if (from === -1 || to === -1) return;
+    // Silêncio aqui parecia "o arrastar não funciona" — o motivo real é sempre um post publicado
+    // na jogada (o horário dele já passou, não dá pra redistribuir). Diz isso em vez de no-op.
+    if (from === -1 || to === -1) {
+      toast.error('Posts já publicados não entram na reordenação — arraste entre os agendados.');
+      return;
+    }
     const before = order.slice();
     order.splice(to, 0, order.splice(from, 1)[0]);
     sendOrder(order, before, 'Ordem atualizada — horários redistribuídos.');

@@ -24,19 +24,22 @@ export function AccountPicker({
 
   return (
     <div className="space-y-1.5">
-      <div className="flex justify-end gap-1">
-        <Button
-          size="xs"
-          variant="ghost"
-          disabled={activeIds.length === 0}
-          onClick={() => onChange(new Set(activeIds))}
-        >
-          Selecionar todas
-        </Button>
-        <Button size="xs" variant="ghost" disabled={selected.size === 0} onClick={() => onChange(new Set())}>
-          Limpar
-        </Button>
-      </div>
+      {/* Com uma conta só, "selecionar todas / limpar" é ruído — o próprio chip já faz o toggle. */}
+      {accounts.length > 1 && (
+        <div className="flex justify-end gap-1">
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={activeIds.length === 0}
+            onClick={() => onChange(new Set(activeIds))}
+          >
+            Selecionar todas
+          </Button>
+          <Button size="xs" variant="ghost" disabled={selected.size === 0} onClick={() => onChange(new Set())}>
+            Limpar
+          </Button>
+        </div>
+      )}
       <ToggleGroup
         type="multiple"
         value={Array.from(selected)}
