@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { ImageIcon, Layers, PenLine } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Post, Target } from '@/lib/types';
 import { isVideoMime } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
-import { reschedule } from '@/lib/api';
+import { getAccountFeed, reschedule } from '@/lib/api';
+import type { FeedItem } from '@/lib/api';
 import { useScheduler } from '@/store';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -47,8 +48,28 @@ function gridEntries(posts: Post[]): Entry[] {
 }
 
 export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogSelection) => void }) {
-  const { reload } = useScheduler();
+  const { reload, accounts } = useScheduler();
   const entries = useMemo(() => gridEntries(posts), [posts]);
+
+  // Feed real do perfil, buscado ao vivo: é o que permite planejar a estética contra o que já
+  // existe. Vem depois dos agendados na grade, que é a ordem em que o perfil vai ficar.
+  const igAccount = accounts.find((a) => a.platform === 'instagram' && a.status === 'active');
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!igAccount) return;
+    let alive = true;
+    getAccountFeed(igAccount.id)
+      .then((r) => {
+        if (!alive) return;
+        setFeed(r.items ?? []);
+        setFeedError(r.error ?? null);
+      })
+      .catch((e) => alive && setFeedError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      alive = false;
+    };
+  }, [igAccount?.id]);
   const [undo, setUndo] = useState<string[] | null>(null);
   const dragId = useRef<string | null>(null);
 
@@ -87,7 +108,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
     sendOrder(order, before, 'Ordem atualizada — horários redistribuídos.');
   }
 
-  if (entries.length === 0) {
+  if (entries.length === 0 && feed.length === 0) {
     return <EmptyState>Nenhum post do Instagram na fila para planejar.</EmptyState>;
   }
 
@@ -140,7 +161,36 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
             </motion.div>
           );
         })}
+
+        {/* Já publicados no perfil (vindos da API do Instagram) — não arrastáveis: são âncoras. */}
+        {feed.map((item) => (
+          <a
+            key={`feed-${item.id}`}
+            href={item.permalink ?? undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={item.caption ?? 'Post publicado no Instagram'}
+            className="group relative block aspect-[3/4] overflow-hidden bg-muted"
+          >
+            {item.thumbnail_url ? (
+              <img src={item.thumbnail_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
+            ) : (
+              <div className="grid size-full place-items-center text-muted-foreground">
+                <ImageIcon className="size-5" />
+              </div>
+            )}
+            <span className="absolute left-1 top-1 rounded-md bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">
+              no perfil
+            </span>
+          </a>
+        ))}
       </div>
+
+      {feedError && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Não consegui carregar o feed do Instagram ({feedError}). A grade mostra só os agendados.
+        </p>
+      )}
     </div>
   );
 }

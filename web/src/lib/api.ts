@@ -134,6 +134,20 @@ export async function uploadMedia(
   });
 }
 
+export interface FeedItem {
+  id: string;
+  thumbnail_url: string | null;
+  permalink: string | null;
+  caption: string | null;
+  published_at: string | null;
+  is_video: boolean;
+}
+
+// Feed real da conta (busca ao vivo na API da rede). Só Instagram e YouTube.
+export function getAccountFeed(accountId: string): Promise<{ items: FeedItem[]; error?: string }> {
+  return req(`/api/feed/${accountId}`);
+}
+
 export function cancelTarget(id: string): Promise<{ ok: true }> {
   return req(`/api/post-targets/${id}/cancel`, { method: 'POST' });
 }

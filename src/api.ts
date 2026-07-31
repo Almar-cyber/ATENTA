@@ -1,9 +1,11 @@
 import { adapters } from './adapters/index.js';
-import { nowIso, rowToMediaAsset } from './lib/db.js';
+import { nowIso, rowToAccount, rowToMediaAsset } from './lib/db.js';
+import { getAccountTokens } from './lib/tokens.js';
+import { fetchWithRetry } from './lib/http.js';
 import { buildAuthUrl, isOAuthPlatform, OAUTH_CLIENT_ID_ENV } from './lib/oauth-urls.js';
 import { encodeState, setStateCookie } from './lib/oauth-state.js';
 import type { Env } from './lib/env.js';
-import type { MediaAsset, Platform, PostTarget } from './lib/types.js';
+import type { Account, MediaAsset, Platform, PostTarget } from './lib/types.js';
 
 const PLATFORMS: readonly Platform[] = ['youtube', 'linkedin', 'instagram', 'facebook', 'pinterest', 'tiktok'];
 const MAX_POSTS_LIMIT = 300;
@@ -36,6 +38,11 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   if (pathname === '/api/media/multipart/start' && method === 'POST') return multipartStart(request, env);
   if (pathname === '/api/media/multipart/part' && method === 'PUT') return multipartPart(request, url, env);
   if (pathname === '/api/media/multipart/complete' && method === 'POST') return multipartComplete(request, env);
+
+  // Feed real da conta conectada (busca AO VIVO na API da rede — as URLs de mídia do Instagram
+  // expiram em dias, então guardar em cache no D1 renderia links quebrados).
+  const feedMatch = /^\/api\/feed\/([^/]+)$/.exec(pathname);
+  if (feedMatch && method === 'GET') return getAccountFeed(feedMatch[1], env);
 
   const cancelMatch = /^\/api\/post-targets\/([^/]+)\/cancel$/.exec(pathname);
   if (cancelMatch && method === 'POST') return cancelTarget(cancelMatch[1], env);
@@ -688,6 +695,110 @@ async function uploadMedia(request: Request, env: Env): Promise<Response> {
     },
     201
   );
+}
+
+export interface FeedItem {
+  id: string;
+  thumbnail_url: string | null;
+  permalink: string | null;
+  caption: string | null;
+  published_at: string | null;
+  is_video: boolean;
+}
+
+// Busca os posts já publicados na conta, pra o planejador de grade mostrar o feed real ao lado do
+// que está agendado. Só Instagram e YouTube: são as redes com escopo de leitura já concedido e
+// cujo perfil tem uma estética de grade/lista que valha planejar.
+async function getAccountFeed(accountId: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`select * from accounts where id = ?`).bind(accountId).first<any>();
+  if (!row) return jsonResponse({ error: 'conta não encontrada' }, 404);
+  const account = rowToAccount(row);
+
+  try {
+    if (account.platform === 'instagram') return jsonResponse({ items: await fetchInstagramFeed(account, env) });
+    if (account.platform === 'youtube') return jsonResponse({ items: await fetchYoutubeFeed(account, env) });
+    return jsonResponse({ items: [], unsupported: true });
+  } catch (err) {
+    // Feed é um extra: se a plataforma recusar, o grid segue mostrando os agendados.
+    return jsonResponse({ items: [], error: err instanceof Error ? err.message : String(err) }, 200);
+  }
+}
+
+async function fetchInstagramFeed(account: Account, env: Env): Promise<FeedItem[]> {
+  const tokens = await getAccountTokens<{ access_token: string }>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
+  if (!tokens?.access_token || !account.external_account_id) return [];
+  const url =
+    `https://graph.facebook.com/v21.0/${account.external_account_id}/media` +
+    `?fields=id,media_type,media_url,thumbnail_url,permalink,timestamp,caption&limit=24` +
+    `&access_token=${encodeURIComponent(tokens.access_token)}`;
+  const res = await fetchWithRetry(url);
+  if (!res.ok) throw new Error(`instagram feed: ${res.status} ${await res.text()}`);
+  const json = (await res.json()) as {
+    data?: Array<{
+      id: string;
+      media_type?: string;
+      media_url?: string;
+      thumbnail_url?: string;
+      permalink?: string;
+      timestamp?: string;
+      caption?: string;
+    }>;
+  };
+  return (json.data ?? []).map((m) => ({
+    id: m.id,
+    // VIDEO usa thumbnail_url; imagem e carrossel usam media_url.
+    thumbnail_url: m.thumbnail_url ?? m.media_url ?? null,
+    permalink: m.permalink ?? null,
+    caption: m.caption ?? null,
+    published_at: m.timestamp ?? null,
+    is_video: m.media_type === 'VIDEO',
+  }));
+}
+
+async function fetchYoutubeFeed(account: Account, env: Env): Promise<FeedItem[]> {
+  const tokens = await getAccountTokens<{ access_token: string }>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
+  if (!tokens?.access_token) return [];
+  const auth = { Authorization: `Bearer ${tokens.access_token}` };
+
+  // O canal guarda os uploads numa playlist própria; é preciso descobri-la antes de listar.
+  const chRes = await fetchWithRetry('https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true', {
+    headers: auth,
+  });
+  if (!chRes.ok) throw new Error(`youtube feed: ${chRes.status} ${await chRes.text()}`);
+  const chJson = (await chRes.json()) as {
+    items?: Array<{ contentDetails?: { relatedPlaylists?: { uploads?: string } } }>;
+  };
+  const uploads = chJson.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) return [];
+
+  const plRes = await fetchWithRetry(
+    `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=24&playlistId=${encodeURIComponent(uploads)}`,
+    { headers: auth }
+  );
+  if (!plRes.ok) throw new Error(`youtube feed: ${plRes.status} ${await plRes.text()}`);
+  const plJson = (await plRes.json()) as {
+    items?: Array<{
+      snippet?: {
+        title?: string;
+        publishedAt?: string;
+        resourceId?: { videoId?: string };
+        thumbnails?: Record<string, { url?: string }>;
+      };
+    }>;
+  };
+  return (plJson.items ?? []).map((it) => {
+    const sn = it.snippet ?? {};
+    const videoId = sn.resourceId?.videoId ?? '';
+    const thumbs = sn.thumbnails ?? {};
+    return {
+      id: videoId,
+      thumbnail_url: thumbs.high?.url ?? thumbs.medium?.url ?? thumbs.default?.url ?? null,
+      permalink: videoId ? `https://youtu.be/${videoId}` : null,
+      caption: sn.title ?? null,
+      published_at: sn.publishedAt ?? null,
+      is_video: true,
+    };
+  });
 }
 
 interface MultipartStartBody {
