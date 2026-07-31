@@ -33,6 +33,7 @@ import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
 import { ComposerHints } from './ComposerHints';
+import type { Hint } from './ComposerHints';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PlatformIcon } from './PlatformIcon';
 
@@ -193,8 +194,11 @@ export function PostComposer({
   const activeAccount = activeTab === 'all' ? null : (selectedAccounts.find((a) => a.id === activeTab) ?? null);
   const tabAccounts = activeAccount ? [activeAccount] : selectedAccounts;
 
+  // Dicas classificadas por CAMPO, pra cada aviso aparecer junto do campo que o causou (o de
+  // mídia embaixo do seletor de arquivos, o de legenda embaixo do textarea) em vez de tudo
+  // amontoado num bloco só. Texto imperativo: diz o que fazer, não só o que está errado.
   const hints = useMemo(() => {
-    const out: string[] = [];
+    const out: Hint[] = [];
     if (tabAccounts.length === 0) return out;
     const count = queue.length;
     const hasVideo = queue.some((q) => isVideoMime(q.mime_type));
@@ -202,13 +206,29 @@ export function PostComposer({
       const name = PLATFORM_LABELS[a.platform];
       const effectiveCaption = captionOverrides[a.id] ?? body;
       const limit = PLATFORM_CAPTION_LIMITS[a.platform];
-      if (limit != null) out.push(`${name}: ${effectiveCaption.length}/${limit}${effectiveCaption.length > limit ? ' ⚠' : ''}`);
+      if (limit != null) {
+        const over = effectiveCaption.length > limit;
+        out.push({
+          field: 'caption',
+          problem: over,
+          text: over
+            ? `Encurte a legenda do ${name} em ${effectiveCaption.length - limit} caractere(s)`
+            : `${name}: ${effectiveCaption.length}/${limit}`,
+        });
+      }
       const requires = PLATFORM_REQUIRES_MEDIA[a.platform];
-      if (requires && count === 0) out.push(`${name} exige ${requires} — anexe um arquivo`);
+      // Mesmo texto pra todas as redes que exigem mídia — assim o Set dedupe e sobra um aviso só.
+      if (requires && count === 0) out.push({ field: 'media', problem: true, text: 'Anexe um arquivo' });
       const max = PLATFORM_MEDIA_MAX[a.platform];
-      if (count > max) out.push(`${name} aceita no máximo ${max} ${max === 1 ? 'arquivo' : 'arquivos'} (você anexou ${count})`);
-      if (count > 1 && hasVideo && PLATFORM_MULTI_IMAGE_ONLY[a.platform]) out.push(`${name}: carrossel aceita apenas imagens — vídeo só sozinho`);
-      if (count > 1 && a.platform === 'instagram' && isStory) out.push(`${name}: Story aceita apenas um arquivo`);
+      if (count > max) {
+        out.push({ field: 'media', problem: true, text: `Remova ${count - max} arquivo(s) — ${name} aceita no máximo ${max}` });
+      }
+      if (count > 1 && hasVideo && PLATFORM_MULTI_IMAGE_ONLY[a.platform]) {
+        out.push({ field: 'media', problem: true, text: `Use só imagens no carrossel do ${name} (vídeo vai sozinho)` });
+      }
+      if (count > 1 && a.platform === 'instagram' && isStory) {
+        out.push({ field: 'media', problem: true, text: 'Deixe só um arquivo para publicar como Story' });
+      }
 
       const videoLimits = a.platform === 'instagram' && isStory ? INSTAGRAM_STORY_VIDEO_LIMITS : PLATFORM_VIDEO_LIMITS[a.platform];
       if (videoLimits) {
@@ -216,23 +236,24 @@ export function PostComposer({
           if (!isVideoMime(item.mime_type)) continue;
           const dur = item.duration_seconds;
           if (dur != null && videoLimits.minDurationSeconds != null && dur < videoLimits.minDurationSeconds) {
-            out.push(`${name}: vídeo muito curto (${fmtDuration(dur)}, mínimo ${fmtDuration(videoLimits.minDurationSeconds)})`);
+            out.push({ field: 'media', problem: true, text: `Use um vídeo de pelo menos ${fmtDuration(videoLimits.minDurationSeconds)} no ${name}` });
           }
           if (dur != null && videoLimits.maxDurationSeconds != null && dur > videoLimits.maxDurationSeconds) {
-            out.push(`${name}: vídeo muito longo (${fmtDuration(dur)}, máximo ${fmtDuration(videoLimits.maxDurationSeconds)})`);
+            out.push({ field: 'media', problem: true, text: `Corte o vídeo para no máximo ${fmtDuration(videoLimits.maxDurationSeconds)} no ${name}` });
           }
           const size = item.file?.size;
           if (size != null && videoLimits.maxSizeBytes != null && size > videoLimits.maxSizeBytes) {
-            out.push(`${name}: arquivo muito grande (${fmtBytes(size)}, máximo ${fmtBytes(videoLimits.maxSizeBytes)})`);
+            out.push({ field: 'media', problem: true, text: `Comprima o vídeo para menos de ${fmtBytes(videoLimits.maxSizeBytes)} no ${name}` });
           }
           if (a.platform === 'youtube' && dur != null && dur > YOUTUBE_LONG_VIDEO_WARN_SECONDS) {
-            out.push(`${name}: vídeos acima de 15min precisam de conta verificada`);
+            out.push({ field: 'media', problem: true, text: 'Vídeos acima de 15min precisam de conta verificada no YouTube' });
           }
         }
       }
     }
     // Duas contas da mesma rede geravam a mesma dica duas vezes ("Instagram: 0/2200" repetido).
-    return Array.from(new Set(out));
+    const seen = new Set<string>();
+    return out.filter((h) => (seen.has(h.text) ? false : (seen.add(h.text), true)));
   }, [tabAccounts, body, queue, isStory, captionOverrides]);
 
   // O preview segue a aba: 'all' mostra todas as contas, uma aba de conta mostra só ela.
@@ -359,6 +380,7 @@ export function PostComposer({
             onRemove={(key) => setQueue((q) => q.filter((i) => i.key !== key))}
             onReplace={replaceMedia}
           />
+          <ComposerHints hints={hints} field="media" />
         </div>
 
         {/* Abas por conta: 'Todas' edita a legenda compartilhada; cada aba de conta edita só a
@@ -411,13 +433,13 @@ export function PostComposer({
               onChange={(e) => setCaptionOverrides((prev) => ({ ...prev, [activeAccount.id]: e.target.value }))}
               className="min-h-24"
             />
-            <ComposerHints hints={hints} />
+            <ComposerHints hints={hints} field="caption" />
           </div>
         ) : (
         <div className="space-y-1.5">
           <Label htmlFor="f-body">Legenda</Label>
           <Textarea id="f-body" value={body} onChange={(e) => setBody(e.target.value)} className="min-h-24" />
-          <ComposerHints hints={hints} />
+          <ComposerHints hints={hints} field="caption" />
         </div>
         )}
 
@@ -488,7 +510,7 @@ export function PostComposer({
         <Button size="lg" onClick={() => submit(false)} disabled={submitting}>
           {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
         </Button>
-        <Button variant="outline" onClick={() => submit(true)} disabled={submitting}>
+        <Button size="lg" variant="outline" onClick={() => submit(true)} disabled={submitting}>
           Salvar como rascunho
         </Button>
       </div>

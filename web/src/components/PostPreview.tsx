@@ -56,7 +56,7 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   const safeIndex = Math.min(index, Math.max(0, media.length - 1));
 
   return (
-    <div className="w-full max-w-[300px] overflow-hidden rounded-2xl bg-card shadow-soft ring-1 ring-foreground/5">
+    <div className="w-full max-w-[300px] overflow-hidden rounded-2xl bg-card border-2 border-foreground shadow-[4px_4px_0_0_var(--foreground)]">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div
           className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white"

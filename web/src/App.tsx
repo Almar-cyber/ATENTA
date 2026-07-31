@@ -81,7 +81,7 @@ function ComposerModal({ open, onClose, children }: { open: boolean; onClose: ()
     >
       <div aria-hidden onClick={onClose} className="absolute inset-0 bg-foreground/25 backdrop-blur-[2px]" />
       <div
-        className={`relative z-10 flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-card shadow-soft-lg ring-1 ring-foreground/10 transition-transform duration-200 ${open ? 'scale-100' : 'scale-95'}`}
+        className={`relative z-10 flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-card border-2 border-foreground shadow-[6px_6px_0_0_var(--foreground)] transition-transform duration-200 ${open ? 'scale-100' : 'scale-95'}`}
       >
         {children}
       </div>
@@ -150,7 +150,7 @@ function Dashboard() {
         {screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
         ) : (
-        <section className="flex h-full flex-col rounded-2xl bg-card p-5 shadow-soft ring-1 ring-foreground/5">
+        <section className="flex h-full flex-col rounded-2xl bg-card p-5 border-2 border-foreground shadow-[4px_4px_0_0_var(--foreground)]">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold">Posts agendados</h2>
             <div className="flex flex-wrap items-center gap-2">
