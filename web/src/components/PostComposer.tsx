@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { X } from 'lucide-react';
 import { toast } from 'sonner';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -28,6 +28,7 @@ import {
   isVideoMime,
 } from '@/lib/platforms';
 import type { PreviewInput } from './PostPreview';
+import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
 
@@ -43,7 +44,13 @@ export interface KeyedPreviewInput {
   input: PreviewInput;
 }
 
-export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: KeyedPreviewInput[]) => void }) {
+export function PostComposer({
+  onRequestOpen,
+  onDone,
+}: {
+  onRequestOpen?: () => void;
+  onDone?: () => void;
+}) {
   const { accounts, accountsById, reload } = useScheduler();
 
   const [title, setTitle] = useState('');
@@ -84,7 +91,7 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
         }))
       );
       toast.success('Post duplicado — escolha uma nova data.');
-      document.getElementById('composer-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      onRequestOpen?.();
     });
   }, []);
 
@@ -118,7 +125,7 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
         )
       );
       toast.success('Editando post — altere e salve.');
-      document.getElementById('composer-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      onRequestOpen?.();
     });
   }, []);
 
@@ -126,8 +133,7 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
   useEffect(() => {
     return onPrefillDate((local) => {
       setScheduledLocal(local);
-      document.getElementById('f-body')?.focus();
-      document.getElementById('composer-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      onRequestOpen?.();
     });
   }, []);
 
@@ -234,10 +240,6 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
     [selectedAccounts, body, captionOverrides, title, queue, isStory]
   );
 
-  useEffect(() => {
-    onPreviewChange?.(previewItems);
-  }, [previewItems, onPreviewChange]);
-
   async function submit(asDraft: boolean) {
     if (selected.size === 0) return toast.error('Selecione ao menos uma conta de destino.');
     if (!scheduledLocal) return toast.error('Informe data/hora do agendamento.');
@@ -272,6 +274,7 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
       toast.success(editingPostId ? 'Post atualizado.' : asDraft ? 'Rascunho salvo.' : 'Post agendado com sucesso.');
       resetForm();
       setEditingPostId(null);
+      onDone?.();
       await reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -281,13 +284,17 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
   }
 
   return (
-    <Card id="composer-card" className="sticky top-4">
-      <CardHeader>
-        <CardTitle>Novo post</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between gap-2 border-b px-5 py-4">
+        <h2 className="text-lg font-semibold">{editingPostId ? 'Editar post' : 'Novo post'}</h2>
+        <Button type="button" variant="ghost" size="icon-sm" onClick={() => onDone?.()} aria-label="Fechar">
+          <X className="size-4" />
+        </Button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
         {editingPostId && (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm dark:border-sky-500/30 dark:bg-sky-500/10">
             <span>Editando post agendado</span>
             <Button
               type="button"
@@ -304,11 +311,19 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
           </div>
         )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="f-title">Título (opcional, usado no YouTube)</Label>
-          <Input id="f-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <div className="space-y-2">
+          <Label>Contas de destino</Label>
+          <AccountPicker accounts={accounts} selected={selected} onChange={setSelected} />
         </div>
 
+        {selectedAccounts.length === 0 && (
+          <p className="rounded-lg border border-dashed px-4 py-6 text-center text-xs text-muted-foreground">
+            Escolha ao menos uma conta acima para preencher o restante do post.
+          </p>
+        )}
+
+        {selectedAccounts.length > 0 && (
+          <div className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="f-body">Legenda</Label>
           <Textarea id="f-body" value={body} onChange={(e) => setBody(e.target.value)} className="min-h-24" />
@@ -327,14 +342,16 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
           </AnimatePresence>
         </div>
 
+        {selectedAccounts.some((a) => a.platform === 'youtube') && (
+          <div className="space-y-1.5">
+            <Label htmlFor="f-title">Título do vídeo (YouTube)</Label>
+            <Input id="f-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="f-when">Quando publicar</Label>
           <Input id="f-when" type="datetime-local" value={scheduledLocal} onChange={(e) => setScheduledLocal(e.target.value)} />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Contas de destino</Label>
-          <AccountPicker accounts={accounts} selected={selected} onChange={setSelected} />
         </div>
 
         {selectedAccounts.length >= 2 && (
@@ -446,17 +463,35 @@ export function PostComposer({ onPreviewChange }: { onPreviewChange?: (items: Ke
             <Input id="f-board" value={pinBoard} onChange={(e) => setPinBoard(e.target.value)} placeholder="usa o board padrão da conta se vazio" />
           </div>
         )}
+          </div>
+        )}
 
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Button onClick={() => submit(false)} disabled={submitting}>
-            {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
-          </Button>
-          <Button variant="outline" onClick={() => submit(true)} disabled={submitting}>
-            Salvar como rascunho
-          </Button>
         </div>
 
-      </CardContent>
-    </Card>
+        <div className="min-h-0 shrink-0 space-y-3 overflow-y-auto border-t bg-muted/30 px-5 py-4 md:w-80 md:border-l md:border-t-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pré-visualização</p>
+          {previewItems.length > 0 ? (
+            <div className="flex flex-col items-center gap-3">
+              {previewItems.map(({ accountId, input }) => (
+                <PostPreview key={accountId} input={input} />
+              ))}
+            </div>
+          ) : (
+            <p className="pt-8 text-center text-xs text-muted-foreground">
+              Selecione ao menos uma conta para ver como o post vai ficar.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-t px-5 py-4">
+        <Button size="lg" className="flex-1" onClick={() => submit(false)} disabled={submitting}>
+          {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
+        </Button>
+        <Button variant="outline" onClick={() => submit(true)} disabled={submitting}>
+          Salvar como rascunho
+        </Button>
+      </div>
+    </div>
   );
 }

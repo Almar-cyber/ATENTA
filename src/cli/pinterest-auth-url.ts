@@ -2,6 +2,7 @@
 // The Worker does the token exchange (see worker.ts handlePinterestCallback); this just prints
 // the consent URL. `state` carries the display_name through the redirect.
 import { requireEnv } from './d1-client.js';
+import { buildAuthUrl } from '../lib/oauth-urls.js';
 
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -28,15 +29,10 @@ function main(): void {
   const redirectUri = `${redirectBase.replace(/\/$/, '')}/oauth/callback/pinterest`;
   const state = Buffer.from(JSON.stringify({ displayName })).toString('base64url');
 
-  const url = new URL('https://www.pinterest.com/oauth/');
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('state', state);
-  url.searchParams.set('scope', 'boards:read,pins:read,pins:write');
+  const url = buildAuthUrl('pinterest', { clientId, redirectUri, state });
 
   console.log('Abra esta URL no navegador, logado com a conta que vai postar:\n');
-  console.log(url.toString());
+  console.log(url);
   console.log(`\n(redirect_uri usado: ${redirectUri} — precisa estar registrado igualzinho no app do Pinterest Developers)`);
   console.log('\nLembrete: sem acesso Standard aprovado (revisão com vídeo de demonstração), os Pins só ficam visíveis em modo Sandbox.');
 }

@@ -3,6 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Button } from '@/components/ui/button';
 import type { Account } from '@/lib/types';
 import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
+import { PlatformIcon } from './PlatformIcon';
 
 // Compact chip picker for "which accounts does this post go to" — a ToggleGroup (Radix, multi-
 // select) instead of a checkbox list, so several accounts can be toggled on/off at a glance.
@@ -51,9 +52,13 @@ export function AccountPicker({
               disabled={inactive}
               variant="outline"
               size="sm"
-              className="gap-1.5 rounded-full border-l-[3px] px-3 data-[state=on]:border-foreground/30 data-[state=on]:bg-muted data-[state=on]:font-semibold"
-              style={{ borderLeftColor: PLATFORM_COLORS[a.platform] }}
+              className="gap-1.5 rounded-md px-3 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:font-semibold"
             >
+              <PlatformIcon
+                platform={a.platform}
+                className="size-3.5 shrink-0"
+                style={{ color: PLATFORM_COLORS[a.platform] }}
+              />
               <span>{a.display_name}</span>
               {inactive && <span className="size-1.5 rounded-full bg-muted-foreground/60" />}
             </ToggleGroupItem>

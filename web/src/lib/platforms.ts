@@ -101,7 +101,7 @@ export const YOUTUBE_LONG_VIDEO_WARN_SECONDS = 900;
 export const STATUS_META: Record<PostStatus, { label: string; className: string }> = {
   draft: { label: 'Rascunho', className: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200' },
   queued: { label: 'Na fila', className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
-  publishing: { label: 'Publicando', className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' },
+  publishing: { label: 'Publicando', className: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300' },
   processing: { label: 'Processando', className: 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300' },
   published: { label: 'Publicado', className: 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300' },
   failed: { label: 'Falhou', className: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' },

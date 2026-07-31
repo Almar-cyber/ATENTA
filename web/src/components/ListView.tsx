@@ -10,6 +10,7 @@ import { useScheduler } from '@/store';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Thumb } from './Thumb';
+import { PlatformIcon } from './PlatformIcon';
 import type { DialogSelection } from './PostDialog';
 
 export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogSelection) => void }) {
@@ -49,32 +50,36 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
   }
 
   return (
-    <div className="divide-y">
+    <div className="space-y-4">
       {rows.map(({ dayHeader, post, target }, i) => (
         <Fragment key={target.id}>
           {dayHeader && (
-            <div className="pt-4 pb-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground first:pt-0">
-              {dayHeader}
-            </div>
+            <div className={`text-sm font-bold text-foreground ${i === 0 ? '' : 'pt-2'}`}>{dayHeader}</div>
           )}
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: Math.min(i * 0.015, 0.3) }}
-            className={`flex items-center gap-3 py-2.5 ${target.status === 'failed' || target.status === 'ambiguous' ? 'bg-red-50/60 dark:bg-red-500/5' : ''}`}
+            className={`flex items-center gap-3 rounded-lg px-3 py-3 transition-colors ${target.status === 'failed' || target.status === 'ambiguous' ? 'bg-red-50 hover:bg-red-100/70 dark:bg-red-500/10' : 'bg-muted/60 hover:bg-muted'}`}
           >
-            <div className="w-28 shrink-0 text-xs text-muted-foreground">{fmtDateTime(post.scheduled_for)}</div>
-            <div className="flex w-24 shrink-0 items-center gap-1.5 text-sm">
-              <span className="size-2 rounded-full" style={{ background: PLATFORM_COLORS[target.platform] }} />
-              {PLATFORM_LABELS[target.platform]}
-            </div>
-            <button
-              onClick={() => onOpen({ post, target })}
-              className="min-w-0 flex-1 truncate text-left text-sm hover:underline"
-              title={target.caption_override ?? post.body ?? ''}
+            <div
+              className="grid size-9 shrink-0 place-items-center rounded-md text-white"
+              style={{ background: PLATFORM_COLORS[target.platform] }}
             >
-              {target.caption_override ?? post.body ?? <span className="text-muted-foreground">(sem legenda)</span>}
-            </button>
+              <PlatformIcon platform={target.platform} className="size-[18px]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <button
+                onClick={() => onOpen({ post, target })}
+                className="block max-w-full truncate text-left text-sm font-medium hover:underline"
+                title={target.caption_override ?? post.body ?? ''}
+              >
+                {target.caption_override ?? post.body ?? <span className="text-muted-foreground">(sem legenda)</span>}
+              </button>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {fmtDateTime(post.scheduled_for)} · {PLATFORM_LABELS[target.platform]}
+              </div>
+            </div>
             <div className="flex w-12 shrink-0 items-center gap-1">
               {target.media.slice(0, 1).map((m) => (
                 <Thumb key={m.id} media={m} />

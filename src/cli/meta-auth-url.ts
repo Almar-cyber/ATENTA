@@ -3,6 +3,7 @@
 // handleMetaCallback). This script only prints the consent URL; `state` carries the
 // display_name through the redirect.
 import { requireEnv } from './d1-client.js';
+import { buildAuthUrl } from '../lib/oauth-urls.js';
 
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -29,17 +30,10 @@ function main(): void {
   const redirectUri = `${redirectBase.replace(/\/$/, '')}/oauth/callback/meta`;
   const state = Buffer.from(JSON.stringify({ displayName })).toString('base64url');
 
-  const url = new URL('https://www.facebook.com/v21.0/dialog/oauth');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('state', state);
-  url.searchParams.set(
-    'scope',
-    'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,business_management'
-  );
+  const url = buildAuthUrl('meta', { clientId, redirectUri, state });
 
   console.log('Abra esta URL no navegador, logado com a conta que administra a Page:\n');
-  console.log(url.toString());
+  console.log(url);
   console.log(`\n(redirect_uri usado: ${redirectUri} — precisa estar registrado igualzinho no app do Meta for Developers)`);
   console.log(
     '\nAssume que você concede acesso a UMA Page só. Se aparecer mais de uma no seletor de contas do Meta, desmarque as que não são desta ferramenta.'

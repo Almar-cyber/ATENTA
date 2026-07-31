@@ -1,5 +1,7 @@
 import { adapters } from './adapters/index.js';
 import { nowIso, rowToMediaAsset } from './lib/db.js';
+import { buildAuthUrl, isOAuthPlatform, OAUTH_CLIENT_ID_ENV } from './lib/oauth-urls.js';
+import { encodeState, setStateCookie } from './lib/oauth-state.js';
 import type { Env } from './lib/env.js';
 import type { MediaAsset, Platform, PostTarget } from './lib/types.js';
 
@@ -21,6 +23,10 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   const method = request.method;
 
   if (pathname === '/api/accounts' && method === 'GET') return listAccounts(env);
+
+  const connectMatch = /^\/api\/connect\/([^/]+)$/.exec(pathname);
+  if (connectMatch && method === 'GET') return startConnect(connectMatch[1], url, env);
+
   if (pathname === '/api/posts' && method === 'GET') return listPosts(url, env);
   if (pathname === '/api/posts' && method === 'POST') return createPost(request, env);
   if (pathname === '/api/posts/reschedule' && method === 'POST') return reschedulePosts(request, env);
@@ -40,6 +46,21 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+// Início do fluxo de conexão pelo navegador: gera um nonce (guardado num cookie HttpOnly como CSRF),
+// monta a URL de consentimento com redirect_uri = <origin>/oauth/callback/:platform e redireciona
+// 302 pra plataforma. O botão "Conectar" do SPA só navega pra cá. Meta cobre Instagram + Facebook.
+function startConnect(platform: string, url: URL, env: Env): Response {
+  if (!isOAuthPlatform(platform)) {
+    return jsonResponse({ error: `conexão pelo app ainda não suportada para "${platform}"` }, 400);
+  }
+  const nonce = crypto.randomUUID();
+  const state = encodeState({ n: nonce });
+  const clientId = String(env[OAUTH_CLIENT_ID_ENV[platform] as keyof Env] ?? '');
+  const redirectUri = `${url.origin}/oauth/callback/${platform}`;
+  const authUrl = buildAuthUrl(platform, { clientId, redirectUri, state });
+  return new Response(null, { status: 302, headers: { Location: authUrl, 'Set-Cookie': setStateCookie(nonce) } });
 }
 
 async function listAccounts(env: Env): Promise<Response> {

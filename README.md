@@ -27,6 +27,7 @@ npm run web:install                          # deps do frontend (web/)
 wrangler login
 wrangler d1 create social-scheduler          # database_id já no wrangler.toml
 wrangler d1 execute social-scheduler --remote --file=migrations/0001_init.sql
+wrangler d1 execute social-scheduler --remote --file=migrations/0002_accounts_multi.sql  # multi-conta por rede (ver nota abaixo)
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
 npm run deploy                               # builda o front (web/ → dist/) e faz wrangler deploy
@@ -35,6 +36,23 @@ npm run deploy                               # builda o front (web/ → dist/) e
 ```
 
 Para os CLIs locais (`enqueue`, `youtube-auth`, `*-auth-url`), copiar `.env.example` para `.env` e preencher `D1_ACCOUNT_ID` / `D1_DATABASE_ID` / `D1_API_TOKEN` (um API token com permissão de D1 Edit, criado no dashboard da Cloudflare). **Importante**: não nomeie essas variáveis `CF_ACCOUNT_ID`/`CF_API_TOKEN` — o Wrangler carrega esse mesmo `.env` sozinho e trata esses dois nomes como credenciais de autenticação da Cloudflare, o que quebra silenciosamente todo comando `wrangler` (secret put, deploy, ...) rodado nessa pasta.
+
+## Conectar contas pelo app (Conexões)
+
+Depois de deployado, dá pra conectar LinkedIn / Meta (Instagram + Facebook) / Pinterest / TikTok
+**direto no dashboard**: header → **Conexões** → botão **Conectar** de cada rede. O fluxo abre o
+consentimento da plataforma e, ao voltar, o Worker grava a conta (nome puxado automático da API) e
+mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando como alternativa.
+
+- **Múltiplas contas por rede** (ex.: dois Instagrams): suportado — a migração `0002_accounts_multi.sql`
+  troca o `unique(platform)` por `unique(platform, external_account_id)`. **Rode no `--remote`** (o
+  `--local`/miniflare não replica o `defer_foreign_keys` usado pra recriar a tabela referenciada; o D1
+  remoto sim, e faz rollback atômico se algo falhar). Na Meta, conecta todas as contas que você
+  autorizar no consentimento; na hora de postar, você escolhe em qual conta no compositor.
+- **YouTube ainda é pelo CLI** (`npm run youtube-auth`) — usa OAuth loopback de "Desktop app", que não
+  roda no navegador; o login web dele fica pra um próximo passo. Por isso o card aparece "em breve".
+- Cada rede precisa ter o `redirect_uri` `…/oauth/callback/<rede>` registrado no console dela (o mesmo
+  que os CLIs já usavam) e os `client_id`/secret setados como secrets do Worker.
 
 ## Fase 1 — YouTube
 

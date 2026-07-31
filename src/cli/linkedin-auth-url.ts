@@ -4,6 +4,7 @@
 // the display_name through the redirect since the Worker itself has no other way to know which
 // account you're authenticating.
 import { requireEnv } from './d1-client.js';
+import { buildAuthUrl } from '../lib/oauth-urls.js';
 
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -30,15 +31,10 @@ function main(): void {
   const redirectUri = `${redirectBase.replace(/\/$/, '')}/oauth/callback/linkedin`;
   const state = Buffer.from(JSON.stringify({ displayName })).toString('base64url');
 
-  const url = new URL('https://www.linkedin.com/oauth/v2/authorization');
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('state', state);
-  url.searchParams.set('scope', 'openid profile w_member_social');
+  const url = buildAuthUrl('linkedin', { clientId, redirectUri, state });
 
   console.log('Abra esta URL no navegador, logado com o perfil que vai postar:\n');
-  console.log(url.toString());
+  console.log(url);
   console.log(`\n(redirect_uri usado: ${redirectUri} — precisa estar registrado igualzinho no app do LinkedIn Developer Portal)`);
 }
 

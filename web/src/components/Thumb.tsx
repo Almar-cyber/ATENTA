@@ -12,12 +12,12 @@ export function Thumb({ media, size = 32 }: { media: Media; size?: number }) {
 
   if (!media.public_url || broken) {
     return (
-      <span className="grid shrink-0 place-items-center rounded bg-muted text-muted-foreground" style={style}>
+      <span className="grid shrink-0 place-items-center rounded-sm bg-muted text-muted-foreground" style={style}>
         {video ? <Film className="size-4" /> : <ImageIcon className="size-4" />}
       </span>
     );
   }
-  const cls = 'shrink-0 rounded object-cover';
+  const cls = 'shrink-0 rounded-sm object-cover';
   return video ? (
     <video src={media.public_url} muted preload="metadata" className={cls} style={style} onError={() => setBroken(true)} />
   ) : (

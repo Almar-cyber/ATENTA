@@ -8,6 +8,7 @@ import {
   isVideoMime,
 } from '@/lib/platforms';
 import { useMediaUrl } from '@/lib/useMediaUrl';
+import { PlatformIcon } from './PlatformIcon';
 
 export interface PreviewInput {
   platform: Platform;
@@ -50,7 +51,7 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   const shownCaption = useMemo(() => (over ? caption.slice(0, limit) : caption), [over, caption, limit]);
 
   return (
-    <div className="w-full max-w-[300px] overflow-hidden rounded-xl border bg-card shadow-sm">
+    <div className="w-full max-w-[300px] overflow-hidden rounded-2xl border bg-card shadow-md">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div
           className="grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white"
@@ -60,25 +61,37 @@ export function PostPreview({ input }: { input: PreviewInput }) {
         </div>
         <div className="leading-tight">
           <div className="text-[13px] font-semibold">{accountName}</div>
-          <div className="text-[11px] text-muted-foreground">{isStory ? `${label} · Story` : label}</div>
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <PlatformIcon platform={platform} className="size-3 shrink-0" style={{ color }} />
+            {isStory ? `${label} · Story` : label}
+          </div>
         </div>
       </div>
 
-      <div className="relative w-full bg-muted" style={{ aspectRatio: SHAPE_ASPECT[shape] }}>
-        <MediaFrame item={media[0]} />
-        {media.length > 1 && (
-          <>
-            <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white">
-              1/{media.length}
-            </div>
-            <div className="absolute inset-x-0 bottom-2 flex justify-center gap-1">
-              {media.map((m, i) => (
-                <span key={m.key} className={`size-1.5 rounded-full ${i === 0 ? 'bg-white' : 'bg-white/55'}`} />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      {media.length > 0 ? (
+        <div
+          className="relative w-full overflow-hidden bg-muted"
+          style={{ aspectRatio: SHAPE_ASPECT[shape], maxHeight: 340 }}
+        >
+          <MediaFrame item={media[0]} />
+          {media.length > 1 && (
+            <>
+              <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white">
+                1/{media.length}
+              </div>
+              <div className="absolute inset-x-0 bottom-2 flex justify-center gap-1">
+                {media.map((m, i) => (
+                  <span key={m.key} className={`size-1.5 rounded-full ${i === 0 ? 'bg-white' : 'bg-white/55'}`} />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex h-24 items-center justify-center border-y bg-muted/50 text-[11px] text-muted-foreground">
+          sem mídia
+        </div>
+      )}
 
       {platform === 'youtube' && title && <div className="px-3 pt-2.5 text-[13px] font-semibold">{title}</div>}
 

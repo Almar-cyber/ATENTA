@@ -93,7 +93,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         </Button>
       </div>
 
-      <div className="grid max-w-lg grid-cols-3 gap-1">
+      <div className="grid max-w-2xl grid-cols-3 gap-1.5">
         {entries.map(({ post, target }) => {
           const m = target.media[0];
           const video = isVideoMime(m?.mime_type);

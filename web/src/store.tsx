@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { Account, Post } from './lib/types';
 import { getAccounts, getPosts } from './lib/api';
 
-export type View = 'list' | 'calendar' | 'grid';
+export type View = 'list' | 'week' | 'calendar' | 'grid';
 
 export interface Filters {
   status: string;

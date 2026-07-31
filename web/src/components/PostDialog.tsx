@@ -1,14 +1,15 @@
 import { toast } from 'sonner';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { Post, Target } from '@/lib/types';
-import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
+import { PLATFORM_COLORS, PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
 import { cancelTarget, queueTarget } from '@/lib/api';
 import { requestPrefill, requestEdit } from '@/lib/composer-bus';
 import { useScheduler } from '@/store';
 import { PostPreview } from './PostPreview';
+import { PlatformIcon } from './PlatformIcon';
 
 export interface DialogSelection {
   post: Post;
@@ -38,84 +39,101 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+      <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-2xl">
         {post && target && status && (
-          <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {PLATFORM_LABELS[target.platform]} — {target.account_name}
-                <Badge className={status.className} variant="secondary">
-                  {status.label}
-                </Badge>
-              </DialogTitle>
-            </DialogHeader>
+          <div className="flex max-h-[88vh] flex-col md:flex-row">
+            {/* Left: details + actions */}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <DialogHeader className="border-b px-5 py-4">
+                <DialogTitle className="flex flex-wrap items-center gap-2">
+                  <span
+                    className="grid size-7 shrink-0 place-items-center rounded-md text-white"
+                    style={{ background: PLATFORM_COLORS[target.platform] }}
+                  >
+                    <PlatformIcon platform={target.platform} className="size-4" />
+                  </span>
+                  <span className="truncate">{PLATFORM_LABELS[target.platform]} — {target.account_name}</span>
+                  <Badge className={status.className} variant="secondary">
+                    {status.label}
+                  </Badge>
+                </DialogTitle>
+              </DialogHeader>
 
-            <div className="space-y-3">
-              <div className="text-sm">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quando</span>
-                <div>{fmtDateTime(post.scheduled_for)}</div>
-              </div>
-
-              <div>
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Como vai ficar</span>
-                <div className="mt-1.5">
-                  <PostPreview
-                    input={{
-                      platform: target.platform,
-                      accountName: target.account_name,
-                      caption: target.caption_override ?? post.body ?? '',
-                      title: post.title ?? undefined,
-                      media: (target.media ?? []).map((m) => ({
-                        key: m.id,
-                        assetId: m.id,
-                        name: m.storage_key,
-                        mime_type: m.mime_type,
-                        public_url: m.public_url,
-                      })),
-                      isStory: !!target.options?.as_story,
-                    }}
-                  />
+              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+                <div className="text-sm">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quando</div>
+                  <div className="mt-0.5">{fmtDateTime(post.scheduled_for)}</div>
                 </div>
+
+                {(target.caption_override ?? post.body) && (
+                  <div className="text-sm">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Legenda</div>
+                    <p className="mt-0.5 whitespace-pre-wrap break-words">{target.caption_override ?? post.body}</p>
+                  </div>
+                )}
+
+                {target.status === 'published' && target.external_url && (
+                  <a href={target.external_url} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-primary underline">
+                    ver post publicado ↗
+                  </a>
+                )}
+                {target.last_error && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                    {target.last_error}
+                  </div>
+                )}
               </div>
 
-              {target.status === 'published' && target.external_url && (
-                <a href={target.external_url} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-primary underline">
-                  ver post publicado ↗
-                </a>
-              )}
-              {target.last_error && <p className="text-xs text-red-600 dark:text-red-400">{target.last_error}</p>}
+              <div className="flex flex-wrap gap-2 border-t px-5 py-4">
+                {canEdit && (
+                  <Button
+                    onClick={() => {
+                      requestEdit({ post });
+                      onClose();
+                    }}
+                  >
+                    Editar
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => requestPrefill({ post, target })}>
+                  Duplicar
+                </Button>
+                {target.status === 'draft' && (
+                  <Button variant="secondary" onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
+                    Mover para fila
+                  </Button>
+                )}
+                {(target.status === 'draft' || target.status === 'queued') && (
+                  <Button variant="destructive" onClick={() => act(() => cancelTarget(target.id), 'Post cancelado.')}>
+                    Cancelar
+                  </Button>
+                )}
+              </div>
             </div>
 
-            <DialogFooter className="flex-wrap gap-2 sm:justify-start">
-              <Button variant="outline" onClick={onClose}>
-                Fechar
-              </Button>
-              {canEdit && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    requestEdit({ post });
-                    onClose();
+            {/* Right: preview */}
+            <div className="flex shrink-0 flex-col border-t bg-muted/30 px-5 py-4 md:w-80 md:border-l md:border-t-0">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Como vai ficar</div>
+              <div className="flex flex-1 items-start justify-center overflow-y-auto">
+                <PostPreview
+                  input={{
+                    platform: target.platform,
+                    accountName: target.account_name,
+                    caption: target.caption_override ?? post.body ?? '',
+                    title: post.title ?? undefined,
+                    media: (target.media ?? []).map((m) => ({
+                      key: m.id,
+                      assetId: m.id,
+                      name: m.storage_key,
+                      mime_type: m.mime_type,
+                      public_url: m.public_url,
+                    })),
+                    isStory: !!target.options?.as_story,
                   }}
-                >
-                  Editar
-                </Button>
-              )}
-              <Button variant="outline" onClick={() => requestPrefill({ post, target })}>
-                Duplicar
-              </Button>
-              {target.status === 'draft' && (
-                <Button variant="secondary" onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
-                  Mover para fila
-                </Button>
-              )}
-              {(target.status === 'draft' || target.status === 'queued') && (
-                <Button variant="destructive" onClick={() => act(() => cancelTarget(target.id), 'Post cancelado.')}>
-                  Cancelar post
-                </Button>
-              )}
-            </DialogFooter>
-          </>
+                />
+              </div>
+            </div>
+          </div>
         )}
       </DialogContent>
     </Dialog>

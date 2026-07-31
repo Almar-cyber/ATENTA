@@ -32,7 +32,7 @@ function Tile({
       onDragStart={onDragStart}
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
-      className="group relative aspect-square cursor-grab overflow-hidden rounded-lg border bg-muted active:cursor-grabbing"
+      className="group relative aspect-square cursor-grab overflow-hidden rounded-xl border bg-muted active:cursor-grabbing"
     >
       {url && !broken ? (
         video ? (

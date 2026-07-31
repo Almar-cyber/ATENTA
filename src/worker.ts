@@ -4,6 +4,7 @@ import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db
 import { checkDashboardAuth } from './lib/auth.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
+import { OAUTH_STATE_COOKIE, clearStateCookie, decodeState, getCookie } from './lib/oauth-state.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
 
@@ -50,7 +51,7 @@ export default {
     // consent screen, not a browser tab that's already presented dashboard credentials.
     const oauthMatch = /^\/oauth\/callback\/(linkedin|meta|pinterest|tiktok)$/.exec(url.pathname);
     if (oauthMatch) {
-      return handleOAuthCallback(oauthMatch[1] as 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url, env);
+      return handleOAuthCallback(oauthMatch[1] as 'linkedin' | 'meta' | 'pinterest' | 'tiktok', request, url, env);
     }
 
     // Unauthenticated: platform app-review processes (Pinterest, TikTok, ...) fetch this
@@ -293,43 +294,48 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
 // OAuth callback — LinkedIn, Meta, Pinterest, TikTok only (their dev consoles require a
 // registered HTTPS redirect_uri with no loopback exception). YouTube uses the local loopback
 // flow instead (see adapters/youtube.ts + cli/youtube-auth.ts), so it never hits this Worker.
-async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url: URL, env: Env): Promise<Response> {
+async function handleOAuthCallback(platform: 'linkedin' | 'meta' | 'pinterest' | 'tiktok', request: Request, url: URL, env: Env): Promise<Response> {
   const code = url.searchParams.get('code');
   if (!code) {
     return new Response('missing ?code=', { status: 400 });
   }
 
-  if (platform === 'linkedin') {
-    return handleLinkedinCallback(code, url, env);
-  }
-  if (platform === 'meta') {
-    return handleMetaCallback(code, url, env);
-  }
-  if (platform === 'pinterest') {
-    return handlePinterestCallback(code, url, env);
-  }
-  if (platform === 'tiktok') {
-    return handleTiktokCallback(code, url, env);
-  }
+  if (platform === 'linkedin') return handleLinkedinCallback(code, request, url, env);
+  if (platform === 'meta') return handleMetaCallback(code, request, url, env);
+  if (platform === 'pinterest') return handlePinterestCallback(code, request, url, env);
+  if (platform === 'tiktok') return handleTiktokCallback(code, request, url, env);
 
-  // TODO: exchange `code` for tokens against each platform's token endpoint, then
-  // setAccountTokens(env.DB, accountId, tokenPayload, env.TOKEN_ENCRYPTION_KEY).
   return new Response(`${platform} OAuth callback not implemented yet — see phased roadmap`, { status: 501 });
 }
 
-// state carries {displayName}, base64url-encoded by cli/linkedin-auth-url.ts — the Worker has no
-// other way to know which account a given redirect belongs to.
-async function handleLinkedinCallback(code: string, url: URL, env: Env): Promise<Response> {
-  const state = url.searchParams.get('state');
-  if (!state) return new Response('missing ?state=', { status: 400 });
-
-  let displayName: string;
-  try {
-    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
-    if (!displayName) throw new Error('empty displayName');
-  } catch {
-    return new Response('invalid ?state=', { status: 400 });
+// Valida o `state`. Fluxo pelo navegador (endpoint /api/connect) manda `{ n: nonce }` e um cookie
+// oauth_state igual — comparamos os dois (CSRF). Fluxo antigo do CLI manda `{ displayName }` sem
+// cookie — aceito e usado como nome de fallback. Retorna o nome de fallback, ou uma Response de erro.
+function checkState(request: Request, url: URL): { fallbackName?: string } | Response {
+  const parsed = decodeState(url.searchParams.get('state'));
+  if (parsed.n) {
+    const cookie = getCookie(request, OAUTH_STATE_COOKIE);
+    if (!cookie || cookie !== parsed.n) return new Response('state inválido (csrf)', { status: 400 });
+    return {};
   }
+  if (parsed.displayName) return { fallbackName: parsed.displayName };
+  return new Response('missing ?state=', { status: 400 });
+}
+
+// Sucesso: volta pro SPA (`/?connected=<plataforma>`), que abre o modal de "conta conectada".
+// Limpa o cookie de state de quebra.
+function connectedRedirect(url: URL, platform: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: { Location: `${url.origin}/?connected=${encodeURIComponent(platform)}`, 'Set-Cookie': clearStateCookie() },
+  });
+}
+
+// O nome é puxado do próprio LinkedIn (userinfo.name); o `state` só carrega o nonce de CSRF (fluxo
+// pelo app) ou um displayName de fallback (fluxo antigo do CLI).
+async function handleLinkedinCallback(code: string, request: Request, url: URL, env: Env): Promise<Response> {
+  const checked = checkState(request, url);
+  if (checked instanceof Response) return checked;
 
   // Must match the redirect_uri used to request `code` exactly (LinkedIn requires an exact match).
   const redirectUri = `${url.origin}${url.pathname}`;
@@ -354,56 +360,29 @@ async function handleLinkedinCallback(code: string, url: URL, env: Env): Promise
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
   });
   if (!userinfoRes.ok) return new Response(`linkedin userinfo failed: ${userinfoRes.status}`, { status: 502 });
-  const userinfo = (await userinfoRes.json()) as { sub: string };
+  const userinfo = (await userinfoRes.json()) as { sub: string; name?: string };
   const memberUrn = `urn:li:person:${userinfo.sub}`;
+  const displayName = userinfo.name || checked.fallbackName || 'LinkedIn';
 
   const { ciphertext, iv } = await encryptJSON(
     { access_token: tokenJson.access_token, member_urn: memberUrn },
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  const ts = nowIso();
+  await upsertAccount(env, 'linkedin', displayName, memberUrn, ciphertext, iv, nowIso(), {}, expiresAt);
 
-  // platform is UNIQUE on accounts (one row per platform, ever) — look up by platform alone so
-  // re-running this with a changed display_name updates the row instead of hitting a
-  // unique-constraint violation on insert.
-  const existing = await env.DB.prepare(`select id from accounts where platform = 'linkedin'`).first<{ id: string }>();
-
-  if (existing) {
-    await env.DB.prepare(
-      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, access_token_expires_at = ?, external_account_id = ?, status = 'active', updated_at = ? where id = ?`
-    )
-      .bind(displayName, ciphertext, iv, expiresAt, memberUrn, ts, existing.id)
-      .run();
-  } else {
-    await env.DB.prepare(
-      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, access_token_expires_at) values (?, 'linkedin', ?, ?, 'active', ?, ?, ?)`
-    )
-      .bind(crypto.randomUUID(), displayName, memberUrn, ciphertext, iv, expiresAt)
-      .run();
-  }
-
-  return new Response(`Conta "${displayName}" autenticada no LinkedIn. Pode fechar esta aba.`);
+  return connectedRedirect(url, 'linkedin');
 }
 
 const GRAPH_VERSION = 'v21.0';
 
-// state carries {displayName}, base64url-encoded by cli/meta-auth-url.ts. Assumes exactly one
-// Page was granted (personal-tool scope, not a Page picker) — if /me/accounts ever returns more
-// than one, only the first is used; see README Pendências. One Page's access_token is reused for
-// both the 'facebook' row and (if the Page has a linked Instagram Business account) the
-// 'instagram' row, since Meta authenticates both platforms with the same Page token.
-async function handleMetaCallback(code: string, url: URL, env: Env): Promise<Response> {
-  const state = url.searchParams.get('state');
-  if (!state) return new Response('missing ?state=', { status: 400 });
-
-  let displayName: string;
-  try {
-    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
-    if (!displayName) throw new Error('empty displayName');
-  } catch {
-    return new Response('invalid ?state=', { status: 400 });
-  }
+// Conecta TODAS as Pages que o usuário autorizou no consentimento (ele escolhe quais lá) — assim
+// dá pra ter, por ex., dois Instagrams. Cada Page vira uma linha 'facebook' e, se tiver Instagram
+// Business vinculado, uma linha 'instagram', ambas com o token da própria Page. Nomes puxados da
+// API (page.name para o Facebook, username para o Instagram).
+async function handleMetaCallback(code: string, request: Request, url: URL, env: Env): Promise<Response> {
+  const checked = checkState(request, url);
+  if (checked instanceof Response) return checked;
 
   const redirectUri = `${url.origin}${url.pathname}`;
 
@@ -443,28 +422,28 @@ async function handleMetaCallback(code: string, url: URL, env: Env): Promise<Res
   if (pagesJson.data.length === 0) {
     return new Response('nenhuma Page encontrada — confirme que você é admin de uma Page do Facebook', { status: 400 });
   }
-  const page = pagesJson.data[0];
 
-  const igRes = await fetchWithRetry(
-    `https://graph.facebook.com/${GRAPH_VERSION}/${page.id}?fields=instagram_business_account&access_token=${encodeURIComponent(page.access_token)}`
-  );
-  const igJson = igRes.ok ? ((await igRes.json()) as { instagram_business_account?: { id: string } }) : {};
-  const igUserId = igJson.instagram_business_account?.id;
-
-  const { ciphertext, iv } = await encryptJSON({ access_token: page.access_token }, env.TOKEN_ENCRYPTION_KEY);
   const ts = nowIso();
+  for (const page of pagesJson.data) {
+    const { ciphertext, iv } = await encryptJSON({ access_token: page.access_token }, env.TOKEN_ENCRYPTION_KEY);
+    await upsertAccount(env, 'facebook', page.name, page.id, ciphertext, iv, ts);
 
-  await upsertAccount(env, 'facebook', displayName, page.id, ciphertext, iv, ts);
-  if (igUserId) {
-    await upsertAccount(env, 'instagram', displayName, igUserId, ciphertext, iv, ts);
+    const igRes = await fetchWithRetry(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${page.id}?fields=instagram_business_account{username}&access_token=${encodeURIComponent(page.access_token)}`
+    );
+    const igJson = igRes.ok ? ((await igRes.json()) as { instagram_business_account?: { id: string; username?: string } }) : {};
+    const ig = igJson.instagram_business_account;
+    if (ig?.id) {
+      await upsertAccount(env, 'instagram', ig.username || page.name, ig.id, ciphertext, iv, ts);
+    }
   }
 
-  const summary = igUserId
-    ? `Facebook Page "${page.name}" e Instagram vinculado autenticados como "${displayName}".`
-    : `Facebook Page "${page.name}" autenticado como "${displayName}" (sem conta Instagram Business vinculada).`;
-  return new Response(`${summary} Pode fechar esta aba.`);
+  return connectedRedirect(url, 'meta');
 }
 
+// Chaveia por (platform, external_account_id) — várias contas por rede convivem, mas reconectar a
+// MESMA conta (mesmo external id) atualiza a linha em vez de duplicar. `access_token_expires_at`
+// entra aqui em vez de um UPDATE separado por plataforma (que não servia mais no mundo multi-conta).
 async function upsertAccount(
   env: Env,
   platform: Platform,
@@ -473,39 +452,33 @@ async function upsertAccount(
   ciphertext: string,
   iv: string,
   ts: string,
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
+  expiresAt: string | null = null
 ): Promise<void> {
-  const existing = await env.DB.prepare(`select id from accounts where platform = ?`).bind(platform).first<{ id: string }>();
+  const existing = await env.DB.prepare(`select id from accounts where platform = ? and external_account_id = ?`)
+    .bind(platform, externalAccountId)
+    .first<{ id: string }>();
   const extraJson = JSON.stringify(extra);
   if (existing) {
     await env.DB.prepare(
-      `update accounts set display_name = ?, external_account_id = ?, token_ciphertext = ?, token_iv = ?, extra = ?, status = 'active', updated_at = ? where id = ?`
+      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, extra = ?, access_token_expires_at = ?, status = 'active', updated_at = ? where id = ?`
     )
-      .bind(displayName, externalAccountId, ciphertext, iv, extraJson, ts, existing.id)
+      .bind(displayName, ciphertext, iv, extraJson, expiresAt, ts, existing.id)
       .run();
   } else {
     await env.DB.prepare(
-      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, extra) values (?, ?, ?, ?, 'active', ?, ?, ?)`
+      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, extra, access_token_expires_at) values (?, ?, ?, ?, 'active', ?, ?, ?, ?)`
     )
-      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv, extraJson)
+      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv, extraJson, expiresAt)
       .run();
   }
 }
 
-// state carries {displayName}, base64url-encoded by cli/pinterest-auth-url.ts. Auto-selects the
-// first board returned by /v5/boards into accounts.extra.default_board_id (personal-tool
-// simplification — a post can still override with options.board_id).
-async function handlePinterestCallback(code: string, url: URL, env: Env): Promise<Response> {
-  const state = url.searchParams.get('state');
-  if (!state) return new Response('missing ?state=', { status: 400 });
-
-  let displayName: string;
-  try {
-    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
-    if (!displayName) throw new Error('empty displayName');
-  } catch {
-    return new Response('invalid ?state=', { status: 400 });
-  }
+// Nome + external id puxados de /v5/user_account (username). Auto-seleciona o primeiro board em
+// extra.default_board_id (um post ainda pode sobrescrever com options.board_id).
+async function handlePinterestCallback(code: string, request: Request, url: URL, env: Env): Promise<Response> {
+  const checked = checkState(request, url);
+  if (checked instanceof Response) return checked;
 
   const redirectUri = `${url.origin}${url.pathname}`;
   const basicAuth = `Basic ${Buffer.from(`${env.PINTEREST_CLIENT_ID}:${env.PINTEREST_CLIENT_SECRET}`).toString('base64')}`;
@@ -518,6 +491,12 @@ async function handlePinterestCallback(code: string, url: URL, env: Env): Promis
   if (!tokenRes.ok) return new Response(`pinterest token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
   const tokenJson = (await tokenRes.json()) as { access_token: string; refresh_token: string; expires_in: number };
 
+  const userRes = await fetchWithRetry('https://api.pinterest.com/v5/user_account', {
+    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+  });
+  const userJson = userRes.ok ? ((await userRes.json()) as { username?: string }) : {};
+  const username = userJson.username || checked.fallbackName || 'Pinterest';
+
   const boardsRes = await fetchWithRetry('https://api.pinterest.com/v5/boards', {
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
   });
@@ -529,38 +508,26 @@ async function handlePinterestCallback(code: string, url: URL, env: Env): Promis
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  const ts = nowIso();
 
   await upsertAccount(
     env,
     'pinterest',
-    displayName,
-    '', // Pinterest has no single "external account id" equivalent at this stage
+    username,
+    username, // external id = username (único no Pinterest)
     ciphertext,
     iv,
-    ts,
-    defaultBoard ? { default_board_id: defaultBoard.id } : {}
+    nowIso(),
+    defaultBoard ? { default_board_id: defaultBoard.id } : {},
+    expiresAt
   );
-  await env.DB.prepare(`update accounts set access_token_expires_at = ? where platform = 'pinterest'`).bind(expiresAt).run();
 
-  const summary = defaultBoard
-    ? `Pinterest autenticado como "${displayName}", board padrão "${defaultBoard.name}".`
-    : `Pinterest autenticado como "${displayName}" (nenhum board encontrado — crie um antes de postar).`;
-  return new Response(`${summary} Pode fechar esta aba.`);
+  return connectedRedirect(url, 'pinterest');
 }
 
-// state carries {displayName}, base64url-encoded by cli/tiktok-auth-url.ts.
-async function handleTiktokCallback(code: string, url: URL, env: Env): Promise<Response> {
-  const state = url.searchParams.get('state');
-  if (!state) return new Response('missing ?state=', { status: 400 });
-
-  let displayName: string;
-  try {
-    displayName = (JSON.parse(Buffer.from(state, 'base64url').toString('utf-8')) as { displayName: string }).displayName;
-    if (!displayName) throw new Error('empty displayName');
-  } catch {
-    return new Response('invalid ?state=', { status: 400 });
-  }
+// Nome puxado de /v2/user/info/ (display_name); external id = open_id do token.
+async function handleTiktokCallback(code: string, request: Request, url: URL, env: Env): Promise<Response> {
+  const checked = checkState(request, url);
+  if (checked instanceof Response) return checked;
 
   const redirectUri = `${url.origin}${url.pathname}`;
 
@@ -583,15 +550,18 @@ async function handleTiktokCallback(code: string, url: URL, env: Env): Promise<R
     open_id: string;
   };
 
+  const infoRes = await fetchWithRetry('https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name', {
+    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+  });
+  const infoJson = infoRes.ok ? ((await infoRes.json()) as { data?: { user?: { display_name?: string } } }) : {};
+  const displayName = infoJson.data?.user?.display_name || checked.fallbackName || 'TikTok';
+
   const { ciphertext, iv } = await encryptJSON(
     { access_token: tokenJson.access_token, refresh_token: tokenJson.refresh_token },
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  const ts = nowIso();
+  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt);
 
-  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, ts);
-  await env.DB.prepare(`update accounts set access_token_expires_at = ? where platform = 'tiktok'`).bind(expiresAt).run();
-
-  return new Response(`Conta "${displayName}" autenticada no TikTok. Pode fechar esta aba.`);
+  return connectedRedirect(url, 'tiktok');
 }

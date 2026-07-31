@@ -6,6 +6,7 @@
 // video + privacy policy — see README). Until then, posts are forced SELF_ONLY to sandbox test
 // accounts regardless of what this script or the adapter request.
 import { requireEnv } from './d1-client.js';
+import { buildAuthUrl } from '../lib/oauth-urls.js';
 
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -32,15 +33,10 @@ function main(): void {
   const redirectUri = `${redirectBase.replace(/\/$/, '')}/oauth/callback/tiktok`;
   const state = Buffer.from(JSON.stringify({ displayName })).toString('base64url');
 
-  const url = new URL('https://www.tiktok.com/v2/auth/authorize/');
-  url.searchParams.set('client_key', clientKey);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'user.info.basic,video.publish,video.upload');
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('state', state);
+  const url = buildAuthUrl('tiktok', { clientId: clientKey, redirectUri, state });
 
   console.log('Abra esta URL no navegador, logado com a conta que vai postar:\n');
-  console.log(url.toString());
+  console.log(url);
   console.log(`\n(redirect_uri usado: ${redirectUri} — precisa estar registrado igualzinho no app do TikTok Developers)`);
   console.log('\nSem a auditoria da Content Posting API aprovada, posts ficam forçados a SELF_ONLY numa conta de sandbox.');
 }

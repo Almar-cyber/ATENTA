@@ -8,6 +8,7 @@ import { requestPrefillDate } from '@/lib/composer-bus';
 import { updatePost } from '@/lib/api';
 import { useScheduler } from '@/store';
 import { Button } from '@/components/ui/button';
+import { PlatformIcon } from './PlatformIcon';
 import type { DialogSelection } from './PostDialog';
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -134,7 +135,7 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
               onClick={() => requestPrefillDate(local)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => handleDrop(day)}
-              className={`min-h-24 rounded-lg border p-1.5 text-left transition-colors hover:border-primary ${isToday ? 'border-2 border-primary' : ''}`}
+              className={`min-h-24 rounded-xl border p-1.5 text-left transition-colors hover:border-primary ${isToday ? 'border-primary/40 bg-primary/10' : ''}`}
             >
               <div className="mb-1 text-xs font-semibold">{day}</div>
               {entries.slice(0, 3).map(({ post, target }) => {
@@ -153,7 +154,11 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
                     className={`mb-0.5 flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[11px] ${failed ? 'bg-red-100 dark:bg-red-500/15' : 'bg-muted'} ${target.status === 'draft' ? 'opacity-70' : ''} ${movable ? 'cursor-grab active:cursor-grabbing' : ''}`}
                     style={{ borderLeft: `3px ${target.status === 'draft' ? 'dashed' : 'solid'} ${PLATFORM_COLORS[target.platform]}` }}
                   >
-                    {failed && <AlertTriangle className="size-2.5 shrink-0 text-red-600" />}
+                    {failed ? (
+                      <AlertTriangle className="size-2.5 shrink-0 text-red-600" />
+                    ) : (
+                      <PlatformIcon platform={target.platform} className="size-2.5 shrink-0" style={{ color: PLATFORM_COLORS[target.platform] }} />
+                    )}
                     <span className="truncate">{target.account_name}</span>
                   </span>
                 );
