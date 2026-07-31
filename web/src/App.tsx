@@ -120,7 +120,13 @@ function Dashboard() {
       reload().catch(() => {});
     } else if (err) {
       setScreen('connections');
-      toast.error('Não foi possível conectar a conta. Tente de novo.');
+      const reason = params.get('reason');
+      const missing = reason?.startsWith('missing_') ? reason.slice('missing_'.length) : null;
+      toast.error(
+        missing
+          ? `${err} ainda não está configurado — falta definir o secret ${missing} no Worker (wrangler secret put ${missing}).`
+          : 'Não foi possível conectar a conta. Tente de novo.'
+      );
     }
     if (connected || err) {
       window.history.replaceState({}, '', window.location.pathname);

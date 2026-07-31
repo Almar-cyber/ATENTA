@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import { motion } from 'motion/react';
 import { RefreshCw, X, ImageIcon, Film } from 'lucide-react';
 import { toast } from 'sonner';
 import type { QueuedMedia } from '@/lib/types';
@@ -26,8 +25,9 @@ function Tile({
   const video = isVideoMime(item.mime_type);
 
   return (
-    <motion.div
-      layout
+    // Sem `layout` do motion aqui de propósito: com muitos arquivos pesados, animar a posição de
+    // cada tile a cada reordenação travava o arrastar. A troca de ordem é instantânea.
+    <div
       draggable
       onDragStart={onDragStart}
       onDragOver={(e) => e.preventDefault()}
@@ -38,7 +38,14 @@ function Tile({
         video ? (
           <video src={url} muted preload="metadata" className="size-full object-cover" onError={() => setBroken(true)} />
         ) : (
-          <img src={url} alt="" className="size-full object-cover" onError={() => setBroken(true)} />
+          <img
+            src={url}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="size-full object-cover"
+            onError={() => setBroken(true)}
+          />
         )
       ) : (
         <div className="grid size-full place-items-center text-muted-foreground">
@@ -68,7 +75,7 @@ function Tile({
           <X className="size-3.5" />
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 

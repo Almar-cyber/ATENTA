@@ -55,9 +55,15 @@ function startConnect(platform: string, url: URL, env: Env): Response {
   if (!isOAuthPlatform(platform)) {
     return jsonResponse({ error: `conexão pelo app ainda não suportada para "${platform}"` }, 400);
   }
+  const envVar = OAUTH_CLIENT_ID_ENV[platform];
+  const clientId = String(env[envVar as keyof Env] ?? '');
+  // Sem o secret, a plataforma recebe client_id vazio e devolve um erro críptico ("client_key")
+  // na tela dela. Melhor falhar aqui e explicar o que falta configurar.
+  if (!clientId) {
+    return Response.redirect(`${url.origin}/?connect_error=${platform}&reason=missing_${envVar}`, 302);
+  }
   const nonce = crypto.randomUUID();
   const state = encodeState({ n: nonce });
-  const clientId = String(env[OAUTH_CLIENT_ID_ENV[platform] as keyof Env] ?? '');
   const redirectUri = `${url.origin}/oauth/callback/${platform}`;
   const authUrl = buildAuthUrl(platform, { clientId, redirectUri, state });
   return new Response(null, { status: 302, headers: { Location: authUrl, 'Set-Cookie': setStateCookie(nonce) } });
