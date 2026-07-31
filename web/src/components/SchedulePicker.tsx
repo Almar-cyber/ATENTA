@@ -42,6 +42,13 @@ export function SchedulePicker({
 
   const [weekStart, setWeekStart] = useState(() => initialDay);
   const [selectedDay, setSelectedDay] = useState(() => initialDay);
+  // Clicar num horário apenas SELECIONA; agendar de fato exige o botão de confirmação — assim um
+  // clique errado não cria o post na data errada.
+  const [chosen, setChosen] = useState<{ hour: number; minute: number } | null>(() => {
+    if (!initial) return null;
+    const d = new Date(initial);
+    return { hour: d.getHours(), minute: d.getMinutes() };
+  });
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
 
@@ -58,8 +65,6 @@ export function SchedulePicker({
     }
     return out;
   }, [selectedDay]);
-
-  const selectedTime = initial ? new Date(initial) : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -114,18 +119,14 @@ export function SchedulePicker({
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             <div className="grid grid-cols-3 gap-2">
               {slots.map(({ hour, minute, past }) => {
-                const isSelected =
-                  selectedTime != null &&
-                  startOfDay(selectedTime).getTime() === startOfDay(selectedDay).getTime() &&
-                  selectedTime.getHours() === hour &&
-                  selectedTime.getMinutes() === minute;
+                const isSelected = chosen != null && chosen.hour === hour && chosen.minute === minute;
                 return (
                   <Button
                     key={`${hour}:${minute}`}
                     type="button"
                     variant={isSelected ? 'default' : 'outline'}
                     disabled={past}
-                    onClick={() => onConfirm(toLocalInput(selectedDay, hour, minute))}
+                    onClick={() => setChosen({ hour, minute })}
                   >
                     {pad(hour)}:{pad(minute)}
                   </Button>
@@ -134,8 +135,26 @@ export function SchedulePicker({
             </div>
           </div>
 
-          <div className="border-t px-5 py-3 text-center text-xs text-muted-foreground">
-            Escolha um horário para {confirmLabel.toLowerCase()}.
+          <div className="flex items-center justify-between gap-3 border-t px-5 py-3">
+            <div className="min-w-0 text-xs">
+              {chosen ? (
+                <>
+                  <div className="text-muted-foreground">Publicar em</div>
+                  <div className="truncate text-sm font-semibold">
+                    {WEEKDAYS[selectedDay.getDay()]}, {selectedDay.getDate()} de {MONTHS[selectedDay.getMonth()]} às{' '}
+                    {pad(chosen.hour)}:{pad(chosen.minute)}
+                  </div>
+                </>
+              ) : (
+                <span className="text-muted-foreground">Escolha um horário acima.</span>
+              )}
+            </div>
+            <Button
+              disabled={!chosen}
+              onClick={() => chosen && onConfirm(toLocalInput(selectedDay, chosen.hour, chosen.minute))}
+            >
+              {confirmLabel}
+            </Button>
           </div>
         </div>
       </DialogContent>
