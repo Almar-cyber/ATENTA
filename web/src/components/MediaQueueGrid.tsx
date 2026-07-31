@@ -3,7 +3,7 @@ import { Crop, RefreshCw, X, ImageIcon, Film } from 'lucide-react';
 import { toast } from 'sonner';
 import type { QueuedMedia } from '@/lib/types';
 import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
-import { useMediaUrl } from '@/lib/useMediaUrl';
+import { useMediaUrl, videoPosterUrl } from '@/lib/useMediaUrl';
 
 function Tile({
   item,
@@ -38,7 +38,7 @@ function Tile({
     >
       {url && !broken ? (
         video ? (
-          <video src={url} muted preload="metadata" className="size-full object-cover" onError={() => setBroken(true)} />
+          <video src={videoPosterUrl(url)} muted preload="metadata" className="size-full object-cover" onError={() => setBroken(true)} />
         ) : (
           <img
             src={url}

@@ -86,6 +86,10 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 - **`useMediaUrl`** (`src/lib/useMediaUrl.ts`): resolve um `QueuedMedia` pra URL exibível (object
   URL pro `File` ainda não enviado, com revoke no cleanup; `public_url` pro que já foi upload).
   Compartilhado por `PostPreview` e `MediaQueueGrid` — não duplicar essa lógica.
+- **`videoPosterUrl`** (mesmo arquivo): todo `<video>` usado como thumbnail parado tem que passar
+  por ela. `preload="metadata"` carrega duração/dimensão mas **não decodifica frame nenhum** — na
+  tela vira um retângulo vazio (foi o bug de "o vídeo não aparece"). Ela acrescenta o media fragment
+  `#t=0.1`, que força o navegador a buscar aquele instante e desenhá-lo.
 
 ## Ao adicionar algo novo
 

@@ -83,6 +83,11 @@ export const PLATFORM_RECOMMENDED_MEDIA: Record<Platform, MediaSpec> = {
 
 export const INSTAGRAM_STORY_RECOMMENDED: MediaSpec = { width: 1080, height: 1920, ratio: '9:16' };
 
+// Vídeo no feed do Instagram **é Reel** — não existe "vídeo de feed" separado na API de publicação
+// (o adapter manda `media_type: 'REELS'`, ver src/adapters/instagram.ts). Por isso vídeo pro
+// Instagram é previsto em 9:16, não no 4:5 das fotos.
+export const INSTAGRAM_REELS_RECOMMENDED: MediaSpec = { width: 1080, height: 1920, ratio: '9:16' };
+
 export const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4', 'video/quicktime'];
 
 export interface VideoLimits {

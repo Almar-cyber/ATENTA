@@ -18,6 +18,7 @@ import {
   uploadMedia,
 } from '@/lib/api';
 import type { FeedItem } from '@/lib/api';
+import { videoPosterUrl } from '@/lib/useMediaUrl';
 import { planGridOrder, moveItem } from '@/lib/gridOrder';
 import type { Movable } from '@/lib/gridOrder';
 import { useScheduler } from '@/store';
@@ -279,7 +280,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
               >
                 {preview.public_url ? (
                   isVideoMime(preview.mime_type) ? (
-                    <video src={preview.public_url} muted preload="metadata" className="size-full object-cover" />
+                    <video src={videoPosterUrl(preview.public_url)} muted preload="metadata" className="size-full object-cover" />
                   ) : (
                     <img src={preview.public_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
                   )
@@ -355,7 +356,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
             >
               {m?.public_url ? (
                 isVideoMime(m.mime_type) ? (
-                  <video src={m.public_url} muted preload="metadata" className="size-full object-cover" />
+                  <video src={videoPosterUrl(m.public_url)} muted preload="metadata" className="size-full object-cover" />
                 ) : (
                   <img src={m.public_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
                 )

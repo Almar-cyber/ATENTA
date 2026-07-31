@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Platform, QueuedMedia } from '@/lib/types';
 import {
+  INSTAGRAM_REELS_RECOMMENDED,
   INSTAGRAM_STORY_RECOMMENDED,
   PLATFORM_CAPTION_LIMITS,
   PLATFORM_COLORS,
@@ -10,7 +11,7 @@ import {
   PLATFORM_RECOMMENDED_MEDIA,
   isVideoMime,
 } from '@/lib/platforms';
-import { useMediaUrl } from '@/lib/useMediaUrl';
+import { useMediaUrl, videoPosterUrl } from '@/lib/useMediaUrl';
 import { PlatformIcon } from './PlatformIcon';
 
 export interface PreviewInput {
@@ -20,6 +21,9 @@ export interface PreviewInput {
   title?: string;
   media: QueuedMedia[];
   isStory?: boolean;
+  /** Imagem de capa escolhida no composer. É o que a rede mostra parado no feed, então tem
+   *  prioridade sobre o frame do vídeo na pré-visualização. */
+  cover?: File;
 }
 
 const SHAPE_ASPECT: Record<string, string> = {
@@ -29,26 +33,29 @@ const SHAPE_ASPECT: Record<string, string> = {
   tall: '3 / 4',
 };
 
-function MediaFrame({ item }: { item: QueuedMedia | undefined }) {
+function MediaFrame({ item, cover }: { item: QueuedMedia | undefined; cover?: File }) {
   const url = useMediaUrl(item);
+  const coverUrl = useMediaUrl(cover ? { key: 'cover', file: cover, name: cover.name, mime_type: cover.type } : undefined);
   const [broken, setBroken] = useState(false);
   const video = isVideoMime(item?.mime_type);
 
+  // Vídeo com capa escolhida: mostra a capa, que é exatamente o que vai aparecer no feed.
+  if (video && coverUrl) {
+    return <img src={coverUrl} alt="" className="h-full w-full object-cover" />;
+  }
   if (!item || !url || broken) {
     return <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{video ? 'vídeo' : item ? 'imagem' : 'sem mídia'}</div>;
   }
   return video ? (
-    <video src={url} muted playsInline preload="metadata" className="h-full w-full object-cover" onError={() => setBroken(true)} />
+    <video src={videoPosterUrl(url)} muted playsInline preload="metadata" className="h-full w-full object-cover" onError={() => setBroken(true)} />
   ) : (
     <img src={url} alt="" className="h-full w-full object-cover" onError={() => setBroken(true)} />
   );
 }
 
 export function PostPreview({ input }: { input: PreviewInput }) {
-  const { platform, accountName, caption, title, media, isStory } = input;
-  const label = PLATFORM_LABELS[platform];
+  const { platform, accountName, caption, title, media, isStory, cover } = input;
   const color = PLATFORM_COLORS[platform];
-  const shape = isStory ? 'story' : PLATFORM_PREVIEW_SHAPE[platform];
   const limit = PLATFORM_CAPTION_LIMITS[platform];
   const over = limit != null && caption.length > limit;
   const shownCaption = useMemo(() => (over ? caption.slice(0, limit) : caption), [over, caption, limit]);
@@ -56,11 +63,21 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   // item) enquanto o índice ainda aponta pro slot antigo.
   const [index, setIndex] = useState(0);
   const safeIndex = Math.min(index, Math.max(0, media.length - 1));
+  const current = media[safeIndex];
+
+  // Vídeo pro Instagram sai como **Reel** — a API não tem "vídeo de feed" separado. Então o preview
+  // mostra 9:16 e diz Reels, em vez de fingir um quadrado que não vai existir.
+  const isReel = platform === 'instagram' && !isStory && isVideoMime(current?.mime_type);
+  const label = isReel ? `${PLATFORM_LABELS[platform]} · Reels` : PLATFORM_LABELS[platform];
+  const shape = isStory || isReel ? 'story' : PLATFORM_PREVIEW_SHAPE[platform];
 
   // Tamanho recomendado da rede + aviso quando o arquivo atual tem outra proporção (a plataforma
   // corta pra caber). Só dá pra avaliar quando o upload capturou width/height.
-  const recommended = isStory ? INSTAGRAM_STORY_RECOMMENDED : PLATFORM_RECOMMENDED_MEDIA[platform];
-  const current = media[safeIndex];
+  const recommended = isStory
+    ? INSTAGRAM_STORY_RECOMMENDED
+    : isReel
+      ? INSTAGRAM_REELS_RECOMMENDED
+      : PLATFORM_RECOMMENDED_MEDIA[platform];
   const willCrop = useMemo(() => {
     if (!current?.width || !current?.height) return false;
     const fileRatio = current.width / current.height;
@@ -93,7 +110,7 @@ export function PostPreview({ input }: { input: PreviewInput }) {
           className="group/carousel relative w-full overflow-hidden bg-muted"
           style={{ aspectRatio: SHAPE_ASPECT[shape], maxHeight: 340 }}
         >
-          <MediaFrame item={media[safeIndex]} />
+          <MediaFrame item={media[safeIndex]} cover={cover} />
           {media.length > 1 && (
             <>
               <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white">

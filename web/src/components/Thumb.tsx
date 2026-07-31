@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ImageIcon, Film } from 'lucide-react';
 import type { Media } from '@/lib/types';
 import { isVideoMime } from '@/lib/platforms';
+import { videoPosterUrl } from '@/lib/useMediaUrl';
 
 // Small media thumbnail with a graceful fallback: if public_url is null or fails to load (e.g. the
 // R2 custom domain isn't reachable), show a glyph instead of a broken-image icon.
@@ -19,7 +20,7 @@ export function Thumb({ media, size = 32 }: { media: Media; size?: number }) {
   }
   const cls = 'shrink-0 rounded-sm object-cover';
   return video ? (
-    <video src={media.public_url} muted preload="metadata" className={cls} style={style} onError={() => setBroken(true)} />
+    <video src={videoPosterUrl(media.public_url)} muted preload="metadata" className={cls} style={style} onError={() => setBroken(true)} />
   ) : (
     <img src={media.public_url} alt="" className={cls} style={style} onError={() => setBroken(true)} />
   );

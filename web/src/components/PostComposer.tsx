@@ -14,6 +14,7 @@ import { createPost, updatePost, uploadMedia } from '@/lib/api';
 import type { CreatePostPayload } from '@/lib/api';
 import { fmtBytes, fmtDuration, isoToLocalInput, localToIso } from '@/lib/format';
 import { readMediaMetadata } from '@/lib/mediaMetadata';
+import { useMediaUrl } from '@/lib/useMediaUrl';
 import type { QueuedMedia } from '@/lib/types';
 import {
   ALLOWED_MIME_TYPES,
@@ -253,6 +254,12 @@ export function PostComposer({
     [selected, accountsById]
   );
 
+  // Object URL da capa, pelo mesmo cache compartilhado da fila de mídia (evita criar/revogar um
+  // URL por render, que já quebrou thumbnail antes).
+  const coverPreviewUrl = useMediaUrl(
+    coverFile ? { key: 'cover', file: coverFile, name: coverFile.name, mime_type: coverFile.type } : undefined
+  );
+
   // Item do recorte em aberto (um por vez, na ordem em que entraram na fila).
   const cropTarget = queue.find((i) => i.key === cropQueue[0]) ?? null;
 
@@ -299,6 +306,11 @@ export function PostComposer({
       }
       if (count > 1 && a.platform === 'instagram' && isStory) {
         out.push({ field: 'media', problem: true, text: 'Deixe só um arquivo para publicar como Story' });
+      }
+      // Vídeo no Instagram não tem "post de vídeo no feed": a API publica como Reel. Diz isso antes
+      // de agendar, senão a pessoa descobre olhando o perfil.
+      if (a.platform === 'instagram' && !isStory && hasVideo && count === 1) {
+        out.push({ field: 'media', problem: false, text: 'Vídeo no Instagram é publicado como Reel (9:16)' });
       }
       // Só imagem: vídeo tem outra faixa e o corte aqui não se aplica.
       if (needsFeedRatio && (a.platform === 'instagram' || a.platform === 'facebook')) {
@@ -350,9 +362,12 @@ export function PostComposer({
           title,
           media: queue,
           isStory,
+          // A capa é o que a rede mostra parado no feed — então é ela que o preview deve mostrar,
+          // não um frame do vídeo. Só pra quem aceita imagem de capa (YouTube/Instagram).
+          cover: coverFile && (a.platform === 'youtube' || a.platform === 'instagram') ? coverFile : undefined,
         },
       })),
-    [tabAccounts, body, captionOverrides, title, queue, isStory]
+    [tabAccounts, body, captionOverrides, title, queue, isStory, coverFile]
   );
 
   // Só habilita o que faz sentido no estado atual: agendar exige conta + data + nenhum problema
@@ -512,8 +527,27 @@ export function PostComposer({
                   onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Imagem de capa para {coverImageNetworks.join(' e ')}.
+                  Capa para {coverImageNetworks.join(' e ')} — no Instagram é a capa do Reel. É ela que aparece na pré-visualização.
                 </p>
+                {coverFile && (
+                  <div className="flex items-center gap-2">
+                    <img
+                      src={coverPreviewUrl ?? undefined}
+                      alt=""
+                      className="size-16 rounded-lg border object-cover"
+                    />
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                      onClick={() => {
+                        setCoverFile(null);
+                        if (coverRef.current) coverRef.current.value = '';
+                      }}
+                    >
+                      remover capa
+                    </button>
+                  </div>
+                )}
               </>
             )}
             {acceptsCoverFrame && (

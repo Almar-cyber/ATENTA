@@ -25,3 +25,18 @@ export function useMediaUrl(item: QueuedMedia | undefined): string | null {
   if (item.file) return fileUrl(item.file);
   return item.public_url ?? null;
 }
+
+/**
+ * URL de vídeo pra EXIBIR parado num thumbnail/preview.
+ *
+ * Um `<video preload="metadata">` carrega a duração e as dimensões mas não decodifica frame nenhum
+ * — na tela isso é um retângulo vazio, que é o que fazia o vídeo "não aparecer" na fila de mídia e
+ * na pré-visualização. O media fragment `#t=` força o navegador a buscar aquele instante e
+ * desenhá-lo. Medido: sem o fragmento o frame vem 100% preto; com ele, a imagem real.
+ *
+ * 0.1s em vez de 0: muitos vídeos abrem em preto absoluto no primeiro frame.
+ */
+export function videoPosterUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  return url.includes('#') ? url : `${url}#t=0.1`;
+}

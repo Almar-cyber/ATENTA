@@ -45,11 +45,14 @@ Depois de deployado, dá pra conectar LinkedIn / Meta (Instagram + Facebook) / P
 consentimento da plataforma e, ao voltar, o Worker grava a conta (nome puxado automático da API) e
 mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando como alternativa.
 
-- **Múltiplas contas por rede** (ex.: dois Instagrams): suportado — a migração `0002_accounts_multi.sql`
-  troca o `unique(platform)` por `unique(platform, external_account_id)`. **Rode no `--remote`** (o
-  `--local`/miniflare não replica o `defer_foreign_keys` usado pra recriar a tabela referenciada; o D1
-  remoto sim, e faz rollback atômico se algo falhar). Na Meta, conecta todas as contas que você
-  autorizar no consentimento; na hora de postar, você escolhe em qual conta no compositor.
+- **Múltiplas contas por rede** (ex.: dois Instagrams): a migração `0002_accounts_multi.sql` troca o
+  `unique(platform)` por `unique(platform, external_account_id)` — **já aplicada no remoto**. Na Meta,
+  conecta todas as contas que você autorizar no consentimento; na hora de postar, você escolhe em qual
+  conta no compositor.
+  Nota pra quem for reaplicar em outro banco: ela dropa e recria `post_targets`/`post_target_media`
+  junto, porque `DROP TABLE accounts` com filhos vivos registra uma violação de FK por linha filha, e
+  recriar a tabela com os mesmos ids depois **não** zera esse contador — `defer_foreign_keys` sozinho
+  não resolve (foi assim que ela falhou duas vezes antes). Os dados e os ids são preservados.
 - **YouTube também conecta pelo navegador** — precisa de uma credencial OAuth do tipo **Web application**
   no Google Cloud (a de "Desktop app" que o CLI usa só aceita redirect loopback), com o redirect
   `…/oauth/callback/youtube` registrado. O CLI (`npm run youtube-auth`) continua valendo.
@@ -235,6 +238,10 @@ recorte a qualquer momento.
 filtro `image/*` e sobe pro R2 sem erro, mas toda plataforma recusa na hora de publicar — então
 `POST /api/media` (e o input do dashboard) rejeitam esses formatos na entrada, com a mensagem
 mandando exportar antes. A allowlist fica em `ALLOWED_MIME_TYPES` (`src/api.ts`).
+
+**Reels (Instagram)** — vídeo pro Instagram **é Reel**: a API de publicação não tem "vídeo de
+feed" separado (o adapter manda `media_type: 'REELS'`). O dashboard mostra isso — a
+pré-visualização vira 9:16 e diz "Instagram · Reels", e a capa passa a ser a capa do Reel.
 
 **Stories (Instagram)** — checkbox no formulário. Aceita exatamente um arquivo (imagem ou vídeo);
 a API da Meta não publica Stories em carrossel nem elementos interativos (stickers, links, música),
