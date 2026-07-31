@@ -69,7 +69,7 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                 )}
 
                 {target.status === 'published' && target.external_url && (
-                  <a href={target.external_url} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-primary underline">
+                  <a href={target.external_url} target="_blank" rel="noopener noreferrer" className="inline-block text-sm font-medium text-accent-foreground underline">
                     ver post publicado ↗
                   </a>
                 )}
