@@ -80,7 +80,11 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   dos botões e cards — `border-2 border-foreground` + `shadow-[3px_3px_0_0_var(--foreground)]`, sem
   sombra difusa nem `ring`. O tooltip é claro (`bg-card`), não a pílula escura do preset, e não tem
   seta: um losango girado não carrega a borda de 2px sem emendar torto.
-- **Toasts**: `sonner` (`toast.success/error`) pra todo feedback de ação; nunca `alert()`.
+- **Toasts**: `sonner` (`toast.success/error`) pra todo feedback de ação; nunca `alert()`. Mesma
+  estética das outras superfícies — fundo claro, borda preta de 2px, sombra deslocada sólida. O
+  `richColors` fica só no ícone e no texto (verde/vermelho); o bloco pastel de fundo foi trocado
+  por `var(--card)`. As classes precisam de `!`: o sonner traz o próprio `box-shadow` difuso na
+  folha de estilo dele, com especificidade maior que a das utilitárias.
 - **Aspects do preview**: quem manda é o **formato** (`PLATFORM_FORMATS[p].shape`) — Reel/Story/Short são 9:16, post de feed é 4:5. `PLATFORM_PREVIEW_SHAPE` é só o fallback de quem não tem formatos.
 - **Motion**: entradas de lista com stagger sutil (`delay: i*0.015`, teto 0.3s); troca de view com
   fade+slide de 150ms (evite `AnimatePresence mode="wait"` numa view que também sofre poll —

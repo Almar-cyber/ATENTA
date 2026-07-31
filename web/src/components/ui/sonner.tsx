@@ -28,15 +28,27 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          "--normal-bg": "var(--card)",
+          "--normal-text": "var(--foreground)",
+          "--normal-border": "var(--foreground)",
           "--border-radius": "var(--radius)",
+          // richColors: mantém o verde/vermelho no ícone e no texto, mas o fundo e a borda seguem
+          // a linguagem do resto (superfície clara, contorno preto) em vez de um bloco pastel.
+          "--success-bg": "var(--card)",
+          "--success-border": "var(--foreground)",
+          "--error-bg": "var(--card)",
+          "--error-border": "var(--foreground)",
+          "--warning-bg": "var(--card)",
+          "--warning-border": "var(--foreground)",
+          "--info-bg": "var(--card)",
+          "--info-border": "var(--foreground)",
         } as React.CSSProperties
       }
       toastOptions={{
         classNames: {
-          toast: "cn-toast",
+          // Mesma estética dos botões e cards. O `!` é necessário: o sonner traz o próprio
+          // box-shadow difuso na folha de estilo dele, com especificidade maior que a utilitária.
+          toast: "border-2! border-foreground! rounded-xl! shadow-[4px_4px_0_0_var(--foreground)]!",
         },
       }}
       {...props}
