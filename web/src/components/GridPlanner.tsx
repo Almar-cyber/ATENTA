@@ -276,7 +276,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
                 layout
                 key={tile.key}
                 {...dragProps(tile)}
-                className="group relative aspect-[3/4] cursor-grab overflow-hidden border-2 border-dashed border-primary bg-muted active:cursor-grabbing"
+                className="group relative aspect-[3/4] cursor-grab overflow-hidden border-2 border-dashed border-brand bg-muted active:cursor-grabbing"
               >
                 {preview.public_url ? (
                   isVideoMime(preview.mime_type) ? (
@@ -384,7 +384,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
           type="button"
           disabled={adding}
           onClick={() => fileRef.current?.click()}
-          className="grid aspect-[3/4] place-items-center border-2 border-dashed border-border bg-muted/40 text-muted-foreground transition-colors hover:border-primary hover:text-foreground disabled:opacity-50"
+          className="grid aspect-[3/4] place-items-center border-2 border-dashed border-border bg-muted/40 text-muted-foreground transition-colors hover:border-brand hover:text-foreground disabled:opacity-50"
         >
           {adding ? <Loader2 className="size-5 animate-spin" /> : <ImagePlus className="size-5" />}
         </button>

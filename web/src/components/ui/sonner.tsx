@@ -48,7 +48,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         classNames: {
           // Mesma estética dos botões e cards. O `!` é necessário: o sonner traz o próprio
           // box-shadow difuso na folha de estilo dele, com especificidade maior que a utilitária.
-          toast: "border-2! border-foreground! rounded-xl! shadow-[4px_4px_0_0_var(--foreground)]!",
+          toast: "border-2! border-brand! rounded-xl! shadow-[4px_4px_0_0_var(--brand)]!",
         },
       }}
       {...props}

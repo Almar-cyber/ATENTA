@@ -25,7 +25,8 @@ function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpe
   const { accounts } = useScheduler();
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 px-6 pb-2 pt-6">
-      <h1 className="text-3xl font-bold tracking-tight">Social Scheduler</h1>
+      {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores. */}
+      <img src="/atenta-wordmark.png" alt="ATENTA!" className="h-10 w-auto" />
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -81,7 +82,7 @@ function ComposerModal({ open, onClose, children }: { open: boolean; onClose: ()
     >
       <div aria-hidden onClick={onClose} className="absolute inset-0 bg-foreground/25 backdrop-blur-[2px]" />
       <div
-        className={`relative z-10 flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-card border-2 border-foreground shadow-[6px_6px_0_0_var(--foreground)] transition-transform duration-200 ${open ? 'scale-100' : 'scale-95'}`}
+        className={`relative z-10 flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-card border-2 border-brand shadow-[6px_6px_0_0_var(--brand)] transition-transform duration-200 ${open ? 'scale-100' : 'scale-95'}`}
       >
         {children}
       </div>
@@ -150,7 +151,7 @@ function Dashboard() {
         {screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
         ) : (
-        <section className="flex h-full flex-col rounded-2xl bg-card p-5 border-2 border-foreground shadow-[4px_4px_0_0_var(--foreground)]">
+        <section className="flex h-full flex-col rounded-2xl bg-card p-5 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)]">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold">Posts agendados</h2>
             <div className="flex flex-wrap items-center gap-2">

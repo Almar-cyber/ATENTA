@@ -38,6 +38,7 @@
     --color-card-foreground: var(--card-foreground);
     --color-card: var(--card);
     --color-foreground: var(--foreground);
+    --color-brand: var(--brand);
     --color-background: var(--background);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
@@ -51,24 +52,28 @@
 }
 
 :root {
+    /* Marca ATENTA!: fundo branco, TEXTO preto, "tinta" brutalista (bordas/sombras) em roxo
+       #52277F (--brand) e o destaque/ação em amarelo #FCEC0E (--primary, com texto preto por cima,
+       alto contraste). O dourado suave antigo virou esse amarelo; o preto das bordas virou o roxo. */
     --background: oklch(1 0 0);
-    --foreground: oklch(0.29 0.01 260);
+    --foreground: oklch(0.29 0.01 260);            /* preto — texto (mantido) */
+    --brand: oklch(0.38 0.142 302.5);              /* #52277F roxo — bordas e sombras brutalistas */
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.29 0.01 260);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.29 0.01 260);
-    --primary: oklch(0.886 0.101 90.2); /* #F3D78A */
-    --primary-foreground: oklch(0.32 0.03 80);
-    --secondary: oklch(0.968 0.003 250);
+    --primary: oklch(0.926 0.195 104.5); /* #FCEC0E */
+    --primary-foreground: oklch(0.29 0.01 260);    /* texto preto sobre o amarelo */
+    --secondary: oklch(0.968 0.004 300);
     --secondary-foreground: oklch(0.29 0.01 260);
-    --muted: oklch(0.968 0.003 250);
-    --muted-foreground: oklch(0.6 0.012 258);
-    --accent: oklch(0.95 0.045 92);
-    --accent-foreground: oklch(0.38 0.06 78);
+    --muted: oklch(0.968 0.004 300);
+    --muted-foreground: oklch(0.52 0.03 302);      /* apoio: roxo dessaturado */
+    --accent: oklch(0.965 0.08 104);               /* amarelo pálido (hover/realce) */
+    --accent-foreground: oklch(0.38 0.142 302.5);  /* roxo legível pra links/ênfase */
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.928 0.004 258);
-    --input: oklch(0.928 0.004 258);
-    --ring: oklch(0.886 0.101 90.2);
+    --border: oklch(0.91 0.02 302);                /* borda leve, levemente arroxeada */
+    --input: oklch(0.91 0.02 302);
+    --ring: oklch(0.38 0.142 302.5);               /* roxo — foco visível */
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -86,24 +91,25 @@
 }
 
 .dark {
-    --background: oklch(0.2 0.008 260);
+    --background: oklch(0.2 0.012 300);
     --foreground: oklch(0.95 0.004 250);
-    --card: oklch(0.25 0.009 260);
+    --brand: oklch(0.72 0.13 300);                 /* roxo mais claro pra borda aparecer no escuro */
+    --card: oklch(0.25 0.014 300);
     --card-foreground: oklch(0.95 0.004 250);
-    --popover: oklch(0.25 0.009 260);
+    --popover: oklch(0.25 0.014 300);
     --popover-foreground: oklch(0.95 0.004 250);
-    --primary: oklch(0.84 0.135 89);
-    --primary-foreground: oklch(0.28 0.03 80);
-    --secondary: oklch(0.3 0.01 260);
+    --primary: oklch(0.9 0.19 104);
+    --primary-foreground: oklch(0.25 0.02 300);
+    --secondary: oklch(0.3 0.015 300);
     --secondary-foreground: oklch(0.95 0.004 250);
-    --muted: oklch(0.3 0.01 260);
-    --muted-foreground: oklch(0.7 0.012 258);
-    --accent: oklch(0.34 0.04 85);
-    --accent-foreground: oklch(0.92 0.04 90);
+    --muted: oklch(0.3 0.015 300);
+    --muted-foreground: oklch(0.72 0.03 300);
+    --accent: oklch(0.34 0.05 300);
+    --accent-foreground: oklch(0.82 0.12 300);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
+    --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.8 0.16 82);
+    --ring: oklch(0.72 0.13 300);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);

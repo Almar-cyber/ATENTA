@@ -19,17 +19,24 @@ design — leia antes de criar telas ou componentes novos, pra manter tudo coere
 
 ## Tokens
 
-Cores, raios e tipografia vêm do tema em `src/index.css` (variáveis CSS em `oklch`). A paleta é
-**branca/neutra com acento dourado/âmbar** (`--primary`): fundo branco, blocos de conteúdo em cinza
-claro levemente frio, dourado só nos realces (botões, estado ativo, "hoje", foco). Use sempre as
-classes utilitárias semânticas — nunca hex solto:
+Cores, raios e tipografia vêm do tema em `src/index.css` (variáveis CSS em `oklch`). A paleta é a da
+marca **ATENTA!**: fundo branco, **texto preto**, a "tinta" brutalista (bordas e sombras deslocadas)
+em **roxo #52277F** (`--brand`) e o destaque/ação em **amarelo #FCEC0E** (`--primary`, com texto
+preto por cima, alto contraste — é o combo do próprio logo). O amarelo vivo fica **contido nos
+realces** (botão, estado ativo, "hoje"); como fundo de área grande cansaria, o fundo é branco. Use
+sempre as classes utilitárias semânticas — nunca hex solto:
 
-- Superfícies: `bg-background` (branco), `bg-card`, `bg-muted`/`bg-secondary` (blocos cinza)
-- Texto: `text-foreground`, `text-muted-foreground`
-- Ação primária: `bg-primary` / `text-primary-foreground` (dourado, texto escuro); destrutiva: `variant="destructive"`
-- Bordas/sombra: `border` (usa `--border`); cards flutuam com `shadow-soft` + `ring-1 ring-foreground/5`
+- Superfícies: `bg-background` (branco), `bg-card`, `bg-muted`/`bg-secondary` (blocos cinza levemente arroxeados)
+- Texto: `text-foreground` (**preto**), `text-muted-foreground` (roxo dessaturado)
+- Ação primária: `bg-primary` / `text-primary-foreground` (amarelo, texto preto); destrutiva: `variant="destructive"`
+- **Tinta brutalista**: `border-brand` + `shadow-[Npx_Npx_0_0_var(--brand)]` (roxo). É o `--brand`, **não** o `--foreground` — separados de propósito, pra borda ser roxa e texto continuar preto.
+- Borda leve (inputs/divisórias): `border` (usa `--border`, levemente arroxeada)
+- Links/ênfase: `text-accent-foreground` (roxo legível — amarelo como texto não tem contraste)
 - Raio base `--radius` (**1rem**) e derivados `rounded-md/lg/xl/2xl`
 - Fonte: Geist (variável `--font-sans`), já aplicada no `body`
+- Logo: `web/public/atenta-wordmark.png` (sticker roxo com traço amarelo, pra fundo claro) no header;
+  `atenta-wordmark-onpurple.png` (traço branco) pra superfície colorida; `atenta-icon.svg` no favicon.
+  **PNG, não SVG, no wordmark** — o SVG deformava o "A" e o "N" em alguns renderizadores.
 
 **Exceção deliberada — cores de marca das plataformas.** `PLATFORM_COLORS` (em
 `src/lib/platforms.ts`) tem os hex oficiais (YouTube #FF0000, LinkedIn #0A66C2, Instagram #E1306C,
