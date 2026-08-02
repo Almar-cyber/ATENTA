@@ -304,6 +304,7 @@ interface AccountRow {
   id: string;
   platform: string;
   status: string;
+  extra: string;
 }
 
 // A target's status only ever starts life as one of these two (an update's newly-added account
@@ -356,7 +357,7 @@ async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMed
   const accountIds = params.accountIds;
 
   const { results: accountRows } = await env.DB.prepare(
-    `select id, platform, status from accounts where id in (${accountIds.map(() => '?').join(',')})`
+    `select id, platform, status, extra from accounts where id in (${accountIds.map(() => '?').join(',')})`
   )
     .bind(...accountIds)
     .all<AccountRow>();
@@ -453,7 +454,10 @@ async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMed
       };
       try {
         // Each adapter's own message is already prefixed with its platform name (e.g. "youtube: ...").
-        adapters[platform].validate(fakeTarget, media);
+        // O validate() do Pinterest lê account.extra.default_board_id, então precisa de uma conta
+        // com o extra parseado — não só o AccountRow leve. Os outros adapters ignoram a conta.
+        const fakeAccount = { ...account, extra: JSON.parse(account.extra || '{}') } as unknown as Account;
+        adapters[platform].validate(fakeTarget, media, fakeAccount);
       } catch (err) {
         return { ok: false, response: jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 400) };
       }

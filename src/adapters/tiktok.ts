@@ -63,7 +63,7 @@ export const tiktokAdapter: PlatformAdapter = {
     return account;
   },
 
-  validate(_target, media) {
+  validate(_target, media, _account) {
     if (media.length !== 1) throw new Error('tiktok: exactly one video is required');
     if (!media[0].mime_type.startsWith('video/')) throw new Error('tiktok: media must be a video');
     checkDuration('tiktok', media[0], undefined, MAX_VIDEO_DURATION_SECONDS);

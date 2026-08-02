@@ -17,16 +17,20 @@
     "meta-auth-url": "tsx src/cli/meta-auth-url.ts",
     "pinterest-auth-url": "tsx src/cli/pinterest-auth-url.ts",
     "tiktok-auth-url": "tsx src/cli/tiktok-auth-url.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.1",
     "@cloudflare/workers-types": "^5.20260722.1",
     "@types/node": "^22.5.4",
     "tsx": "^4.19.0",
     "typescript": "^5.6.2",
+    "vitest": "^4.1.10",
     "wrangler": "^4.0.0"
   }
 }

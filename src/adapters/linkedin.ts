@@ -47,7 +47,7 @@ export const linkedinAdapter: PlatformAdapter = {
     throw new Error('linkedin: token nearing expiry, no refresh possible — run linkedin-auth-url again');
   },
 
-  validate(_target, media) {
+  validate(_target, media, _account) {
     if (media.length > MULTI_IMAGE_MAX) {
       throw new Error(`linkedin: at most ${MULTI_IMAGE_MAX} images per post (got ${media.length})`);
     }

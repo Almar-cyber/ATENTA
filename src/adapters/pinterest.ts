@@ -61,7 +61,7 @@ export const pinterestAdapter: PlatformAdapter = {
     return account;
   },
 
-  validate(target, media) {
+  validate(target, media, account) {
     if (media.length === 0) throw new Error('pinterest: at least one image or video is required');
     if (media.length > CAROUSEL_MAX_ITEMS) {
       throw new Error(`pinterest: carousel supports at most ${CAROUSEL_MAX_ITEMS} images (got ${media.length})`);
@@ -77,8 +77,12 @@ export const pinterestAdapter: PlatformAdapter = {
         checkDuration('pinterest', asset, MIN_VIDEO_DURATION_SECONDS, MAX_VIDEO_DURATION_SECONDS);
       }
     }
+    // Espelha a resolução do publish(): board do post, senão o default que o callback OAuth gravou
+    // em accounts.extra (o caminho normal, README "Fase 3"). Checar só options.board_id rejeitava
+    // todo post que usa o board padrão — o validate() não via a conta.
     const options = target.options as { board_id?: string };
-    if (!options.board_id) throw new Error('pinterest: no board_id in options and no default board resolved at auth time');
+    const boardId = options.board_id ?? (account.extra as { default_board_id?: string }).default_board_id;
+    if (!boardId) throw new Error('pinterest: no board_id in options and no default board resolved at auth time');
   },
 
   async publish(target, media, account, env) {

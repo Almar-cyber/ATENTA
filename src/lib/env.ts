@@ -16,6 +16,11 @@ export interface Env {
   // Wrangler secrets (`wrangler secret put NAME`) — never committed, never in .env.
   TOKEN_ENCRYPTION_KEY: string;
 
+  // Opcional: webhook (ntfy.sh ou Discord) pra onde o poller empurra alertas de falha/reauth/
+  // ambíguo/timeout — os Cron Triggers não têm o e-mail de "workflow falhou" que o GitHub Actions
+  // teria. Sem o secret, o alerta é só log (comportamento anterior). Ver src/lib/notify.ts.
+  ALERT_WEBHOOK_URL?: string;
+
   // Gates the dashboard + /api/* (see src/lib/auth.ts) — single shared password, any username.
   // Optional: unset means no gate at all, i.e. the dashboard and API are publicly reachable.
   DASHBOARD_PASSWORD?: string;

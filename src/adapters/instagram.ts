@@ -60,7 +60,7 @@ export const instagramAdapter: PlatformAdapter = {
     throw new Error('instagram: no refresh mechanism implemented — run meta-auth-url again if needs_reauth');
   },
 
-  validate(target, media) {
+  validate(target, media, _account) {
     if (media.length === 0) throw new Error('instagram: at least one image or video is required');
     if (media.length > CAROUSEL_MAX_ITEMS) {
       throw new Error(`instagram: carousel supports at most ${CAROUSEL_MAX_ITEMS} items (got ${media.length})`);

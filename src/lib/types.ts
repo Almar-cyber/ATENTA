@@ -74,7 +74,7 @@ export interface PlatformAdapter {
   needsRefresh(account: Account): boolean;
   ensureFreshToken(account: Account, env: Env): Promise<Account>;
   /** Throws before spending an API call. */
-  validate(target: PostTarget, media: MediaAsset[]): void;
+  validate(target: PostTarget, media: MediaAsset[], account: Account): void;
   publish(target: PostTarget, media: MediaAsset[], account: Account, env: Env): Promise<PublishResult>;
   /** For async platforms; reads/writes adapter_state. */
   checkStatus(target: PostTarget, account: Account, env: Env): Promise<PublishResult>;

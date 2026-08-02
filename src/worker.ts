@@ -4,6 +4,7 @@ import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db
 import { checkDashboardAuth } from './lib/auth.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
+import { notify } from './lib/notify.js';
 import { OAUTH_STATE_COOKIE, clearStateCookie, decodeState, getCookie } from './lib/oauth-state.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
@@ -101,6 +102,10 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
       await env.DB.prepare(`update accounts set status = 'needs_reauth', updated_at = ? where id = ?`)
         .bind(nowIso(), account.id)
         .run();
+      await notify(
+        env,
+        `🔑 ${account.platform} (${account.display_name}) precisa de reauth — rode o CLI de auth dessa plataforma. Nada será publicado nela até lá.`
+      );
     }
   }
 }
@@ -111,14 +116,16 @@ async function stepClaimAndPublishDue(env: Env): Promise<void> {
   const { results } = await env.DB.prepare(
     // sp.body/sp.title entram no SELECT pra rowToPostTarget resolver a legenda e o título — o
     // adapter só lê target.caption_override/target.title, e a legenda canônica mora em sp.body.
+    // next_attempt_at é o backoff de retry (migração 0004): null até o destino falhar a 1ª vez.
     `select pt.*, sp.body, sp.title from post_targets pt
      join accounts a on a.id = pt.account_id
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      where pt.status = 'queued' and sp.scheduled_for <= ? and a.status = 'active'
+       and (pt.next_attempt_at is null or pt.next_attempt_at <= ?)
      order by sp.scheduled_for asc
      limit ?`
   )
-    .bind(nowIso(), CLAIM_BATCH_SIZE)
+    .bind(nowIso(), nowIso(), CLAIM_BATCH_SIZE)
     .all<any>();
 
   for (const row of results ?? []) {
@@ -132,7 +139,16 @@ async function stepClaimAndPublishDue(env: Env): Promise<void> {
 
     const adapter = adapters[target.platform];
     try {
-      adapter.validate(target, media);
+      try {
+        adapter.validate(target, media, account);
+      } catch (err) {
+        // validate() só olha o target, a mídia e a conta — sem rede, sem relógio. Dadas as mesmas
+        // linhas, falha igual toda vez; mandar isso pela escada de retry queimaria as 5 tentativas
+        // em 75min pra chegar ao mesmo veredito. Corrigir exige editar o post (ou configurar o
+        // domínio do R2) e reenfileirar — por isso é permanente, não retryable.
+        await handleFailure(env, target, 'permanent', err instanceof Error ? err.message : String(err));
+        continue;
+      }
       const result = await adapter.publish(target, media, account, env);
       await applyPublishResult(env, target, result);
     } catch (err) {
@@ -179,12 +195,17 @@ async function stepSweeps(env: Env): Promise<void> {
     .run();
 
   const processingCutoff = new Date(Date.now() - PROCESSING_TIMEOUT_HOURS * 3_600_000).toISOString();
-  await env.DB.prepare(
+  const { results: timedOut } = await env.DB.prepare(
     `update post_targets set status = 'failed', last_error = 'timed out waiting on platform processing', updated_at = ?
-     where status = 'processing' and updated_at < ?`
+     where status = 'processing' and updated_at < ? returning platform`
   )
     .bind(nowIso(), processingCutoff)
-    .run();
+    .all<{ platform: string }>();
+
+  if (timedOut?.length) {
+    const platforms = timedOut.map((r) => r.platform).join(', ');
+    await notify(env, `❌ ${timedOut.length} post(s) desistiram esperando o processamento da plataforma: ${platforms}`);
+  }
 }
 
 async function claim(env: Env, id: string, fromStatus: string, toStatus: string): Promise<boolean> {
@@ -226,7 +247,15 @@ async function applyPublishResult(env: Env, target: PostTarget, result: PublishR
   }
 
   if (result.state === 'processing') {
-    await env.DB.prepare(`update post_targets set status = 'processing', adapter_state = ?, updated_at = ? where id = ?`)
+    // updated_at só é carimbado na transição PARA processing, nunca num recheck que a encontra
+    // ainda processando. O sweep de 6h mede a idade por essa coluna — bumpá-la a cada 10min
+    // empurraria o prazo pra sempre e o sweep nunca dispararia justamente no caso que ele existe
+    // pra pegar (um container que travou no processamento da plataforma).
+    await env.DB.prepare(
+      `update post_targets set status = 'processing', adapter_state = ?,
+         updated_at = case when status = 'processing' then updated_at else ? end
+       where id = ?`
+    )
       .bind(JSON.stringify(result.adapterState ?? target.adapter_state), ts, target.id)
       .run();
     return;
@@ -254,9 +283,12 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     await env.DB.prepare(`update accounts set status = 'needs_reauth', updated_at = ? where id = ?`)
       .bind(ts, target.account_id)
       .run();
-    await env.DB.prepare(`update post_targets set status = 'queued', last_error = ?, updated_at = ? where id = ?`)
+    await env.DB.prepare(
+      `update post_targets set status = 'queued', last_error = ?, next_attempt_at = null, updated_at = ? where id = ?`
+    )
       .bind(message, ts, target.id)
       .run();
+    await notify(env, `🔑 ${target.platform} precisa de reauth (falha na publicação): ${message}`);
     return;
   }
 
@@ -264,6 +296,7 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     await env.DB.prepare(`update post_targets set status = 'ambiguous', last_error = ?, updated_at = ? where id = ?`)
       .bind(message, ts, target.id)
       .run();
+    await notify(env, `⚠️ ${target.platform}: publicação AMBÍGUA, confira na plataforma se saiu. ${message}`);
     return;
   }
 
@@ -271,6 +304,7 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     await env.DB.prepare(`update post_targets set status = 'failed', last_error = ?, updated_at = ? where id = ?`)
       .bind(message, ts, target.id)
       .run();
+    await notify(env, `❌ ${target.platform}: falhou definitivamente. ${message}`);
     return;
   }
 
@@ -280,19 +314,22 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     await env.DB.prepare(`update post_targets set status = 'failed', last_error = ?, attempt_count = ?, updated_at = ? where id = ?`)
       .bind(message, attemptCount, ts, target.id)
       .run();
+    await notify(env, `❌ ${target.platform}: desistiu após ${attemptCount} tentativas. ${message}`);
     return;
   }
 
+  // O backoff vai em post_targets.next_attempt_at (migração 0004), NÃO em scheduled_posts.scheduled_for:
+  // scheduled_for é o horário que você escolheu e é compartilhado por todos os destinos do post, então
+  // atrasar um destino que falhou ali empurraria os irmãos junto. A versão anterior escrevia numa
+  // coluna post_targets.scheduled_for que nunca existiu — o UPDATE estourava dentro do handler de
+  // falha e o retry nunca rodava.
   // TODO (per adapter, Phase 1+): use the platform's real quota-reset boundary instead of a flat 24h.
   const delayMs = errorClass === 'quota' ? 24 * 3_600_000 : 15 * 60_000;
-  const nextRunAt = new Date(Date.now() + delayMs).toISOString();
-  // scheduled_for lives on scheduled_posts, not post_targets (one schedule shared by all of a
-  // post's targets) — two updates, one per table.
-  await env.DB.prepare(`update post_targets set status = 'queued', last_error = ?, attempt_count = ?, updated_at = ? where id = ?`)
-    .bind(message, attemptCount, ts, target.id)
-    .run();
-  await env.DB.prepare(`update scheduled_posts set scheduled_for = ?, updated_at = ? where id = ?`)
-    .bind(nextRunAt, ts, target.scheduled_post_id)
+  const nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+  await env.DB.prepare(
+    `update post_targets set status = 'queued', last_error = ?, attempt_count = ?, next_attempt_at = ?, updated_at = ? where id = ?`
+  )
+    .bind(message, attemptCount, nextAttemptAt, ts, target.id)
     .run();
 }
 
@@ -301,10 +338,47 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
 // flow instead (see adapters/youtube.ts + cli/youtube-auth.ts), so it never hits this Worker.
 type OAuthCallbackPlatform = 'linkedin' | 'meta' | 'pinterest' | 'tiktok' | 'youtube';
 
+// Campos que cada provedor usa pra reportar recusa no redirect (OAuth 2.0 padrão + os próprios do
+// TikTok e da Meta). É daqui que sai o motivo quando a autorização falha.
+const OAUTH_ERROR_FIELDS = ['error', 'error_description', 'error_reason', 'error_code', 'errCode', 'log_id'] as const;
+
+/** Resumo legível de uma recusa reportada pelo provedor, ou null se não houver. */
+function describeProviderError(platform: string, url: URL): string | null {
+  const detail = OAUTH_ERROR_FIELDS.map((field) => {
+    const value = url.searchParams.get(field);
+    return value ? `${field}=${value}` : null;
+  })
+    .filter((entry) => entry !== null)
+    .join(' | ');
+  return detail ? `${platform} recusou a autorização: ${detail}` : null;
+}
+
+/** A query com o `code` redigido — é uma credencial de curta duração e não pode ir pra tela nem log. */
+function safeQuery(url: URL): string {
+  const params = new URLSearchParams(url.search);
+  if (params.has('code')) params.set('code', '<redacted>');
+  return params.toString() || '(nenhum)';
+}
+
 async function handleOAuthCallback(platform: OAuthCallbackPlatform, request: Request, url: URL, env: Env): Promise<Response> {
+  // Checa uma recusa reportada pelo provedor ANTES de procurar o ?code=. Ao recusar a autorização,
+  // todos esses provedores redirecionam de volta com o motivo na query e SEM code — responder um
+  // "missing ?code=" seco jogava fora a única explicação disponível, que era exatamente o que
+  // deixava a falha do TikTok impossível de diagnosticar.
+  const providerError = describeProviderError(platform, url);
+  if (providerError) {
+    console.error(`[oauth/${platform}] ${providerError}`);
+    return new Response(providerError, { status: 400 });
+  }
+
   const code = url.searchParams.get('code');
   if (!code) {
-    return new Response('missing ?code=', { status: 400 });
+    // Sem code e sem erro reconhecido: despeja o que chegou, pra um nome de parâmetro inesperado
+    // não se esconder do mesmo jeito.
+    return new Response(
+      `${platform}: callback sem ?code= e sem erro reconhecido. Parâmetros recebidos: ${safeQuery(url)}`,
+      { status: 400 }
+    );
   }
 
   // Sem isto, qualquer exceção aqui vira a página "Error 1101 — Worker threw exception" da

@@ -37,7 +37,7 @@ export const facebookAdapter: PlatformAdapter = {
     throw new Error('facebook: no refresh mechanism implemented — run meta-auth-url again if needs_reauth');
   },
 
-  validate(_target, media) {
+  validate(_target, media, _account) {
     if (media.length > CAROUSEL_MAX_ITEMS) {
       throw new Error(`facebook: at most ${CAROUSEL_MAX_ITEMS} photos per post (got ${media.length})`);
     }
