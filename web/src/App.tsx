@@ -27,11 +27,13 @@ function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpe
     <header className="flex flex-wrap items-center justify-between gap-4 px-6 pb-2 pt-6">
       {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores. */}
       <img src="/atenta-wordmark.png" alt="ATENTA!" className="h-10 w-auto" />
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
+        {/* Avatares só no desktop: no mobile eles empurravam o "Novo post" pra quebrar, e a função
+            (abrir Conexões) já está no botão ao lado. */}
         <button
           type="button"
           onClick={onOpenConnections}
-          className="flex flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted"
+          className="hidden flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted sm:flex"
           title="Gerenciar conexões"
         >
           {accounts.length === 0 ? (
@@ -51,11 +53,12 @@ function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpe
             ))
           )}
         </button>
-        <Button size="lg" variant="outline" onClick={onOpenConnections}>
+        {/* No mobile os dois botões dividem a linha (flex-1); no desktop voltam à largura natural. */}
+        <Button size="lg" variant="outline" onClick={onOpenConnections} className="flex-1 sm:flex-none">
           <Link2 className="size-4" />
           Conexões
         </Button>
-        <Button size="lg" onClick={onNewPost}>
+        <Button size="lg" onClick={onNewPost} className="flex-1 sm:flex-none">
           <Plus className="size-4" />
           Novo post
         </Button>
@@ -154,7 +157,7 @@ function Dashboard() {
         <section className="flex h-full flex-col rounded-2xl bg-card p-5 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)]">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold">Posts agendados</h2>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <Tabs value={view} onValueChange={(v) => setView(v as View)}>
                 <TabsList>
                   <TabsTrigger value="list">Lista</TabsTrigger>
@@ -166,7 +169,7 @@ function Dashboard() {
               <FilterSelect
                 value={filters.status || 'all'}
                 onChange={(v) => setFilters({ status: v === 'all' ? '' : v })}
-                width="w-36"
+                width="w-full sm:w-36"
                 options={[
                   ['all', 'todos os status'],
                   ['draft', 'Rascunho'],
@@ -182,13 +185,13 @@ function Dashboard() {
               <FilterSelect
                 value={filters.platform || 'all'}
                 onChange={(v) => setFilters({ platform: v === 'all' ? '' : v })}
-                width="w-40"
+                width="w-full sm:w-40"
                 options={[['all', 'todas as plataformas'], ...Object.entries(PLATFORM_LABELS)]}
               />
               <FilterSelect
                 value={filters.account || 'all'}
                 onChange={(v) => setFilters({ account: v === 'all' ? '' : v })}
-                width="w-44"
+                width="w-full sm:w-44"
                 options={[['all', 'todas as contas'], ...accounts.map((a) => [a.id, `${PLATFORM_LABELS[a.platform]} — ${a.display_name}`] as [string, string])]}
               />
             </div>
