@@ -98,6 +98,9 @@ export function PostComposer({
   const isStory = formats.instagram === 'story';
   const [ytPrivacy, setYtPrivacy] = useState('');
   const [pinBoard, setPinBoard] = useState('');
+  // Sem valor padrão de propósito: a auditoria da Content Posting API do TikTok exige que o app
+  // mostre esse seletor sem nada pré-selecionado (ver src/adapters/tiktok.ts).
+  const [tiktokPrivacy, setTiktokPrivacy] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('all');
@@ -122,6 +125,7 @@ export function PostComposer({
       setSelected(new Set([target.account_id]));
       setYtPrivacy((target.options?.privacyStatus as string) ?? '');
       setPinBoard((target.options?.board_id as string) ?? '');
+      setTiktokPrivacy((target.options?.privacy_level as string) ?? '');
       setFormats((f) => ({ ...f, instagram: igFormatOf(target.options) }));
       setFormatTouched(true);
       setQueue(
@@ -152,6 +156,7 @@ export function PostComposer({
       setSelected(new Set(post.targets.map((t) => t.account_id)));
       setYtPrivacy((post.targets.find((t) => t.platform === 'youtube')?.options?.privacyStatus as string) ?? '');
       setPinBoard((post.targets.find((t) => t.platform === 'pinterest')?.options?.board_id as string) ?? '');
+      setTiktokPrivacy((post.targets.find((t) => t.platform === 'tiktok')?.options?.privacy_level as string) ?? '');
       setFormats((f) => ({ ...f, instagram: igFormatOf(post.targets.find((t) => t.platform === 'instagram')?.options) }));
       setFormatTouched(true);
       setQueue(
@@ -289,6 +294,7 @@ export function PostComposer({
     setFormatTouched(false);
     setYtPrivacy('');
     setPinBoard('');
+    setTiktokPrivacy('');
     setCaptionOverrides({});
     setCoverFile(null);
     setCoverSeconds('');
@@ -492,6 +498,11 @@ export function PostComposer({
     const when = whenLocal ?? scheduledLocal ?? '';
     const effectiveWhen = when || (asDraft ? defaultDraftSlot() : '');
     if (!effectiveWhen) return toast.error('Escolha quando publicar.');
+    // Rascunho pula (mesma lógica de "captura antes de estar pronto" da mídia); só bloqueia ao
+    // mandar pra fila de verdade. Sem valor padrão de propósito — ver o comentário no useState.
+    if (!asDraft && selectedAccounts.some((a) => a.platform === 'tiktok') && !tiktokPrivacy) {
+      return toast.error('Escolha o nível de privacidade do TikTok antes de agendar.');
+    }
 
     setSubmitting(true);
     try {
@@ -513,6 +524,7 @@ export function PostComposer({
         body,
         youtube_privacy_status: ytPrivacy || undefined,
         pinterest_board_id: pinBoard || undefined,
+        tiktok_privacy_level: tiktokPrivacy || undefined,
         instagram_format: formats.instagram,
         cover_media_id: coverMediaId,
         cover_timestamp_ms: Number.isFinite(coverMs) ? coverMs : undefined,
@@ -815,6 +827,23 @@ export function PostComposer({
           <div className="space-y-1.5">
             <Label htmlFor="f-board">Board ID (Pinterest, opcional)</Label>
             <Input id="f-board" value={pinBoard} onChange={(e) => setPinBoard(e.target.value)} placeholder="usa o board padrão da conta se vazio" />
+          </div>
+        )}
+
+        {selectedAccounts.some((a) => a.platform === 'tiktok') && (
+          <div className="space-y-1.5">
+            <Label>Nível de privacidade (TikTok) *</Label>
+            {/* Sem opção padrão pré-selecionada — exigência da auditoria da Content Posting API. */}
+            <Select value={tiktokPrivacy} onValueChange={setTiktokPrivacy}>
+              <SelectTrigger>
+                <SelectValue placeholder="Escolha antes de agendar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PUBLIC_TO_EVERYONE">Público</SelectItem>
+                <SelectItem value="MUTUAL_FOLLOW_FRIENDS">Amigos</SelectItem>
+                <SelectItem value="SELF_ONLY">Só eu</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
           </div>

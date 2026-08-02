@@ -1,5 +1,6 @@
 import { adapters } from './adapters/index.js';
 import { handleApiRequest } from './api.js';
+import { renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { checkDashboardAuth } from './lib/auth.js';
 import { encryptJSON } from './lib/crypto.js';
@@ -18,50 +19,6 @@ const PUBLISHING_STALE_MINUTES = 30;
 const PROCESSING_TIMEOUT_HOURS = 6;
 const MAX_ATTEMPTS = 5;
 
-// Required by Pinterest/TikTok app review — this is a single-user personal tool, not a service
-// with outside users, so this states plainly what it actually does rather than boilerplate legalese.
-const PRIVACY_POLICY_TEXT = `ALMAR Social Scheduler — Politica de Privacidade
-
-Esta ferramenta (ALMAR Social Scheduler) e uma ferramenta pessoal de agendamento de posts,
-operada e usada por ALMAR para publicar nas suas proprias contas do YouTube, LinkedIn, Facebook,
-Instagram, Pinterest e TikTok. Nao e um servico oferecido a terceiros nem a outros usuarios.
-
-Dados coletados:
-- Tokens de acesso/atualizacao (OAuth) das contas conectadas pelo proprio proprietario.
-- Metadados dos posts agendados (legenda, horario, plataforma de destino).
-
-Como os dados sao armazenados:
-- Os tokens sao criptografados (AES-256-GCM) antes de serem salvos num banco de dados privado
-  (Cloudflare D1), acessivel apenas pelo proprietario da ferramenta.
-
-O que NAO fazemos:
-- Nao compartilhamos, vendemos ou usamos esses dados para publicidade.
-- Nao coletamos dados de nenhum outro usuario ou visitante.
-
-Retencao: os tokens ficam armazenados ate o proprietario revogar o acesso do app ou remover a
-conta da ferramenta.
-
-Contato: alexia01native@gmail.com`;
-
-const TERMS_OF_SERVICE_TEXT = `ALMAR Social Scheduler — Termos de Servico
-
-Esta ferramenta (ALMAR Social Scheduler) e uma ferramenta pessoal de agendamento de posts,
-operada e usada exclusivamente por ALMAR para publicar nas suas proprias contas do YouTube,
-LinkedIn, Facebook, Instagram, Pinterest e TikTok. Nao e um servico oferecido a terceiros, nao
-tem outros usuarios e nao pode ser contratado ou acessado por ninguem alem do proprietario.
-
-Uso: a ferramenta agenda e publica conteudo (texto, imagem e video) nas contas conectadas pelo
-proprio proprietario, respeitando os termos de uso e as politicas de conteudo de cada plataforma
-(YouTube, LinkedIn, Facebook, Instagram, Pinterest, TikTok).
-
-Responsabilidade: o proprietario e o unico responsavel pelo conteudo publicado atraves da
-ferramenta. Nao ha garantia de disponibilidade continua do servico.
-
-Alteracoes: estes termos podem ser atualizados a qualquer momento, sem aviso previo, dado que
-esta e uma ferramenta de uso pessoal e nao comercial.
-
-Contato: alexia01native@gmail.com`;
-
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runPoller(env));
@@ -69,6 +26,11 @@ export default {
 
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // NOTA: forçar HTTPS fica no toggle "Always Use HTTPS" da zona (SSL/TLS → Edge Certificates no
+    // dashboard), não aqui. Tentar redirecionar no Worker pegava o `wrangler dev` junto — ele
+    // apresenta o host como atenta.omangue.co (por causa da rota custom), então não dá pra
+    // distinguir dev de produção pelo host, e o redirect quebrava o desenvolvimento local.
 
     // Unauthenticated: these are cross-site redirects landing here straight from each platform's
     // consent screen, not a browser tab that's already presented dashboard credentials.
@@ -82,10 +44,10 @@ export default {
     // segment (e.g. /privacy/almar) — some app-review forms require the company/app name to
     // literally appear in the URL to prove ownership; the suffix is otherwise ignored.
     if (/^\/privacy(\/.*)?$/.test(url.pathname)) {
-      return new Response(PRIVACY_POLICY_TEXT, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+      return new Response(await renderPrivacyPolicy(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
     if (/^\/terms(\/.*)?$/.test(url.pathname)) {
-      return new Response(TERMS_OF_SERVICE_TEXT, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+      return new Response(await renderTermsOfService(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     const authError = checkDashboardAuth(request, env);
@@ -114,8 +76,9 @@ async function runPoller(env: Env): Promise<void> {
   // etc.) fica contido aqui e nunca derruba as etapas de publish acima.
   try {
     await stepCollectMetrics(env);
+    await stepCollectAccountMetrics(env);
   } catch (err) {
-    console.error('[metrics] stepCollectMetrics falhou:', err);
+    console.error('[metrics] coleta falhou:', err);
   }
 }
 
@@ -167,6 +130,47 @@ async function stepCollectMetrics(env: Env): Promise<void> {
 
 async function setNextMetricsAt(env: Env, targetId: string, at: string): Promise<void> {
   await env.DB.prepare(`update post_targets set next_metrics_at = ? where id = ?`).bind(at, targetId).run();
+}
+
+// Seguidores mudam devagar — 1 snapshot por dia por conta basta pra ver a tendência de "novos
+// seguidores". Coleta se não há snapshot de conta nas últimas ~20h.
+const ACCOUNT_METRICS_INTERVAL_HOURS = 20;
+
+async function stepCollectAccountMetrics(env: Env): Promise<void> {
+  const cutoff = new Date(Date.now() - ACCOUNT_METRICS_INTERVAL_HOURS * 3_600_000).toISOString();
+  const { results } = await env.DB.prepare(
+    `select * from accounts a where a.status = 'active'
+       and not exists (select 1 from account_metrics m where m.account_id = a.id and m.fetched_at > ?)`
+  )
+    .bind(cutoff)
+    .all<any>();
+
+  for (const row of results ?? []) {
+    const account = rowToAccount(row);
+    const fetcher = metricsFetchers[account.platform];
+    if (!fetcher?.fetchAccountMetrics) continue;
+    try {
+      const snap = await fetcher.fetchAccountMetrics(account, env);
+      if (snap) {
+        await env.DB.prepare(
+          `insert into account_metrics (id, account_id, fetched_at, followers, reach, profile_views, raw)
+           values (?, ?, ?, ?, ?, ?, ?)`
+        )
+          .bind(
+            crypto.randomUUID(),
+            account.id,
+            nowIso(),
+            snap.followers ?? null,
+            snap.reach ?? null,
+            snap.profile_views ?? null,
+            JSON.stringify(snap.raw ?? {})
+          )
+          .run();
+      }
+    } catch (err) {
+      console.error(`[metrics] conta ${account.platform}/${account.id} falhou:`, err);
+    }
+  }
 }
 
 async function insertPostMetrics(env: Env, target: PostTarget, snap: PostMetricsSnapshot): Promise<void> {

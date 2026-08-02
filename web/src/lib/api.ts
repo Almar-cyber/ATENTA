@@ -43,6 +43,19 @@ export function getMetrics(): Promise<{ metrics: PostMetricRow[] }> {
   return req('/api/metrics');
 }
 
+export interface FollowerRow {
+  account_id: string;
+  platform: Platform;
+  display_name: string;
+  followers: number | null; // snapshot mais recente
+  followers_first: number | null; // primeiro snapshot (pro delta)
+  since: string | null;
+}
+
+export function getFollowers(): Promise<{ followers: FollowerRow[] }> {
+  return req('/api/metrics/followers');
+}
+
 export function getPosts(params: { status?: string; platform?: string; limit?: number } = {}): Promise<{ posts: Post[] }> {
   const q = new URLSearchParams();
   if (params.status) q.set('status', params.status);
@@ -59,6 +72,7 @@ export interface CreatePostPayload {
   media_asset_ids?: string[];
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
+  tiktok_privacy_level?: string;
   instagram_format?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;

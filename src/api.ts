@@ -52,6 +52,8 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
 
   // Métricas coletadas (Fase A, design-analytics.md): o snapshot mais recente por post publicado.
   if (pathname === '/api/metrics' && method === 'GET') return listMetrics(env);
+  // Seguidores por conta (mais recente + primeiro snapshot) — pro "novos seguidores".
+  if (pathname === '/api/metrics/followers' && method === 'GET') return listFollowers(env);
   // Série temporal de um destino (todos os snapshots, pro sparkline).
   const metricsSeriesMatch = /^\/api\/metrics\/([^/]+)$/.exec(pathname);
   if (metricsSeriesMatch && method === 'GET') return getMetricsSeries(metricsSeriesMatch[1], env);
@@ -273,6 +275,7 @@ interface CreatePostBody {
   options?: Record<string, unknown>;
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
+  tiktok_privacy_level?: string;
   instagram_as_story?: boolean;
   /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
    *  continua aceito pra não quebrar chamadas antigas do CLI. */
@@ -297,6 +300,7 @@ interface UpdatePostBody {
   options?: Record<string, unknown>;
   youtube_privacy_status?: string;
   pinterest_board_id?: string;
+  tiktok_privacy_level?: string;
   instagram_as_story?: boolean;
   /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
    *  continua aceito pra não quebrar chamadas antigas do CLI. */
@@ -332,6 +336,7 @@ interface ValidateAccountsAndMediaParams {
   options?: Record<string, unknown>;
   youtubePrivacyStatus?: string;
   pinterestBoardId?: string;
+  tiktokPrivacyLevel?: string;
   instagramAsStory?: boolean;
   instagramFormat?: string;
   coverMediaId?: string;
@@ -418,6 +423,9 @@ async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMed
     }
     if (platform === 'pinterest' && params.pinterestBoardId) {
       options.board_id = params.pinterestBoardId;
+    }
+    if (platform === 'tiktok' && params.tiktokPrivacyLevel) {
+      options.privacy_level = params.tiktokPrivacyLevel;
     }
     if (platform === 'instagram') {
       // O formato define o media_type do container (VIDEO / REELS / STORIES). `as_story` fica
@@ -537,6 +545,7 @@ async function createPost(request: Request, env: Env): Promise<Response> {
     options: payload.options,
     youtubePrivacyStatus: payload.youtube_privacy_status,
     pinterestBoardId: payload.pinterest_board_id,
+    tiktokPrivacyLevel: payload.tiktok_privacy_level,
     instagramAsStory: payload.instagram_as_story,
     coverMediaId: payload.cover_media_id,
     coverTimestampMs: payload.cover_timestamp_ms,
@@ -615,6 +624,7 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
       options: payload.options,
       youtubePrivacyStatus: payload.youtube_privacy_status,
       pinterestBoardId: payload.pinterest_board_id,
+      tiktokPrivacyLevel: payload.tiktok_privacy_level,
       instagramAsStory: payload.instagram_as_story,
       instagramFormat: payload.instagram_format,
       coverMediaId: payload.cover_media_id,
@@ -1000,6 +1010,19 @@ async function listMetrics(env: Env): Promise<Response> {
   ).all<Record<string, unknown>>();
 
   return jsonResponse({ metrics: results ?? [] });
+}
+
+// Seguidores por conta: o valor mais recente e o primeiro snapshot, pra UI calcular o delta
+// ("novos seguidores"). Contas sem nenhum snapshot ainda voltam com followers null.
+async function listFollowers(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select a.id as account_id, a.platform, a.display_name,
+            (select followers from account_metrics m where m.account_id = a.id order by m.fetched_at desc limit 1) as followers,
+            (select followers from account_metrics m where m.account_id = a.id order by m.fetched_at asc limit 1) as followers_first,
+            (select fetched_at from account_metrics m where m.account_id = a.id order by m.fetched_at asc limit 1) as since
+       from accounts a where a.status = 'active'`
+  ).all<Record<string, unknown>>();
+  return jsonResponse({ followers: results ?? [] });
 }
 
 // Todos os snapshots de um destino, do mais antigo pro mais novo (pro gráfico de evolução).
