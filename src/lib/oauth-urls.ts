@@ -77,7 +77,10 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
       const u = new URL('https://www.tiktok.com/v2/auth/authorize/');
       u.searchParams.set('client_key', clientId); // TikTok chama de client_key, mesmo valor
       u.searchParams.set('response_type', 'code');
-      u.searchParams.set('scope', 'user.info.basic,video.publish,video.upload');
+      // video.list é o escopo do endpoint /v2/video/query/ (métricas de post). Pedimos junto pra
+      // que, quando a auditoria da Content Posting API aprovar, o Insights do TikTok funcione
+      // reconectando 1x só — sem esse escopo o coletor bate em 401 mesmo aprovado.
+      u.searchParams.set('scope', 'user.info.basic,video.publish,video.upload,video.list');
       u.searchParams.set('redirect_uri', redirectUri);
       u.searchParams.set('state', state);
       // TikTok exige vírgula literal no scope, não %2C — URLSearchParams codifica por padrão.

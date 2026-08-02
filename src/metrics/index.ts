@@ -12,6 +12,7 @@ import type { Env } from '../lib/env.js';
 import { instagramMetrics } from './instagram.js';
 import { facebookMetrics } from './facebook.js';
 import { youtubeMetrics } from './youtube.js';
+import { tiktokMetrics } from './tiktok.js';
 
 /** Núcleo normalizado — o denominador comum entre as redes. `undefined` = a rede não expõe. */
 export interface PostMetricsSnapshot {
@@ -45,6 +46,9 @@ export const metricsFetchers: Partial<Record<Platform, MetricsFetcher>> = {
   instagram: instagramMetrics,
   facebook: facebookMetrics,
   youtube: youtubeMetrics,
+  // TikTok só devolve dados quando a auditoria aprovar E a conta reconectar com o escopo
+  // video.list (adicionado em oauth-urls.ts). Até lá, o fetch bate em 401 e a coleta pula.
+  tiktok: tiktokMetrics,
 };
 
 /** Há coletor pra essa rede? (as demais são puladas no poller sem erro.) */
