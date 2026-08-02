@@ -11,6 +11,7 @@ export const OAUTH_STATE_COOKIE = 'oauth_state';
 
 export interface OAuthStatePayload {
   n?: string; // nonce (fluxo pelo navegador)
+  o?: string; // dono (owner_id) de quem iniciou a conexão — o callback não tem sessão pra consultar
   displayName?: string; // legado do CLI
 }
 

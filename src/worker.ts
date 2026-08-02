@@ -10,6 +10,7 @@ import { metricsFetchers } from './metrics/index.js';
 import { nextMetricsAt } from './metrics/cadence.js';
 import type { PostMetricsSnapshot } from './metrics/index.js';
 import { OAUTH_STATE_COOKIE, clearStateCookie, decodeState, getCookie } from './lib/oauth-state.js';
+import { SINGLE_OPERATOR } from './lib/identity.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
 
@@ -517,12 +518,14 @@ async function handleOAuthCallback(platform: OAuthCallbackPlatform, request: Req
 // Valida o `state`. Fluxo pelo navegador (endpoint /api/connect) manda `{ n: nonce }` e um cookie
 // oauth_state igual — comparamos os dois (CSRF). Fluxo antigo do CLI manda `{ displayName }` sem
 // cookie — aceito e usado como nome de fallback. Retorna o nome de fallback, ou uma Response de erro.
-function checkState(request: Request, url: URL): { fallbackName?: string } | Response {
+function checkState(request: Request, url: URL): { fallbackName?: string; owner?: string } | Response {
   const parsed = decodeState(url.searchParams.get('state'));
   if (parsed.n) {
     const cookie = getCookie(request, OAUTH_STATE_COOKIE);
     if (!cookie || cookie !== parsed.n) return new Response('state inválido (csrf)', { status: 400 });
-    return {};
+    // `o` é o dono que iniciou a conexão (gravado por /api/connect). O callback vem da plataforma,
+    // sem sessão nossa — é o state que diz de quem é a conta que está sendo conectada.
+    return { owner: parsed.o };
   }
   if (parsed.displayName) return { fallbackName: parsed.displayName };
   return new Response('missing ?state=', { status: 400 });
@@ -575,7 +578,7 @@ async function handleLinkedinCallback(code: string, request: Request, url: URL, 
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'linkedin', displayName, memberUrn, ciphertext, iv, nowIso(), {}, expiresAt);
+  await upsertAccount(env, 'linkedin', displayName, memberUrn, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner ?? SINGLE_OPERATOR);
 
   return connectedRedirect(url, 'linkedin');
 }
@@ -632,7 +635,7 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
   const ts = nowIso();
   for (const page of pagesJson.data) {
     const { ciphertext, iv } = await encryptJSON({ access_token: page.access_token }, env.TOKEN_ENCRYPTION_KEY);
-    await upsertAccount(env, 'facebook', page.name, page.id, ciphertext, iv, ts);
+    await upsertAccount(env, 'facebook', page.name, page.id, ciphertext, iv, ts, {}, null, checked.owner ?? SINGLE_OPERATOR);
 
     const igRes = await fetchWithRetry(
       `https://graph.facebook.com/${GRAPH_VERSION}/${page.id}?fields=instagram_business_account{username}&access_token=${encodeURIComponent(page.access_token)}`
@@ -640,7 +643,7 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
     const igJson = igRes.ok ? ((await igRes.json()) as { instagram_business_account?: { id: string; username?: string } }) : {};
     const ig = igJson.instagram_business_account;
     if (ig?.id) {
-      await upsertAccount(env, 'instagram', ig.username || page.name, ig.id, ciphertext, iv, ts);
+      await upsertAccount(env, 'instagram', ig.username || page.name, ig.id, ciphertext, iv, ts, {}, null, checked.owner ?? SINGLE_OPERATOR);
     }
   }
 
@@ -659,18 +662,21 @@ async function upsertAccount(
   iv: string,
   ts: string,
   extra: Record<string, unknown> = {},
-  expiresAt: string | null = null
+  expiresAt: string | null = null,
+  owner: string = SINGLE_OPERATOR
 ): Promise<void> {
+  // O `and owner_id = ?` mantém contas de donos diferentes separadas mesmo quando é a MESMA conta
+  // da rede (duas pessoas podem conectar o mesmo Instagram nas suas próprias áreas).
   const existing =
-    (await env.DB.prepare(`select id from accounts where platform = ? and external_account_id = ?`)
-      .bind(platform, externalAccountId)
+    (await env.DB.prepare(`select id from accounts where platform = ? and external_account_id = ? and owner_id = ?`)
+      .bind(platform, externalAccountId, owner)
       .first<{ id: string }>()) ??
     // Linha antiga criada por CLI, que gravava a conta sem o external id (o YouTube via
     // `npm run youtube-auth` é assim). É a MESMA conta — adota a linha e preenche o id, em vez de
     // tentar inserir uma segunda, que esbarraria no `unique(platform)` de 0001 e derrubava o
     // callback com exceção não tratada (Cloudflare 1101) no meio do fluxo de consentimento.
-    (await env.DB.prepare(`select id from accounts where platform = ? and external_account_id is null`)
-      .bind(platform)
+    (await env.DB.prepare(`select id from accounts where platform = ? and external_account_id is null and owner_id = ?`)
+      .bind(platform, owner)
       .first<{ id: string }>());
   const extraJson = JSON.stringify(extra);
   if (existing) {
@@ -681,9 +687,9 @@ async function upsertAccount(
       .run();
   } else {
     await env.DB.prepare(
-      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, extra, access_token_expires_at) values (?, ?, ?, ?, 'active', ?, ?, ?, ?)`
+      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, extra, access_token_expires_at, owner_id) values (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`
     )
-      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv, extraJson, expiresAt)
+      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv, extraJson, expiresAt, owner)
       .run();
   }
 }
@@ -732,7 +738,8 @@ async function handlePinterestCallback(code: string, request: Request, url: URL,
     iv,
     nowIso(),
     defaultBoard ? { default_board_id: defaultBoard.id } : {},
-    expiresAt
+    expiresAt,
+    checked.owner ?? SINGLE_OPERATOR
   );
 
   return connectedRedirect(url, 'pinterest');
@@ -775,7 +782,7 @@ async function handleTiktokCallback(code: string, request: Request, url: URL, en
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt);
+  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner ?? SINGLE_OPERATOR);
 
   return connectedRedirect(url, 'tiktok');
 }
@@ -830,7 +837,7 @@ async function handleYoutubeCallback(code: string, request: Request, url: URL, e
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'youtube', displayName, channel?.id ?? '', ciphertext, iv, nowIso(), {}, expiresAt);
+  await upsertAccount(env, 'youtube', displayName, channel?.id ?? '', ciphertext, iv, nowIso(), {}, expiresAt, checked.owner ?? SINGLE_OPERATOR);
 
   return connectedRedirect(url, 'youtube');
 }

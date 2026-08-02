@@ -1,10 +1,12 @@
 import { env } from 'cloudflare:test';
 import migration0001 from '../migrations/0001_init.sql?raw';
-// Só 0001 + a coluna next_attempt_at: os testes do poller não dependem de 0002_accounts_multi (a
-// troca do unique da tabela accounts) nem de 0003_grid_previews, e reaplicar o rebuild de accounts
-// em cada resetDb só adicionaria fragilidade. next_attempt_at é 0004 aqui (era 0002 na branch).
+// Todas as migrações, na ordem: o teste de isolação precisa de 0002 (multi-conta por rede — dois
+// donos podem ter cada um o seu Instagram), 0003 (grid_previews), 0005 (métricas) e 0006 (owner_id).
+import migration0002 from '../migrations/0002_accounts_multi.sql?raw';
+import migration0003 from '../migrations/0003_grid_previews.sql?raw';
 import migration0004 from '../migrations/0004_next_attempt_at.sql?raw';
 import migration0005 from '../migrations/0005_metrics.sql?raw';
+import migration0006 from '../migrations/0006_owner_id.sql?raw';
 import { adapters } from '../src/adapters/index.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from '../src/lib/types.js';
 
@@ -15,13 +17,13 @@ import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTa
  */
 export async function resetDb(): Promise<void> {
   // Filhas (post_metrics, account_metrics) primeiro: elas referenciam post_targets/accounts.
-  for (const table of ['post_metrics', 'account_metrics', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
+  for (const table of ['post_metrics', 'account_metrics', 'grid_previews', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
     await env.DB.prepare(`drop table if exists ${table}`).run();
   }
-  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics']) {
+  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics', 'grid_previews_platform_sort', 'idx_accounts_owner', 'idx_scheduled_posts_owner', 'idx_grid_previews_owner']) {
     await env.DB.prepare(`drop index if exists ${index}`).run();
   }
-  for (const sql of splitStatements(`${migration0001}\n${migration0004}\n${migration0005}`)) {
+  for (const sql of splitStatements(`${migration0001}\n${migration0002}\n${migration0003}\n${migration0004}\n${migration0005}\n${migration0006}`)) {
     await env.DB.prepare(sql).run();
   }
 }

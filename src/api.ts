@@ -4,6 +4,7 @@ import { getAccountTokens } from './lib/tokens.js';
 import { fetchWithRetry } from './lib/http.js';
 import { buildAuthUrl, isOAuthPlatform, OAUTH_CLIENT_ID_ENV } from './lib/oauth-urls.js';
 import { encodeState, setStateCookie } from './lib/oauth-state.js';
+import { currentUser } from './lib/identity.js';
 import type { Env } from './lib/env.js';
 import type { Account, MediaAsset, Platform, PostTarget } from './lib/types.js';
 
@@ -23,15 +24,18 @@ const ALLOWED_MIME_TYPES: readonly string[] = [
 export async function handleApiRequest(request: Request, url: URL, env: Env): Promise<Response> {
   const { pathname } = url;
   const method = request.method;
+  // Dono de tudo que esta requisição ler ou escrever. Ponto único de entrada da identidade —
+  // daqui pra baixo todo handler recebe `owner` e TODA query filtra por ele. Ver design-multiuser.md.
+  const owner = currentUser(request, env);
 
-  if (pathname === '/api/accounts' && method === 'GET') return listAccounts(env);
+  if (pathname === '/api/accounts' && method === 'GET') return listAccounts(owner, env);
 
   const connectMatch = /^\/api\/connect\/([^/]+)$/.exec(pathname);
-  if (connectMatch && method === 'GET') return startConnect(connectMatch[1], url, env);
+  if (connectMatch && method === 'GET') return startConnect(connectMatch[1], url, owner, env);
 
-  if (pathname === '/api/posts' && method === 'GET') return listPosts(url, env);
-  if (pathname === '/api/posts' && method === 'POST') return createPost(request, env);
-  if (pathname === '/api/posts/reschedule' && method === 'POST') return reschedulePosts(request, env);
+  if (pathname === '/api/posts' && method === 'GET') return listPosts(url, owner, env);
+  if (pathname === '/api/posts' && method === 'POST') return createPost(request, owner, env);
+  if (pathname === '/api/posts/reschedule' && method === 'POST') return reschedulePosts(request, owner, env);
   if (pathname === '/api/media' && method === 'POST') return uploadMedia(request, env);
   // Upload em partes: o navegador fatia o arquivo, então nem o limite de corpo da requisição
   // (100MB no plano free) nem a memória do Worker (128MB) são atingidos por vídeos grandes.
@@ -42,7 +46,7 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   // Feed real da conta conectada (busca AO VIVO na API da rede — as URLs de mídia do Instagram
   // expiram em dias, então guardar em cache no D1 renderia links quebrados).
   const feedMatch = /^\/api\/feed\/([^/]+)$/.exec(pathname);
-  if (feedMatch && method === 'GET') return getAccountFeed(feedMatch[1], env);
+  if (feedMatch && method === 'GET') return getAccountFeed(feedMatch[1], owner, env);
 
   // Bytes de uma mídia já no R2, servidos pela NOSSA origem. O domínio público do R2 é outro host
   // e sem CORS: uma imagem carregada de lá suja o canvas e o recorte no navegador quebra. Por aqui
@@ -51,36 +55,36 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   if (mediaBytesMatch && method === 'GET') return getMediaBytes(mediaBytesMatch[1], env);
 
   // Métricas coletadas (Fase A, design-analytics.md): o snapshot mais recente por post publicado.
-  if (pathname === '/api/metrics' && method === 'GET') return listMetrics(env);
+  if (pathname === '/api/metrics' && method === 'GET') return listMetrics(owner, env);
   // Seguidores por conta (mais recente + primeiro snapshot) — pro "novos seguidores".
-  if (pathname === '/api/metrics/followers' && method === 'GET') return listFollowers(env);
+  if (pathname === '/api/metrics/followers' && method === 'GET') return listFollowers(owner, env);
   // Série temporal de um destino (todos os snapshots, pro sparkline).
   const metricsSeriesMatch = /^\/api\/metrics\/([^/]+)$/.exec(pathname);
-  if (metricsSeriesMatch && method === 'GET') return getMetricsSeries(metricsSeriesMatch[1], env);
+  if (metricsSeriesMatch && method === 'GET') return getMetricsSeries(metricsSeriesMatch[1], owner, env);
 
   // Prévias do planejador de grade (imagens sem post — só pra ver como o feed vai ficar).
-  if (pathname === '/api/grid-previews' && method === 'GET') return listGridPreviews(url, env);
-  if (pathname === '/api/grid-previews' && method === 'POST') return createGridPreview(request, env);
+  if (pathname === '/api/grid-previews' && method === 'GET') return listGridPreviews(url, owner, env);
+  if (pathname === '/api/grid-previews' && method === 'POST') return createGridPreview(request, owner, env);
   const previewMatch = /^\/api\/grid-previews\/([^/]+)$/.exec(pathname);
-  if (previewMatch && method === 'PATCH') return updateGridPreview(previewMatch[1], request, env);
-  if (previewMatch && method === 'DELETE') return deleteGridPreview(previewMatch[1], env);
+  if (previewMatch && method === 'PATCH') return updateGridPreview(previewMatch[1], request, owner, env);
+  if (previewMatch && method === 'DELETE') return deleteGridPreview(previewMatch[1], owner, env);
 
   const cancelMatch = /^\/api\/post-targets\/([^/]+)\/cancel$/.exec(pathname);
-  if (cancelMatch && method === 'POST') return cancelTarget(cancelMatch[1], env);
+  if (cancelMatch && method === 'POST') return cancelTarget(cancelMatch[1], owner, env);
 
   const queueMatch = /^\/api\/post-targets\/([^/]+)\/queue$/.exec(pathname);
-  if (queueMatch && method === 'POST') return queueTarget(queueMatch[1], env);
+  if (queueMatch && method === 'POST') return queueTarget(queueMatch[1], owner, env);
 
   // Cancelado/falhou não é fim de linha: reativar devolve pra rascunho (não pra fila — a data
   // original já pode ter passado, e voltar direto pra fila publicaria na hora seguinte).
   const reactivateMatch = /^\/api\/post-targets\/([^/]+)\/reactivate$/.exec(pathname);
-  if (reactivateMatch && method === 'POST') return reactivateTarget(reactivateMatch[1], env);
+  if (reactivateMatch && method === 'POST') return reactivateTarget(reactivateMatch[1], owner, env);
 
   const deleteTargetMatch = /^\/api\/post-targets\/([^/]+)$/.exec(pathname);
-  if (deleteTargetMatch && method === 'DELETE') return deleteTarget(deleteTargetMatch[1], env);
+  if (deleteTargetMatch && method === 'DELETE') return deleteTarget(deleteTargetMatch[1], owner, env);
 
   const updatePostMatch = /^\/api\/posts\/([^/]+)$/.exec(pathname);
-  if (updatePostMatch && method === 'PATCH') return updatePost(updatePostMatch[1], request, env);
+  if (updatePostMatch && method === 'PATCH') return updatePost(updatePostMatch[1], request, owner, env);
 
   return jsonResponse({ error: 'not found' }, 404);
 }
@@ -92,7 +96,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 // Início do fluxo de conexão pelo navegador: gera um nonce (guardado num cookie HttpOnly como CSRF),
 // monta a URL de consentimento com redirect_uri = <origin>/oauth/callback/:platform e redireciona
 // 302 pra plataforma. O botão "Conectar" do SPA só navega pra cá. Meta cobre Instagram + Facebook.
-function startConnect(platform: string, url: URL, env: Env): Response {
+function startConnect(platform: string, url: URL, owner: string, env: Env): Response {
   if (!isOAuthPlatform(platform)) {
     return jsonResponse({ error: `conexão pelo app ainda não suportada para "${platform}"` }, 400);
   }
@@ -104,16 +108,20 @@ function startConnect(platform: string, url: URL, env: Env): Response {
     return Response.redirect(`${url.origin}/?connect_error=${platform}&reason=missing_${envVar}`, 302);
   }
   const nonce = crypto.randomUUID();
-  const state = encodeState({ n: nonce });
+  // o dono viaja no state: o callback OAuth roda sem sessão (vem da plataforma) e é ele que
+  // decide de quem é a conta recém-conectada.
+  const state = encodeState({ n: nonce, o: owner });
   const redirectUri = `${url.origin}/oauth/callback/${platform}`;
   const authUrl = buildAuthUrl(platform, { clientId, redirectUri, state });
   return new Response(null, { status: 302, headers: { Location: authUrl, 'Set-Cookie': setStateCookie(nonce) } });
 }
 
-async function listAccounts(env: Env): Promise<Response> {
+async function listAccounts(owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select id, platform, display_name, status, extra from accounts order by platform asc`
-  ).all<{ id: string; platform: string; display_name: string; status: string; extra: string }>();
+    `select id, platform, display_name, status, extra from accounts where owner_id = ? order by platform asc`
+  )
+    .bind(owner)
+    .all<{ id: string; platform: string; display_name: string; status: string; extra: string }>();
 
   const accounts = (results ?? []).map((r) => ({
     id: r.id,
@@ -147,14 +155,16 @@ interface PostTargetRow {
   account_name: string;
 }
 
-async function listPosts(url: URL, env: Env): Promise<Response> {
+async function listPosts(url: URL, owner: string, env: Env): Promise<Response> {
   const statusFilter = url.searchParams.get('status');
   const platformFilter = url.searchParams.get('platform');
   const limitParam = Number(url.searchParams.get('limit'));
   const limit = Math.min(Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 100, MAX_POSTS_LIMIT);
 
-  const conditions: string[] = [];
-  const params: unknown[] = [];
+  // sp.owner_id é a primeira condição SEMPRE — os filtros de status/plataforma são opcionais,
+  // o de dono não é.
+  const conditions: string[] = ['sp.owner_id = ?'];
+  const params: unknown[] = [owner];
   if (statusFilter) {
     conditions.push('pt.status = ?');
     params.push(statusFilter);
@@ -163,7 +173,7 @@ async function listPosts(url: URL, env: Env): Promise<Response> {
     conditions.push('pt.platform = ?');
     params.push(platformFilter);
   }
-  const where = conditions.length ? `where ${conditions.join(' and ')}` : '';
+  const where = `where ${conditions.join(' and ')}`;
 
   const { results } = await env.DB.prepare(
     `select sp.id as post_id, sp.title, sp.body, sp.scheduled_for, sp.created_at,
@@ -361,16 +371,18 @@ type ValidateAccountsAndMediaResult =
 // merge platform-specific options and run the adapter's own validate() (skipped for drafts, same
 // as createPost always did). Returns either the built target list or the 400 Response to send
 // back verbatim; callers must not perform any DB write before checking `ok`.
-async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMediaParams): Promise<ValidateAccountsAndMediaResult> {
+async function validateAccountsAndMedia(env: Env, owner: string, params: ValidateAccountsAndMediaParams): Promise<ValidateAccountsAndMediaResult> {
   if (!Array.isArray(params.accountIds) || params.accountIds.length === 0) {
     return { ok: false, response: jsonResponse({ error: 'Selecione ao menos uma conta de destino' }, 400) };
   }
   const accountIds = params.accountIds;
 
   const { results: accountRows } = await env.DB.prepare(
-    `select id, platform, status, extra from accounts where id in (${accountIds.map(() => '?').join(',')})`
+    // `and owner_id = ?` é o que impede agendar um post mirando a conta de OUTRO dono: ids que
+    // não são dele simplesmente não voltam, e o length check abaixo recusa a requisição.
+    `select id, platform, status, extra from accounts where id in (${accountIds.map(() => '?').join(',')}) and owner_id = ?`
   )
-    .bind(...accountIds)
+    .bind(...accountIds, owner)
     .all<AccountRow>();
   const accounts = accountRows ?? [];
 
@@ -518,7 +530,7 @@ async function insertTargets(
   }
 }
 
-async function createPost(request: Request, env: Env): Promise<Response> {
+async function createPost(request: Request, owner: string, env: Env): Promise<Response> {
   let payload: CreatePostBody;
   try {
     payload = await request.json();
@@ -538,7 +550,7 @@ async function createPost(request: Request, env: Env): Promise<Response> {
 
   const targetStatus: NewTargetStatus = payload.save_as === 'draft' ? 'draft' : 'queued';
 
-  const result = await validateAccountsAndMedia(env, {
+  const result = await validateAccountsAndMedia(env, owner, {
     accountIds: payload.target_account_ids,
     mediaAssetId: payload.media_asset_id,
     mediaAssetIds: payload.media_asset_ids,
@@ -557,8 +569,8 @@ async function createPost(request: Request, env: Env): Promise<Response> {
   if (!result.ok) return result.response;
 
   const scheduledPostId = crypto.randomUUID();
-  await env.DB.prepare(`insert into scheduled_posts (id, title, body, scheduled_for) values (?, ?, ?, ?)`)
-    .bind(scheduledPostId, payload.title ?? null, payload.body, payload.scheduled_for)
+  await env.DB.prepare(`insert into scheduled_posts (id, title, body, scheduled_for, owner_id) values (?, ?, ?, ?, ?)`)
+    .bind(scheduledPostId, payload.title ?? null, payload.body, payload.scheduled_for, owner)
     .run();
 
   await insertTargets(env, scheduledPostId, result.targets, result.media, payload.target_caption_overrides);
@@ -566,7 +578,7 @@ async function createPost(request: Request, env: Env): Promise<Response> {
   return jsonResponse({ id: scheduledPostId, target_count: result.targets.length }, 201);
 }
 
-async function updatePost(id: string, request: Request, env: Env): Promise<Response> {
+async function updatePost(id: string, request: Request, owner: string, env: Env): Promise<Response> {
   let payload: UpdatePostBody;
   try {
     payload = await request.json();
@@ -587,7 +599,9 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
     return jsonResponse({ error: 'Escreva uma legenda ou anexe um arquivo' }, 400);
   }
 
-  const post = await env.DB.prepare(`select id from scheduled_posts where id = ?`).bind(id).first<{ id: string }>();
+  const post = await env.DB.prepare(`select id from scheduled_posts where id = ? and owner_id = ?`)
+    .bind(id, owner)
+    .first<{ id: string }>();
   if (!post) return jsonResponse({ error: 'post não encontrado' }, 404);
 
   // Guard applies to every PATCH, not just the full-replace branch below: the moment any target
@@ -617,7 +631,7 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
       oldStatusMap.set(t.account_id, t.status === 'draft' || t.status === 'queued' ? (t.status as NewTargetStatus) : 'draft');
     }
 
-    const result = await validateAccountsAndMedia(env, {
+    const result = await validateAccountsAndMedia(env, owner, {
       accountIds: payload.target_account_ids,
       mediaAssetId: payload.media_asset_id,
       mediaAssetIds: payload.media_asset_ids,
@@ -665,8 +679,8 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
   if (setClauses.length > 0) {
     setClauses.push('updated_at = ?');
     setParams.push(nowIso());
-    await env.DB.prepare(`update scheduled_posts set ${setClauses.join(', ')} where id = ?`)
-      .bind(...setParams, id)
+    await env.DB.prepare(`update scheduled_posts set ${setClauses.join(', ')} where id = ? and owner_id = ?`)
+      .bind(...setParams, id, owner)
       .run();
   }
 
@@ -680,7 +694,7 @@ interface RescheduleBody {
   ordered_post_ids?: string[];
 }
 
-async function reschedulePosts(request: Request, env: Env): Promise<Response> {
+async function reschedulePosts(request: Request, owner: string, env: Env): Promise<Response> {
   let payload: RescheduleBody;
   try {
     payload = await request.json();
@@ -694,9 +708,9 @@ async function reschedulePosts(request: Request, env: Env): Promise<Response> {
 
   const placeholders = ids.map(() => '?').join(',');
   const { results } = await env.DB.prepare(
-    `select id, scheduled_for from scheduled_posts where id in (${placeholders})`
+    `select id, scheduled_for from scheduled_posts where id in (${placeholders}) and owner_id = ?`
   )
-    .bind(...ids)
+    .bind(...ids, owner)
     .all<{ id: string; scheduled_for: string }>();
   const rows = results ?? [];
 
@@ -710,8 +724,8 @@ async function reschedulePosts(request: Request, env: Env): Promise<Response> {
   const slots = rows.map((r) => r.scheduled_for).sort();
   const ts = nowIso();
   for (let i = 0; i < ids.length; i++) {
-    await env.DB.prepare(`update scheduled_posts set scheduled_for = ?, updated_at = ? where id = ?`)
-      .bind(slots[i], ts, ids[i])
+    await env.DB.prepare(`update scheduled_posts set scheduled_for = ?, updated_at = ? where id = ? and owner_id = ?`)
+      .bind(slots[i], ts, ids[i], owner)
       .run();
   }
 
@@ -789,8 +803,10 @@ export interface FeedItem {
 // Busca os posts já publicados na conta, pra o planejador de grade mostrar o feed real ao lado do
 // que está agendado. Só Instagram e YouTube: são as redes com escopo de leitura já concedido e
 // cujo perfil tem uma estética de grade/lista que valha planejar.
-async function getAccountFeed(accountId: string, env: Env): Promise<Response> {
-  const row = await env.DB.prepare(`select * from accounts where id = ?`).bind(accountId).first<any>();
+async function getAccountFeed(accountId: string, owner: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`select * from accounts where id = ? and owner_id = ?`)
+    .bind(accountId, owner)
+    .first<any>();
   if (!row) return jsonResponse({ error: 'conta não encontrada' }, 404);
   const account = rowToAccount(row);
 
@@ -990,7 +1006,7 @@ async function getMediaBytes(id: string, env: Env): Promise<Response> {
 // Snapshot mais recente de métrica por post publicado (Fase A). Um post sem nenhum snapshot ainda
 // (coleta não rodou, ou rede sem coletor) simplesmente não aparece — a lista cresce conforme o
 // poller coleta. `m.id = (subquery do último por destino)` pega só o snapshot mais novo de cada um.
-async function listMetrics(env: Env): Promise<Response> {
+async function listMetrics(owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select pt.id as target_id, pt.platform, pt.external_url, pt.published_at,
             a.display_name as account_name,
@@ -1010,34 +1026,44 @@ async function listMetrics(env: Env): Promise<Response> {
        join post_metrics m on m.id = (
          select id from post_metrics where post_target_id = pt.id order by fetched_at desc limit 1
        )
-      where pt.status = 'published'
+      where pt.status = 'published' and sp.owner_id = ?
       order by pt.published_at desc
       limit 200`
-  ).all<Record<string, unknown>>();
+  )
+    .bind(owner)
+    .all<Record<string, unknown>>();
 
   return jsonResponse({ metrics: results ?? [] });
 }
 
 // Seguidores por conta: o valor mais recente e o primeiro snapshot, pra UI calcular o delta
 // ("novos seguidores"). Contas sem nenhum snapshot ainda voltam com followers null.
-async function listFollowers(env: Env): Promise<Response> {
+async function listFollowers(owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select a.id as account_id, a.platform, a.display_name,
             (select followers from account_metrics m where m.account_id = a.id order by m.fetched_at desc limit 1) as followers,
             (select followers from account_metrics m where m.account_id = a.id order by m.fetched_at asc limit 1) as followers_first,
             (select fetched_at from account_metrics m where m.account_id = a.id order by m.fetched_at asc limit 1) as since
-       from accounts a where a.status = 'active'`
-  ).all<Record<string, unknown>>();
+       from accounts a where a.status = 'active' and a.owner_id = ?`
+  )
+    .bind(owner)
+    .all<Record<string, unknown>>();
   return jsonResponse({ followers: results ?? [] });
 }
 
 // Todos os snapshots de um destino, do mais antigo pro mais novo (pro gráfico de evolução).
-async function getMetricsSeries(targetId: string, env: Env): Promise<Response> {
+async function getMetricsSeries(targetId: string, owner: string, env: Env): Promise<Response> {
+  // post_metrics não tem dono próprio — o escopo vem do post pai do destino.
   const { results } = await env.DB.prepare(
-    `select fetched_at, impressions, reach, likes, comments, shares, saves, video_views, avg_watch_seconds
-       from post_metrics where post_target_id = ? order by fetched_at asc`
+    `select pm.fetched_at, pm.impressions, pm.reach, pm.likes, pm.comments, pm.shares, pm.saves,
+            pm.video_views, pm.avg_watch_seconds
+       from post_metrics pm
+       join post_targets pt on pt.id = pm.post_target_id
+       join scheduled_posts sp on sp.id = pt.scheduled_post_id
+      where pm.post_target_id = ? and sp.owner_id = ?
+      order by pm.fetched_at asc`
   )
-    .bind(targetId)
+    .bind(targetId, owner)
     .all<Record<string, unknown>>();
 
   return jsonResponse({ series: results ?? [] });
@@ -1059,19 +1085,19 @@ const GRID_PREVIEW_SELECT = `select p.id, p.platform, p.media_asset_id, p.sort_a
   from grid_previews p
   join media_assets m on m.id = p.media_asset_id`;
 
-async function listGridPreviews(url: URL, env: Env): Promise<Response> {
+async function listGridPreviews(url: URL, owner: string, env: Env): Promise<Response> {
   const platform = url.searchParams.get('platform');
   if (platform && !PLATFORMS.includes(platform as Platform)) {
     return jsonResponse({ error: `plataforma inválida: ${platform}` }, 400);
   }
   const stmt = platform
-    ? env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.platform = ? order by p.sort_at desc`).bind(platform)
-    : env.DB.prepare(`${GRID_PREVIEW_SELECT} order by p.sort_at desc`);
+    ? env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.owner_id = ? and p.platform = ? order by p.sort_at desc`).bind(owner, platform)
+    : env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.owner_id = ? order by p.sort_at desc`).bind(owner);
   const { results } = await stmt.all<GridPreviewRow>();
   return jsonResponse({ previews: results ?? [] });
 }
 
-async function createGridPreview(request: Request, env: Env): Promise<Response> {
+async function createGridPreview(request: Request, owner: string, env: Env): Promise<Response> {
   let payload: { platform?: string; media_asset_id?: string; sort_at?: string };
   try {
     payload = await request.json();
@@ -1088,15 +1114,17 @@ async function createGridPreview(request: Request, env: Env): Promise<Response> 
   if (!asset) return jsonResponse({ error: 'mídia não encontrada' }, 404);
 
   const id = crypto.randomUUID();
-  await env.DB.prepare(`insert into grid_previews (id, platform, media_asset_id, sort_at) values (?, ?, ?, ?)`)
-    .bind(id, platform, mediaAssetId, payload.sort_at || nowIso())
+  await env.DB.prepare(`insert into grid_previews (id, platform, media_asset_id, sort_at, owner_id) values (?, ?, ?, ?, ?)`)
+    .bind(id, platform, mediaAssetId, payload.sort_at || nowIso(), owner)
     .run();
 
-  const row = await env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.id = ?`).bind(id).first<GridPreviewRow>();
+  const row = await env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.id = ? and p.owner_id = ?`)
+    .bind(id, owner)
+    .first<GridPreviewRow>();
   return jsonResponse(row, 201);
 }
 
-async function updateGridPreview(id: string, request: Request, env: Env): Promise<Response> {
+async function updateGridPreview(id: string, request: Request, owner: string, env: Env): Promise<Response> {
   let payload: { sort_at?: string };
   try {
     payload = await request.json();
@@ -1105,8 +1133,8 @@ async function updateGridPreview(id: string, request: Request, env: Env): Promis
   }
   if (!payload.sort_at) return jsonResponse({ error: 'sort_at obrigatório' }, 400);
 
-  const { results } = await env.DB.prepare(`update grid_previews set sort_at = ? where id = ? returning id`)
-    .bind(payload.sort_at, id)
+  const { results } = await env.DB.prepare(`update grid_previews set sort_at = ? where id = ? and owner_id = ? returning id`)
+    .bind(payload.sort_at, id, owner)
     .all<{ id: string }>();
   if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'prévia não encontrada' }, 404);
   return jsonResponse({ ok: true });
@@ -1114,9 +1142,9 @@ async function updateGridPreview(id: string, request: Request, env: Env): Promis
 
 // Só apaga a linha da grade — o media_asset (e o objeto no R2) fica, porque a mesma mídia pode já
 // ter sido reaproveitada num post agendado.
-async function deleteGridPreview(id: string, env: Env): Promise<Response> {
-  const { results } = await env.DB.prepare(`delete from grid_previews where id = ? returning id`)
-    .bind(id)
+async function deleteGridPreview(id: string, owner: string, env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(`delete from grid_previews where id = ? and owner_id = ? returning id`)
+    .bind(id, owner)
     .all<{ id: string }>();
   if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'prévia não encontrada' }, 404);
   return jsonResponse({ ok: true });
@@ -1133,11 +1161,13 @@ function parseOptionalInt(value: FormDataEntryValue | null): number | null {
   return n === null ? null : Math.round(n);
 }
 
-async function cancelTarget(targetId: string, env: Env): Promise<Response> {
+async function cancelTarget(targetId: string, owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `update post_targets set status = 'canceled', updated_at = ? where id = ? and status in ('draft','queued') returning id`
+    // post_targets não tem owner_id — o escopo vem do post pai. Sem esta subquery, um id de
+    // destino de OUTRO dono seria cancelado por quem soubesse o uuid.
+    `update post_targets set status = 'canceled', updated_at = ? where id = ? and status in ('draft','queued') and scheduled_post_id in (select id from scheduled_posts where owner_id = ?) returning id`
   )
-    .bind(nowIso(), targetId)
+    .bind(nowIso(), targetId, owner)
     .all<{ id: string }>();
 
   if ((results?.length ?? 0) === 0) {
@@ -1148,12 +1178,12 @@ async function cancelTarget(targetId: string, env: Env): Promise<Response> {
 
 // Cancelado/falhou volta pra rascunho, e não pra fila: a data original pode já ter passado e o
 // poller publicaria na próxima varredura. De rascunho, a pessoa escolhe a data e manda pra fila.
-async function reactivateTarget(targetId: string, env: Env): Promise<Response> {
+async function reactivateTarget(targetId: string, owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `update post_targets set status = 'draft', last_error = null, attempt_count = 0, updated_at = ?
-       where id = ? and status in ('canceled','failed','ambiguous') returning id`
+       where id = ? and status in ('canceled','failed','ambiguous') and scheduled_post_id in (select id from scheduled_posts where owner_id = ?) returning id`
   )
-    .bind(nowIso(), targetId)
+    .bind(nowIso(), targetId, owner)
     .all<{ id: string }>();
 
   if ((results?.length ?? 0) === 0) {
@@ -1164,9 +1194,15 @@ async function reactivateTarget(targetId: string, env: Env): Promise<Response> {
 
 // Apaga um destino de vez. Se era o último do post, o post vai junto — senão sobra uma linha em
 // scheduled_posts sem destino nenhum, invisível na interface e impossível de limpar depois.
-async function deleteTarget(targetId: string, env: Env): Promise<Response> {
-  const row = await env.DB.prepare(`select scheduled_post_id, status from post_targets where id = ?`)
-    .bind(targetId)
+async function deleteTarget(targetId: string, owner: string, env: Env): Promise<Response> {
+  // O join com scheduled_posts é o escopo de dono: destino de outro dono não é encontrado (404),
+  // e o delete abaixo nunca chega a rodar.
+  const row = await env.DB.prepare(
+    `select pt.scheduled_post_id, pt.status from post_targets pt
+       join scheduled_posts sp on sp.id = pt.scheduled_post_id
+      where pt.id = ? and sp.owner_id = ?`
+  )
+    .bind(targetId, owner)
     .first<{ scheduled_post_id: string; status: string }>();
   if (!row) return jsonResponse({ error: 'destino não encontrado' }, 404);
 
@@ -1184,17 +1220,21 @@ async function deleteTarget(targetId: string, env: Env): Promise<Response> {
     .first<{ n: number }>();
   const postDeleted = (remaining?.n ?? 0) === 0;
   if (postDeleted) {
-    await env.DB.prepare(`delete from scheduled_posts where id = ?`).bind(row.scheduled_post_id).run();
+    // owner_id redundante aqui (o SELECT acima já provou o dono), mas defesa em profundidade:
+    // nenhum DELETE deste arquivo roda sem o dono na cláusula.
+    await env.DB.prepare(`delete from scheduled_posts where id = ? and owner_id = ?`)
+      .bind(row.scheduled_post_id, owner)
+      .run();
   }
 
   return jsonResponse({ ok: true, post_deleted: postDeleted });
 }
 
-async function queueTarget(targetId: string, env: Env): Promise<Response> {
+async function queueTarget(targetId: string, owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `update post_targets set status = 'queued', updated_at = ? where id = ? and status = 'draft' returning id`
+    `update post_targets set status = 'queued', updated_at = ? where id = ? and status = 'draft' and scheduled_post_id in (select id from scheduled_posts where owner_id = ?) returning id`
   )
-    .bind(nowIso(), targetId)
+    .bind(nowIso(), targetId, owner)
     .all<{ id: string }>();
 
   if ((results?.length ?? 0) === 0) {
