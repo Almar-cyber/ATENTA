@@ -21,6 +21,34 @@ const ALLOWED_MIME_TYPES: readonly string[] = [
   'video/quicktime',
 ];
 
+// Cota de armazenamento por dono. O R2 é o único recurso que sai do free tier (10 GB) conforme
+// entram usuários — Workers e D1 têm folga de ordens de grandeza. 2 GB por dono deixa ~5 pessoas
+// no free tier; ajuste conforme a conta comporte.
+const MEDIA_QUOTA_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** Bytes já ocupados por este dono no R2. */
+async function usedBytes(owner: string, env: Env): Promise<number> {
+  const row = await env.DB.prepare(`select coalesce(sum(size_bytes), 0) as total from media_assets where owner_id = ?`)
+    .bind(owner)
+    .first<{ total: number }>();
+  return row?.total ?? 0;
+}
+
+/** Resposta 413 se este upload estourar a cota do dono; null se cabe. */
+async function checkQuota(owner: string, incoming: number, env: Env): Promise<Response | null> {
+  const used = await usedBytes(owner, env);
+  if (used + incoming <= MEDIA_QUOTA_BYTES) return null;
+  const gb = (n: number) => (n / 1024 / 1024 / 1024).toFixed(1).replace('.', ',');
+  return jsonResponse(
+    {
+      error:
+        `sem espaço: você já usa ${gb(used)} GB dos ${gb(MEDIA_QUOTA_BYTES)} GB disponíveis. ` +
+        'Exclua posts antigos com mídia pesada pra liberar espaço.',
+    },
+    413
+  );
+}
+
 export async function handleApiRequest(request: Request, url: URL, env: Env): Promise<Response> {
   const { pathname } = url;
   const method = request.method;
@@ -36,12 +64,12 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   if (pathname === '/api/posts' && method === 'GET') return listPosts(url, owner, env);
   if (pathname === '/api/posts' && method === 'POST') return createPost(request, owner, env);
   if (pathname === '/api/posts/reschedule' && method === 'POST') return reschedulePosts(request, owner, env);
-  if (pathname === '/api/media' && method === 'POST') return uploadMedia(request, env);
+  if (pathname === '/api/media' && method === 'POST') return uploadMedia(request, owner, env);
   // Upload em partes: o navegador fatia o arquivo, então nem o limite de corpo da requisição
   // (100MB no plano free) nem a memória do Worker (128MB) são atingidos por vídeos grandes.
-  if (pathname === '/api/media/multipart/start' && method === 'POST') return multipartStart(request, env);
+  if (pathname === '/api/media/multipart/start' && method === 'POST') return multipartStart(request, owner, env);
   if (pathname === '/api/media/multipart/part' && method === 'PUT') return multipartPart(request, url, env);
-  if (pathname === '/api/media/multipart/complete' && method === 'POST') return multipartComplete(request, env);
+  if (pathname === '/api/media/multipart/complete' && method === 'POST') return multipartComplete(request, owner, env);
 
   // Feed real da conta conectada (busca AO VIVO na API da rede — as URLs de mídia do Instagram
   // expiram em dias, então guardar em cache no D1 renderia links quebrados).
@@ -732,7 +760,7 @@ async function reschedulePosts(request: Request, owner: string, env: Env): Promi
   return jsonResponse({ ok: true, reordered: ids.length });
 }
 
-async function uploadMedia(request: Request, env: Env): Promise<Response> {
+async function uploadMedia(request: Request, owner: string, env: Env): Promise<Response> {
   let form: FormData;
   try {
     form = await request.formData();
@@ -754,6 +782,10 @@ async function uploadMedia(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  // Cota antes de gravar: recusar depois de subir os bytes desperdiça banda e deixa lixo no R2.
+  const overQuota = await checkQuota(owner, file.size, env);
+  if (overQuota) return overQuota;
+
   const id = crypto.randomUUID();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload';
   const storageKey = `${id}-${safeName}`;
@@ -771,9 +803,9 @@ async function uploadMedia(request: Request, env: Env): Promise<Response> {
   const publicUrl = env.MEDIA_PUBLIC_BASE_URL ? `${env.MEDIA_PUBLIC_BASE_URL}/${storageKey}` : null;
 
   await env.DB.prepare(
-    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, duration_seconds, width, height) values (?, ?, ?, ?, ?, ?, ?, ?)`
+    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, duration_seconds, width, height, owner_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, storageKey, publicUrl, mimeType, bytes.byteLength, durationSeconds, width, height)
+    .bind(id, storageKey, publicUrl, mimeType, bytes.byteLength, durationSeconds, width, height, owner)
     .run();
 
   return jsonResponse(
@@ -902,7 +934,7 @@ interface MultipartStartBody {
   mime_type?: string;
 }
 
-async function multipartStart(request: Request, env: Env): Promise<Response> {
+async function multipartStart(request: Request, owner: string, env: Env): Promise<Response> {
   let body: MultipartStartBody;
   try {
     body = await request.json();
@@ -946,7 +978,7 @@ interface MultipartCompleteBody {
   height?: number | null;
 }
 
-async function multipartComplete(request: Request, env: Env): Promise<Response> {
+async function multipartComplete(request: Request, owner: string, env: Env): Promise<Response> {
   let body: MultipartCompleteBody;
   try {
     body = await request.json();
@@ -965,9 +997,9 @@ async function multipartComplete(request: Request, env: Env): Promise<Response> 
   const publicUrl = env.MEDIA_PUBLIC_BASE_URL ? `${env.MEDIA_PUBLIC_BASE_URL}/${storageKey}` : null;
 
   await env.DB.prepare(
-    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, duration_seconds, width, height) values (?, ?, ?, ?, ?, ?, ?, ?)`
+    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, duration_seconds, width, height, owner_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, storageKey, publicUrl, mimeType, body.size_bytes ?? 0, body.duration_seconds ?? null, body.width ?? null, body.height ?? null)
+    .bind(id, storageKey, publicUrl, mimeType, body.size_bytes ?? 0, body.duration_seconds ?? null, body.width ?? null, body.height ?? null, owner)
     .run();
 
   return jsonResponse(

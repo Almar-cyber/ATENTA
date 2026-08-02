@@ -81,6 +81,55 @@ async function runPoller(env: Env): Promise<void> {
   } catch (err) {
     console.error('[metrics] coleta falhou:', err);
   }
+  // Também secundária: limpar mídia velha nunca pode impedir uma publicação.
+  try {
+    await stepPurgeOldMedia(env);
+  } catch (err) {
+    console.error('[purge] limpeza de mídia falhou:', err);
+  }
+}
+
+// Mídia de post publicado só ocupa espaço: o arquivo já está na rede social, e é de lá que a
+// grade/preview do publicado carrega. Sem esta limpeza o R2 cresce pra sempre e o free tier (10 GB)
+// vira o teto de usuários; com ela, o storage estabiliza no que foi publicado nos últimos dias.
+//
+// Os metadados (mime, dimensões, duração) FICAM — só o objeto no R2 e o public_url somem, então a
+// listagem continua funcionando e o Thumb cai no glyph de fallback.
+const MEDIA_RETENTION_DAYS = 30;
+const PURGE_BATCH = 20;
+
+async function stepPurgeOldMedia(env: Env): Promise<void> {
+  const cutoff = new Date(Date.now() - MEDIA_RETENTION_DAYS * 24 * 3_600_000).toISOString();
+  const { results } = await env.DB.prepare(
+    // Só mídia cujos destinos TODOS já publicaram há mais que a retenção — se o mesmo arquivo ainda
+    // está em algum post não publicado (ou numa prévia da grade), ele continua sendo necessário.
+    `select ma.id, ma.storage_key from media_assets ma
+      where ma.public_url is not null
+        and exists (
+          select 1 from post_target_media ptm
+            join post_targets pt on pt.id = ptm.post_target_id
+           where ptm.media_asset_id = ma.id and pt.status = 'published' and pt.published_at < ?
+        )
+        and not exists (
+          select 1 from post_target_media ptm2
+            join post_targets pt2 on pt2.id = ptm2.post_target_id
+           where ptm2.media_asset_id = ma.id and (pt2.status != 'published' or pt2.published_at >= ?)
+        )
+        and not exists (select 1 from grid_previews gp where gp.media_asset_id = ma.id)
+      limit ?`
+  )
+    .bind(cutoff, cutoff, PURGE_BATCH)
+    .all<{ id: string; storage_key: string }>();
+
+  for (const row of results ?? []) {
+    try {
+      await env.MEDIA.delete(row.storage_key);
+      // public_url = null é o que marca "já foi limpa" e tira a linha da próxima varredura.
+      await env.DB.prepare(`update media_assets set public_url = null where id = ?`).bind(row.id).run();
+    } catch (err) {
+      console.error(`[purge] ${row.storage_key}:`, err);
+    }
+  }
 }
 
 // Sentinela que remove um destino da fila de coleta pra sempre (rede sem coletor, sem published_at,
