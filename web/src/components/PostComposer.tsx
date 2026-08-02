@@ -587,7 +587,10 @@ export function PostComposer({
       </div>
       {/* Estreito: rola tudo junto (uma barra só). Largo: duas colunas com scroll independente. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
-        <div className="min-h-0 flex-1 space-y-4 px-5 py-4 md:overflow-y-auto">
+        {/* No mobile a coluna tem altura natural (shrink-0) e quem rola é o container acima — se
+            fosse flex-1, ela encolheria abaixo do conteúdo e a mídia transbordava por cima da
+            pré-visualização (visível com muitos arquivos). No desktop volta a flex-1 com scroll próprio. */}
+        <div className="shrink-0 space-y-4 px-5 py-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
         {editingPostId && (
           <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted px-3 py-2 text-sm">
             <span>Editando post agendado</span>

@@ -55,7 +55,7 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
   }
 
   return (
-    <div className="space-y-4">
+    <div className="h-full space-y-4 overflow-y-auto pb-2 pr-0.5">
       {rows.map(({ dayHeader, post, target }, i) => (
         <Fragment key={target.id}>
           {dayHeader && (

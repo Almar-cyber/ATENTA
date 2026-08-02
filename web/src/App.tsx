@@ -7,7 +7,6 @@ import type { View } from '@/store';
 import { PLATFORM_LABELS } from '@/lib/platforms';
 import type { Post } from '@/lib/types';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PostComposer } from '@/components/PostComposer';
@@ -18,16 +17,17 @@ import { WeekView } from '@/components/WeekView';
 import { CalendarView } from '@/components/CalendarView';
 import { GridPlanner } from '@/components/GridPlanner';
 import { ConnectionsView } from '@/components/ConnectionsView';
+import { FilterMenu } from '@/components/FilterMenu';
 import { PostDialog } from '@/components/PostDialog';
 import type { DialogSelection } from '@/components/PostDialog';
 
 function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpenConnections: () => void }) {
   const { accounts } = useScheduler();
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 px-6 pb-2 pt-6">
+    <header className="flex flex-wrap items-center justify-between gap-3 px-3 pb-2 pt-4 sm:gap-4 sm:px-6 sm:pt-6">
       {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores. */}
       <img src="/atenta-wordmark.png" alt="ATENTA!" className="h-10 w-auto" />
-      <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
+      <div className="flex w-full items-center justify-end gap-3 sm:ml-auto sm:w-auto">
         {/* Avatares só no desktop: no mobile eles empurravam o "Novo post" pra quebrar, e a função
             (abrir Conexões) já está no botão ao lado. */}
         <button
@@ -150,14 +150,16 @@ function Dashboard() {
           setView('list');
         }}
       />
-      <main className="min-h-0 flex-1 px-6 pb-6 pt-2">
+      <main className="min-h-0 flex-1 px-3 pb-3 pt-2 sm:px-6 sm:pb-6">
         {screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
         ) : (
-        <section className="flex h-full flex-col rounded-2xl bg-card p-5 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)]">
+        <section className="flex h-full flex-col rounded-2xl bg-card p-3 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)] sm:p-5">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold">Posts agendados</h2>
-            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            {/* Abas à esquerda, Filtros à direita. No mobile a fileira ocupa a largura toda e o
+                Filtros vai pro canto (ml-auto); no desktop fica compacto. */}
+            <div className="flex w-full items-center gap-2 sm:w-auto">
               <Tabs value={view} onValueChange={(v) => setView(v as View)}>
                 <TabsList>
                   <TabsTrigger value="list">Lista</TabsTrigger>
@@ -166,44 +168,22 @@ function Dashboard() {
                   <TabsTrigger value="grid">Grid IG</TabsTrigger>
                 </TabsList>
               </Tabs>
-              <FilterSelect
-                value={filters.status || 'all'}
-                onChange={(v) => setFilters({ status: v === 'all' ? '' : v })}
-                width="w-full sm:w-36"
-                options={[
-                  ['all', 'todos os status'],
-                  ['draft', 'Rascunho'],
-                  ['queued', 'Na fila'],
-                  ['publishing', 'Publicando'],
-                  ['processing', 'Processando'],
-                  ['published', 'Publicado'],
-                  ['failed', 'Falhou'],
-                  ['canceled', 'Cancelado'],
-                  ['ambiguous', 'Indefinido'],
-                ]}
-              />
-              <FilterSelect
-                value={filters.platform || 'all'}
-                onChange={(v) => setFilters({ platform: v === 'all' ? '' : v })}
-                width="w-full sm:w-40"
-                options={[['all', 'todas as plataformas'], ...Object.entries(PLATFORM_LABELS)]}
-              />
-              <FilterSelect
-                value={filters.account || 'all'}
-                onChange={(v) => setFilters({ account: v === 'all' ? '' : v })}
-                width="w-full sm:w-44"
-                options={[['all', 'todas as contas'], ...accounts.map((a) => [a.id, `${PLATFORM_LABELS[a.platform]} — ${a.display_name}`] as [string, string])]}
-              />
+              <div className="ml-auto sm:ml-0">
+                <FilterMenu filters={filters} setFilters={setFilters} accounts={accounts} />
+              </div>
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto">
+          {/* overflow-hidden (não -auto): quem rola é cada view por dentro, com a barra de
+              navegação dela fixa. Sem isso, rolar a Semana levava a nav do calendário junto. */}
+          <div className="min-h-0 flex-1 overflow-hidden">
             {/* Remount-and-fade on view change (key={view}). No AnimatePresence/exit here on
                 purpose: mode="wait" deadlocks when the 30s poll re-creates `visible` mid-exit,
                 freezing the old view. Keying the div remounts instantly, then motion plays the
                 enter. */}
             <motion.div
               key={view}
+              className="h-full min-h-0"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.15 }}
@@ -248,33 +228,6 @@ function Dashboard() {
 
       <PostDialog selection={selection} onClose={() => setSelection(null)} />
     </div>
-  );
-}
-
-function FilterSelect({
-  value,
-  onChange,
-  options,
-  width,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: [string, string][];
-  width: string;
-}) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={width} size="sm">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map(([v, label]) => (
-          <SelectItem key={v} value={v}>
-            {label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
   );
 }
 

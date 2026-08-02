@@ -55,7 +55,9 @@ function Tile({
         </div>
       )}
 
-      <span className="absolute left-1 top-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-white">
+      {/* Número no canto INFERIOR: no topo ele colidia com os 3 botões de ação em tiles pequenos
+          (mobile), escondendo o de recorte. */}
+      <span className="absolute bottom-1 left-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-white">
         {index + 1}
       </span>
 
@@ -149,7 +151,8 @@ export function MediaQueueGrid({
   if (items.length === 0 && !onAdd) return null;
 
   return (
-    <div className="grid grid-cols-4 gap-2">
+    // 3 colunas no mobile (tiles maiores, os 3 botões de ação cabem), 4 no desktop.
+    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
       <input
         ref={replaceInputRef}
         type="file"

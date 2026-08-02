@@ -243,7 +243,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
       : { onDragOver: (e: React.DragEvent) => e.preventDefault(), onDrop: () => onDrop(tile.key) };
 
   return (
-    <div>
+    <div className="h-full overflow-y-auto pb-2">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" disabled={adding} onClick={() => fileRef.current?.click()}>
           {adding ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />}

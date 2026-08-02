@@ -95,19 +95,19 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
   }
 
   return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="flex h-full flex-col">
+      <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2">
         <Button size="icon" variant="outline" className="size-8" onClick={() => shift(-1)}>
           <ChevronLeft className="size-4" />
         </Button>
-        <span className="min-w-40 text-sm font-semibold">
+        <span className="min-w-0 whitespace-nowrap text-sm font-semibold sm:min-w-40">
           {MONTHS[month]} de {year}
         </span>
         <Button size="icon" variant="outline" className="size-8" onClick={() => shift(1)}>
           <ChevronRight className="size-4" />
         </Button>
         <Button
-          size="sm"
+          size="default"
           variant="outline"
           onClick={() => {
             setYear(now.getFullYear());
@@ -118,9 +118,11 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
         </Button>
       </div>
 
+      {/* Só a grade rola; a nav acima fica fixa. Os nomes dos dias grudam no topo do scroll. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="grid grid-cols-7 gap-1.5">
         {WEEKDAYS.map((w) => (
-          <div key={w} className="pb-1 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div key={w} className="sticky top-0 z-10 bg-card pb-1 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {w}
           </div>
         ))}
@@ -168,6 +170,7 @@ export function CalendarView({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dia
             </button>
           );
         })}
+      </div>
       </div>
     </div>
   );

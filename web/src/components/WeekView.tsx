@@ -69,23 +69,26 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
   const rangeLabel = `${pad(days[0].getDate())}/${pad(days[0].getMonth() + 1)} – ${pad(days[6].getDate())}/${pad(days[6].getMonth() + 1)}`;
 
   return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="flex h-full flex-col">
+      <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2">
         <Button size="icon" variant="outline" className="size-8" onClick={() => setWeekStart((w) => addDays(w, -7))}>
           <ChevronLeft className="size-4" />
         </Button>
-        <span className="min-w-32 text-center text-sm font-semibold">{rangeLabel}</span>
+        <span className="min-w-0 whitespace-nowrap text-center text-sm font-semibold sm:min-w-32">{rangeLabel}</span>
         <Button size="icon" variant="outline" className="size-8" onClick={() => setWeekStart((w) => addDays(w, 7))}>
           <ChevronRight className="size-4" />
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setWeekStart(startOfWeek(now))}>
+        <Button size="default" variant="outline" onClick={() => setWeekStart(startOfWeek(now))}>
           Esta semana
         </Button>
       </div>
 
-      <div className="min-w-[720px] overflow-hidden rounded-xl border">
-        {/* Header: corner + 7 day headers */}
-        <div className="grid grid-cols-[56px_repeat(7,1fr)] border-b bg-muted/40">
+      {/* Container que rola (X e Y). A nav acima fica fixa; aqui dentro, o cabeçalho de dias gruda
+          no topo (sticky) e só as linhas de hora deslizam por baixo. */}
+      <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+        <div className="min-w-[720px]">
+        {/* Header: corner + 7 day headers — sticky no topo do scroll (bg sólido pra cobrir as linhas). */}
+        <div className="sticky top-0 z-10 grid grid-cols-[56px_repeat(7,1fr)] border-b bg-muted">
           <div />
           {days.map((d) => {
             const isToday = d.toDateString() === now.toDateString();
@@ -146,6 +149,7 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
             })}
           </div>
         ))}
+        </div>
       </div>
     </div>
   );

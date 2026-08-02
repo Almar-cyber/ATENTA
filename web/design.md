@@ -76,8 +76,21 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 - **Modais em split**: prefira layout horizontal (dados/form à esquerda, preview à direita) a scroll
   vertical longo; limite a altura de mídia/preview (`PostPreview` corta em ~340px e mostra faixa
   "sem mídia" em vez de estourar formatos verticais). Ver `PostDialog` e `PostComposer`.
-- **CTAs primários**: ação principal usa `size="lg"` (grande, uppercase, dourado); secundária fica
-  `variant="outline"`.
+- **Padrão de tamanho de botão** — três níveis, e nada fora deles:
+  - `size="lg"` (h-11, uppercase): **CTA primário** de fluxo — "Novo post", "Agendar post", "Usar
+    este recorte". Um por contexto; o secundário ao lado fica `variant="outline"`.
+  - `size="default"` (h-8): **controles de barra e de navegação** — o botão de Filtros, "Hoje"/"Esta
+    semana", as setas ‹ › do calendário (via `size="icon" className="size-8"`). **Bate com a altura
+    da pílula de abas (`TabsList` é h-8)**, então a fileira do topo fica alinhada.
+  - `size="sm"` (h-7): **ações terciárias inline** numa linha de lista (Duplicar/Cancelar/Excluir).
+  Regra: se está na mesma fileira das abas, é `default` (h-8) — não misture `sm`/`lg` ali.
+- **Responsivo dos controles do topo**: header e barra usam `px-3 sm:px-6` (aproveita a lateral no
+  mobile). No mobile os CTAs do header dividem a linha (`flex-1`), os avatares de conta somem
+  (`hidden sm:flex`) e o botão de Filtros vira **só ícone** (`hidden sm:inline` no rótulo). Os
+  filtros moram num popover (`FilterMenu`), não soltos na barra.
+- **Scroll**: o container das views é `overflow-hidden` — **quem rola é cada view por dentro**. Nas
+  vistas de calendário (Semana/Mês) a barra de navegação é `shrink-0` (fixa) e só a grade rola, com
+  o cabeçalho de dias `sticky top-0`. Sem isso, rolar levava a nav junto.
 - **Conexão de contas (OAuth pelo app)**: o botão "Conectar" navega o top-level pra
   `/api/connect/:rede` (o Worker monta a URL de consentimento e redireciona); ao voltar, o callback
   redireciona pra `/?connected=<rede>` e o `Dashboard` (efeito no mount) lê o param, dá `reload()` e
