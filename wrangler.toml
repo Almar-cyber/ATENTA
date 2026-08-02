@@ -3,6 +3,17 @@ main = "src/worker.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Domínio custom da marca (zona omangue.co, já na Cloudflare — a mesma do R2). O Worker passa a
+# atender https://atenta.omangue.co; o `wrangler deploy` cria o registro DNS e o certificado
+# sozinho. A URL *.workers.dev continua ativa junto (os redirects OAuth seguem registrados nela).
+routes = [
+  { pattern = "atenta.omangue.co", custom_domain = true }
+]
+# Mantém a URL *.workers.dev ativa junto do domínio custom: os redirect_uri OAuth registrados nos
+# consoles das plataformas apontam pra ela, então desligá-la quebraria o "Conectar". Pra conectar
+# pelo domínio novo, registrar …/oauth/callback/<rede> em atenta.omangue.co em cada console.
+workers_dev = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "social-scheduler"
