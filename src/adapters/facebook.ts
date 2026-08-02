@@ -37,7 +37,13 @@ export const facebookAdapter: PlatformAdapter = {
     throw new Error('facebook: no refresh mechanism implemented — run meta-auth-url again if needs_reauth');
   },
 
-  validate(_target, media, _account) {
+  validate(target, media, _account) {
+    // Diferente do Instagram/TikTok/Pinterest, onde legenda vazia é aceita: um post só-texto no
+    // Facebook sem legenda não tem o que publicar. Com mídia, a legenda é opcional (vira o texto
+    // que acompanha a foto/vídeo).
+    if (media.length === 0 && !target.caption_override) {
+      throw new Error('facebook: um post só-texto precisa de legenda — não há o que publicar');
+    }
     if (media.length > CAROUSEL_MAX_ITEMS) {
       throw new Error(`facebook: at most ${CAROUSEL_MAX_ITEMS} photos per post (got ${media.length})`);
     }
