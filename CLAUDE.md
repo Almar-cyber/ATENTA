@@ -17,6 +17,9 @@ criar ou restilizar telas).
 ## Convenções
 
 - UI, README e comentários são em **pt-BR** — mantenha.
+- **Nunca mencione IA, Claude, "assistente" ou modelo em nada que fique versionado**:
+  mensagens de commit (sem `Co-Authored-By: Claude…`), corpo de PR, changelog, comentários
+  de código, docs. Commitar como se fosse trabalho normal do usuário.
 - O `validate()` dos adapters no Worker é a autoridade sobre limites de plataforma;
   as dicas em `web/src/lib/platforms.ts` são só do cliente — nunca mova a regra pro front.
 - `PLATFORM_COLORS` (hex de marca das redes) só em indicadores de plataforma, nunca
