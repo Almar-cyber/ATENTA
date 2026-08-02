@@ -155,9 +155,9 @@ function Dashboard() {
 
   const visible = useMemo(() => accountFilter(posts, filters.account), [posts, filters.account]);
 
+  // h-dvh (dynamic viewport height), não h-screen/100vh: no iOS o 100vh ignora a barra de endereço
+  // e fica mais alto que a área visível, sobrando um branco rolável embaixo.
   return (
-    {/* h-dvh (dynamic viewport height), não h-screen/100vh: no iOS o 100vh ignora a barra de
-        endereço e fica mais alto que a área visível, sobrando um branco rolável embaixo. */}
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       <Header
         onNewPost={openComposer}
