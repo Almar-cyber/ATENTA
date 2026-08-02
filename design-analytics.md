@@ -166,7 +166,7 @@ linha a linha) + as legendas; sai insight qualitativo e recomendações.
 
 ## 7. Fases
 
-1. **Fase A — coleta + dash básico** (desbloqueado agora): reconectar IG/FB com escopo de insights,
+1. **Fase A — coleta + dash básico + insights estatísticos** (implementado): reconectar reconectar IG/FB com escopo de insights,
    `post_metrics`/`account_metrics`, coletor no cron, tela de números reais. YouTube básico entra
    sem reconexão.
 2. **Fase B — insights de IA:** só depois de A ter dado acumulado; Gemini sobre os agregados.

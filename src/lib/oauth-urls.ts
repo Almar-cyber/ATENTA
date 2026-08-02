@@ -80,7 +80,9 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
       u.searchParams.set('scope', 'user.info.basic,video.publish,video.upload');
       u.searchParams.set('redirect_uri', redirectUri);
       u.searchParams.set('state', state);
-      return u.toString();
+      // TikTok exige vírgula literal no scope, não %2C — URLSearchParams codifica por padrão.
+      // Só esse parâmetro tem vírgula, então o replace global é seguro.
+      return u.toString().replace(/%2C/g, ',');
     }
   }
 }

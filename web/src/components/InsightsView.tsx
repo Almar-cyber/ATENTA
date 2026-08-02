@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, Bookmark, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
+import { ArrowLeft, Bookmark, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
 import type { FollowerRow, PostMetricRow } from '@/lib/api';
 import { getFollowers, getMetrics } from '@/lib/api';
+import { computeInsights } from '@/lib/insights';
 import type { Platform } from '@/lib/types';
 import { PLATFORM_LABELS } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
@@ -120,6 +121,7 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
   } else {
     const best = byPlatform[0];
     const worst = byPlatform.length > 1 ? byPlatform[byPlatform.length - 1] : null;
+    const insights = computeInsights(metrics);
     body = (
       <div className="space-y-5">
         {/* Números gerais */}
@@ -135,7 +137,27 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
           />
         </div>
 
-        {/* Destaques: rede que mais/menos performou */}
+        {/* Insights estatísticos (sem IA): melhor horário, formato, post... */}
+        {insights.length > 0 && (
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destaques</div>
+            <div className="space-y-2">
+              {insights.map((ins) => (
+                <div key={ins.id} className="flex items-start gap-3 rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]">
+                  <div className={`grid size-8 shrink-0 place-items-center rounded-full ${ins.tone === 'bad' ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}>
+                    {ins.tone === 'bad' ? <TrendingDown className="size-4" /> : <Lightbulb className="size-4" />}
+                  </div>
+                  <div className="min-w-0 leading-snug">
+                    <div className="font-semibold">{ins.headline}</div>
+                    {ins.detail && <div className="text-xs text-muted-foreground">{ins.detail}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Rede que mais/menos performou */}
         {best && (
           <div className="grid gap-3 sm:grid-cols-2">
             <Highlight kind="up" agg={best} />

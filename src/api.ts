@@ -994,6 +994,8 @@ async function listMetrics(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select pt.id as target_id, pt.platform, pt.external_url, pt.published_at,
             a.display_name as account_name,
+            -- Formato (post/reel/story/video/short) pros insights por formato — vem do options JSON.
+            json_extract(pt.options, '$.format') as format,
             -- No YouTube o conteúdo é o título (body vazio); cai nele quando não há legenda.
             coalesce(nullif(pt.caption_override, ''), nullif(sp.body, ''), sp.title) as caption,
             m.fetched_at, m.impressions, m.reach, m.likes, m.comments, m.shares, m.saves,
