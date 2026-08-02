@@ -742,7 +742,9 @@ export function PostComposer({
             "Personalizar legenda", que ficava confusa com várias contas. */}
         {selectedAccounts.length >= 2 && (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="h-auto flex-wrap">
+            {/* h-auto! (com bang) pra vencer o `group-data-horizontal/tabs:h-8` do preset — sem
+                isso a pílula ficava presa em 32px e os itens vazavam pra fora ao quebrar linha. */}
+            <TabsList className="h-auto! flex-wrap gap-1 py-1">
               <TabsTrigger value="all">Todas</TabsTrigger>
               {selectedAccounts.map((a) => (
                 <TabsTrigger key={a.id} value={a.id} className="gap-1.5">
