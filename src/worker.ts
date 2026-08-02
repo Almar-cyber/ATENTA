@@ -1,6 +1,7 @@
 import { adapters } from './adapters/index.js';
 import { handleApiRequest } from './api.js';
 import { renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
+import { renderLandingPage } from './landingPage.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { checkDashboardAuth } from './lib/auth.js';
 import { encryptJSON } from './lib/crypto.js';
@@ -49,6 +50,13 @@ export default {
     }
     if (/^\/terms(\/.*)?$/.test(url.pathname)) {
       return new Response(await renderTermsOfService(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+
+    // Página pública do produto na raiz, ANTES do gate: o App Review de cada plataforma exige um
+    // site que mostre o serviço, e o dashboard fica atrás de senha — um revisor batia em 401 e
+    // reprovava sem ver o que o app faz. O painel em si mora em /app pra baixo.
+    if (url.pathname === '/' && !url.searchParams.has('connected') && !url.searchParams.has('connect_error')) {
+      return new Response(await renderLandingPage(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     const authError = checkDashboardAuth(request, env);
