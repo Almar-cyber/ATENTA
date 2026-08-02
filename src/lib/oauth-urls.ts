@@ -45,7 +45,10 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
       u.searchParams.set('state', state);
       u.searchParams.set(
         'scope',
-        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,business_management'
+        // instagram_manage_insights + read_insights são pra Fase A de analytics (métricas de post):
+        // sem eles, os fetchers de IG/FB voltam null. Só tem efeito ao (re)conectar — contas já
+        // conectadas antes precisam passar pelo consentimento de novo pra ganhar o escopo.
+        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,read_insights,business_management'
       );
       return u.toString();
     }

@@ -20,6 +20,29 @@ export function getAccounts(): Promise<{ accounts: Account[] }> {
   return req('/api/accounts');
 }
 
+// Métricas coletadas (Fase A). `null` = a rede não expõe aquela métrica pra esse post.
+export interface PostMetricRow {
+  target_id: string;
+  platform: Platform;
+  external_url: string | null;
+  published_at: string | null;
+  account_name: string;
+  caption: string | null;
+  fetched_at: string;
+  impressions: number | null;
+  reach: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  video_views: number | null;
+  avg_watch_seconds: number | null;
+}
+
+export function getMetrics(): Promise<{ metrics: PostMetricRow[] }> {
+  return req('/api/metrics');
+}
+
 export function getPosts(params: { status?: string; platform?: string; limit?: number } = {}): Promise<{ posts: Post[] }> {
   const q = new URLSearchParams();
   if (params.status) q.set('status', params.status);

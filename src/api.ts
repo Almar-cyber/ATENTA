@@ -50,6 +50,12 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   const mediaBytesMatch = /^\/api\/media\/([^/]+)\/bytes$/.exec(pathname);
   if (mediaBytesMatch && method === 'GET') return getMediaBytes(mediaBytesMatch[1], env);
 
+  // Métricas coletadas (Fase A, design-analytics.md): o snapshot mais recente por post publicado.
+  if (pathname === '/api/metrics' && method === 'GET') return listMetrics(env);
+  // Série temporal de um destino (todos os snapshots, pro sparkline).
+  const metricsSeriesMatch = /^\/api\/metrics\/([^/]+)$/.exec(pathname);
+  if (metricsSeriesMatch && method === 'GET') return getMetricsSeries(metricsSeriesMatch[1], env);
+
   // Prévias do planejador de grade (imagens sem post — só pra ver como o feed vai ficar).
   if (pathname === '/api/grid-previews' && method === 'GET') return listGridPreviews(url, env);
   if (pathname === '/api/grid-previews' && method === 'POST') return createGridPreview(request, env);
@@ -969,6 +975,43 @@ async function getMediaBytes(id: string, env: Env): Promise<Response> {
       'Cache-Control': 'public, max-age=31536000, immutable',
     },
   });
+}
+
+// Snapshot mais recente de métrica por post publicado (Fase A). Um post sem nenhum snapshot ainda
+// (coleta não rodou, ou rede sem coletor) simplesmente não aparece — a lista cresce conforme o
+// poller coleta. `m.id = (subquery do último por destino)` pega só o snapshot mais novo de cada um.
+async function listMetrics(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select pt.id as target_id, pt.platform, pt.external_url, pt.published_at,
+            a.display_name as account_name,
+            -- No YouTube o conteúdo é o título (body vazio); cai nele quando não há legenda.
+            coalesce(nullif(pt.caption_override, ''), nullif(sp.body, ''), sp.title) as caption,
+            m.fetched_at, m.impressions, m.reach, m.likes, m.comments, m.shares, m.saves,
+            m.video_views, m.avg_watch_seconds
+       from post_targets pt
+       join accounts a on a.id = pt.account_id
+       join scheduled_posts sp on sp.id = pt.scheduled_post_id
+       join post_metrics m on m.id = (
+         select id from post_metrics where post_target_id = pt.id order by fetched_at desc limit 1
+       )
+      where pt.status = 'published'
+      order by pt.published_at desc
+      limit 200`
+  ).all<Record<string, unknown>>();
+
+  return jsonResponse({ metrics: results ?? [] });
+}
+
+// Todos os snapshots de um destino, do mais antigo pro mais novo (pro gráfico de evolução).
+async function getMetricsSeries(targetId: string, env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select fetched_at, impressions, reach, likes, comments, shares, saves, video_views, avg_watch_seconds
+       from post_metrics where post_target_id = ? order by fetched_at asc`
+  )
+    .bind(targetId)
+    .all<Record<string, unknown>>();
+
+  return jsonResponse({ series: results ?? [] });
 }
 
 interface GridPreviewRow {

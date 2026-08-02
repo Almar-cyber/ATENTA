@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle2, Link2, Plus } from 'lucide-react';
+import { BarChart3, CheckCircle2, Link2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
@@ -16,12 +16,21 @@ import { ListView } from '@/components/ListView';
 import { WeekView } from '@/components/WeekView';
 import { CalendarView } from '@/components/CalendarView';
 import { GridPlanner } from '@/components/GridPlanner';
+import { InsightsView } from '@/components/InsightsView';
 import { ConnectionsView } from '@/components/ConnectionsView';
 import { FilterMenu } from '@/components/FilterMenu';
 import { PostDialog } from '@/components/PostDialog';
 import type { DialogSelection } from '@/components/PostDialog';
 
-function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpenConnections: () => void }) {
+function Header({
+  onNewPost,
+  onOpenConnections,
+  onOpenInsights,
+}: {
+  onNewPost: () => void;
+  onOpenConnections: () => void;
+  onOpenInsights: () => void;
+}) {
   const { accounts } = useScheduler();
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 px-3 pb-2 pt-4 sm:gap-4 sm:px-6 sm:pt-6">
@@ -53,10 +62,15 @@ function Header({ onNewPost, onOpenConnections }: { onNewPost: () => void; onOpe
             ))
           )}
         </button>
-        {/* No mobile os dois botões dividem a linha (flex-1); no desktop voltam à largura natural. */}
-        <Button size="lg" variant="outline" onClick={onOpenConnections} className="flex-1 sm:flex-none">
+        {/* Conexões e Insights são navegação secundária: só o ícone no mobile (rótulo hidden sm),
+            pra sobrar a linha pro "Novo post" (o CTA primário, esse mantém o rótulo). */}
+        <Button size="lg" variant="outline" onClick={onOpenConnections} aria-label="Conexões" className="px-3 sm:px-6">
           <Link2 className="size-4" />
-          Conexões
+          <span className="hidden sm:inline">Conexões</span>
+        </Button>
+        <Button size="lg" variant="outline" onClick={onOpenInsights} aria-label="Insights" className="px-3 sm:px-6">
+          <BarChart3 className="size-4" />
+          <span className="hidden sm:inline">Insights</span>
         </Button>
         <Button size="lg" onClick={onNewPost} className="flex-1 sm:flex-none">
           <Plus className="size-4" />
@@ -106,7 +120,7 @@ function accountFilter(posts: Post[], accountId: string): Post[] {
 function Dashboard() {
   const { posts, accounts, filters, setFilters, reload } = useScheduler();
   const [view, setView] = useState<View>('list');
-  const [screen, setScreen] = useState<'scheduler' | 'connections'>('scheduler');
+  const [screen, setScreen] = useState<'scheduler' | 'connections' | 'insights'>('scheduler');
   const [selection, setSelection] = useState<DialogSelection | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [justConnected, setJustConnected] = useState(false);
@@ -143,7 +157,11 @@ function Dashboard() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <Header onNewPost={openComposer} onOpenConnections={() => setScreen('connections')} />
+      <Header
+        onNewPost={openComposer}
+        onOpenConnections={() => setScreen('connections')}
+        onOpenInsights={() => setScreen('insights')}
+      />
       <AlertBanner
         onSeeFailures={() => {
           setFilters({ status: 'failed' });
@@ -153,6 +171,8 @@ function Dashboard() {
       <main className="min-h-0 flex-1 px-3 pb-3 pt-2 sm:px-6 sm:pb-6">
         {screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
+        ) : screen === 'insights' ? (
+          <InsightsView onBack={() => setScreen('scheduler')} />
         ) : (
         <section className="flex h-full flex-col rounded-2xl bg-card p-3 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)] sm:p-5">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
