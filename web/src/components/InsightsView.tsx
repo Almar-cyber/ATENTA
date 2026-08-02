@@ -200,14 +200,16 @@ function Highlight({ kind, agg }: { kind: 'up' | 'down'; agg: PlatformAgg }) {
       <div className={`grid size-9 shrink-0 place-items-center rounded-full ${up ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
         {up ? <TrendingUp className="size-5" /> : <TrendingDown className="size-5" />}
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 leading-tight">
         <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {up ? 'Rede que mais performou' : 'Rede que menos performou'}
         </div>
-        <div className="flex items-center gap-1.5 font-semibold">
+        <div className="mt-1 flex items-center gap-1.5 font-semibold">
           <PlatformIcon platform={agg.platform} className="size-4 shrink-0" />
           {PLATFORM_LABELS[agg.platform]}
-          <span className="text-muted-foreground">· {n(agg.engagement)} de engajamento</span>
+        </div>
+        <div className="text-sm text-muted-foreground">
+          <span className="font-semibold tabular-nums text-foreground">{n(agg.engagement)}</span> de engajamento
         </div>
       </div>
     </div>
