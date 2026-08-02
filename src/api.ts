@@ -996,6 +996,10 @@ async function listMetrics(env: Env): Promise<Response> {
             a.display_name as account_name,
             -- Formato (post/reel/story/video/short) pros insights por formato — vem do options JSON.
             json_extract(pt.options, '$.format') as format,
+            -- Duração do vídeo (maior mídia do destino) pro insight de "duração ideal".
+            (select max(ma.duration_seconds) from post_target_media ptm
+               join media_assets ma on ma.id = ptm.media_asset_id
+              where ptm.post_target_id = pt.id) as duration_seconds,
             -- No YouTube o conteúdo é o título (body vazio); cai nele quando não há legenda.
             coalesce(nullif(pt.caption_override, ''), nullif(sp.body, ''), sp.title) as caption,
             m.fetched_at, m.impressions, m.reach, m.likes, m.comments, m.shares, m.saves,

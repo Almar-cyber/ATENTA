@@ -117,7 +117,13 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
       </EmptyState>
     );
   } else if (selected) {
-    body = <PlatformDetail platform={selected} metrics={metrics.filter((m) => m.platform === selected)} followers={followersByPlatform.get(selected)} />;
+    body = (
+      <PlatformDetail
+        platform={selected}
+        metrics={metrics.filter((m) => m.platform === selected)}
+        followerRows={followers.filter((f) => f.platform === selected)}
+      />
+    );
   } else {
     const best = byPlatform[0];
     const worst = byPlatform.length > 1 ? byPlatform[byPlatform.length - 1] : null;
@@ -136,8 +142,8 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
           />
         </div>
 
-        {/* Insights estatísticos (sem IA): melhor horário, formato, post... */}
-        <Destaques metrics={metrics} />
+        {/* Insights estatísticos (sem IA): melhor horário, formato, post, tendência de seguidores... */}
+        <Destaques metrics={metrics} followers={followers} />
 
         {/* Rede que mais/menos performou */}
         {best && (
@@ -150,7 +156,7 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
         {/* Redes — clicáveis pro detalhe */}
         <div>
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Por rede</div>
-          <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {byPlatform.map((p) => (
               <button
                 key={p.platform}
@@ -199,13 +205,13 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
 
 // Bloco de insights estatísticos (sem IA). Reusado na visão geral (todas as redes) e no detalhe de
 // cada rede (só os posts dela) — as guardas de amostra em computeInsights evitam ruído com poucos.
-function Destaques({ metrics }: { metrics: PostMetricRow[] }) {
-  const insights = computeInsights(metrics);
+function Destaques({ metrics, followers = [] }: { metrics: PostMetricRow[]; followers?: FollowerRow[] }) {
+  const insights = computeInsights(metrics, followers);
   if (insights.length === 0) return null;
   return (
     <div>
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destaques</div>
-      <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
         {insights.map((ins) => (
           <div key={ins.id} className="flex items-start gap-3 rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]">
             <div className={`grid size-8 shrink-0 place-items-center rounded-full ${ins.tone === 'bad' ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}>
@@ -321,19 +327,21 @@ function PostCard({ m, isVideoNet }: { m: PostMetricRow; isVideoNet: boolean }) 
 }
 
 // Nível 2: os posts de uma rede específica, em cards expansíveis (resumo → detalhe).
-function PlatformDetail({ platform, metrics, followers }: { platform: Platform; metrics: PostMetricRow[]; followers?: number }) {
+function PlatformDetail({ platform, metrics, followerRows }: { platform: Platform; metrics: PostMetricRow[]; followerRows: FollowerRow[] }) {
   const isVideoNet = platform === 'youtube' || platform === 'tiktok';
+  const followerCount = followerRows.reduce((s, f) => s + (f.followers ?? 0), 0);
+  const hasFollowers = followerRows.some((f) => f.followers != null);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <Stat icon={<PlatformIcon platform={platform} className="size-3.5" />} label="Posts" value={n(metrics.length)} />
-        {followers != null && <Stat icon={<UserPlus className="size-3.5" />} label="Seguidores" value={n(followers)} />}
+        {hasFollowers && <Stat icon={<UserPlus className="size-3.5" />} label="Seguidores" value={n(followerCount)} />}
       </div>
 
-      {/* Insights só desta rede (melhor post/horário/dia dela). */}
-      <Destaques metrics={metrics} />
+      {/* Insights só desta rede (melhor post/horário/dia + tendência de seguidores dela). */}
+      <Destaques metrics={metrics} followers={followerRows} />
 
-      <div className="space-y-3">
+      <div className="grid gap-3 lg:grid-cols-2">
         {metrics.map((m) => (
           <PostCard key={m.target_id} m={m} isVideoNet={isVideoNet} />
         ))}

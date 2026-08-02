@@ -29,6 +29,7 @@ export interface PostMetricRow {
   account_name: string;
   caption: string | null;
   format: string | null;
+  duration_seconds: number | null;
   fetched_at: string;
   impressions: number | null;
   reach: number | null;
