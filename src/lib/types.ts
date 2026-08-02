@@ -47,7 +47,12 @@ export interface PostTarget {
   account_id: string;
   platform: Platform;
   status: PostTargetStatus;
+  /** Legenda a publicar, já resolvida pelo poller: o override do destino se houver, senão a
+   *  scheduled_posts.body. Os adapters leem isto e nada mais. Legitimamente vazia no Instagram,
+   *  TikTok e Pinterest, onde a legenda é opcional. */
   caption_override: string | null;
+  /** scheduled_posts.title — o YouTube usa como título do vídeo. */
+  title: string | null;
   options: Record<string, unknown>;
   adapter_state: Record<string, unknown>;
   external_post_id: string | null;

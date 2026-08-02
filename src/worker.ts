@@ -109,7 +109,9 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
 // RETURNING id, so two overlapping runs never double-publish.
 async function stepClaimAndPublishDue(env: Env): Promise<void> {
   const { results } = await env.DB.prepare(
-    `select pt.* from post_targets pt
+    // sp.body/sp.title entram no SELECT pra rowToPostTarget resolver a legenda e o título — o
+    // adapter só lê target.caption_override/target.title, e a legenda canônica mora em sp.body.
+    `select pt.*, sp.body, sp.title from post_targets pt
      join accounts a on a.id = pt.account_id
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      where pt.status = 'queued' and sp.scheduled_for <= ? and a.status = 'active'
@@ -143,8 +145,11 @@ async function stepClaimAndPublishDue(env: Env): Promise<void> {
 // not just assumed to be "picked up again by the next run."
 async function stepRecheckProcessing(env: Env): Promise<void> {
   const { results } = await env.DB.prepare(
-    `select pt.* from post_targets pt
+    // Mesma resolução de legenda/título da query de claim: um retry no meio do processamento
+    // recria containers (Instagram), então o target ainda precisa da legenda resolvida aqui também.
+    `select pt.*, sp.body, sp.title from post_targets pt
      join accounts a on a.id = pt.account_id
+     join scheduled_posts sp on sp.id = pt.scheduled_post_id
      where pt.status = 'processing' and a.status = 'active'
      order by pt.updated_at asc
      limit ?`

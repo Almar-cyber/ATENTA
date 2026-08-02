@@ -329,6 +329,12 @@ interface ValidateAccountsAndMediaParams {
   instagramFormat?: string;
   coverMediaId?: string;
   coverTimestampMs?: number;
+  // Legenda canônica e título do post + overrides por conta, pra que o validate() de cada adapter
+  // veja a MESMA legenda que o poller vai publicar (o poller resolve override ?? body). Sem isso, a
+  // validação rodava com legenda vazia e um guard de "post só-texto precisa de legenda" nunca dispararia.
+  body?: string;
+  title?: string;
+  captionOverrides?: Record<string, string>;
   // createPost uses one status for every target (from save_as); updatePost's full-replace uses a
   // per-account status (from each target's OLD status) — so the caller decides, not this helper.
   getTargetStatus: (accountId: string) => NewTargetStatus;
@@ -432,7 +438,10 @@ async function validateAccountsAndMedia(env: Env, params: ValidateAccountsAndMed
         account_id: account.id,
         platform,
         status: 'draft',
-        caption_override: null,
+        // Mesma resolução do poller (override do destino ?? legenda canônica), pra o validate()
+        // enxergar a legenda real. `|| null` normaliza string vazia pra null.
+        caption_override: params.captionOverrides?.[account.id] || params.body || null,
+        title: params.title ?? null,
         options,
         adapter_state: {},
         external_post_id: null,
@@ -521,6 +530,9 @@ async function createPost(request: Request, env: Env): Promise<Response> {
     instagramAsStory: payload.instagram_as_story,
     coverMediaId: payload.cover_media_id,
     coverTimestampMs: payload.cover_timestamp_ms,
+    body: payload.body,
+    title: payload.title,
+    captionOverrides: payload.target_caption_overrides,
     getTargetStatus: () => targetStatus,
   });
   if (!result.ok) return result.response;
@@ -597,6 +609,9 @@ async function updatePost(id: string, request: Request, env: Env): Promise<Respo
       instagramFormat: payload.instagram_format,
       coverMediaId: payload.cover_media_id,
       coverTimestampMs: payload.cover_timestamp_ms,
+      body: payload.body,
+      title: payload.title,
+      captionOverrides: payload.target_caption_overrides,
       // An account not previously targeted (newly added during this edit) defaults to 'queued' —
       // matching what a non-draft createPost call would do.
       getTargetStatus: (accountId) => oldStatusMap.get(accountId) ?? 'queued',

@@ -41,6 +41,11 @@ interface PostTargetRow {
   platform: string;
   status: string;
   caption_override: string | null;
+  // Vindos do JOIN com scheduled_posts (o poller adiciona `sp.body, sp.title` à query). A legenda
+  // canônica mora em scheduled_posts.body; o adapter só lê caption_override, então é aqui que o
+  // body vira a legenda efetiva quando o destino não tem override próprio.
+  body?: string | null;
+  title?: string | null;
   options: string;
   adapter_state: string;
   external_post_id: string | null;
@@ -58,7 +63,11 @@ export function rowToPostTarget(row: PostTargetRow): PostTarget {
     account_id: row.account_id,
     platform: row.platform as Platform,
     status: row.status as PostTarget['status'],
-    caption_override: row.caption_override,
+    // Legenda efetiva: o override do destino primeiro, senão a legenda canônica do post. Antes lia
+    // só o override — que é null no caso comum (legenda compartilhada) — e todo post agendado pelo
+    // dashboard publicava com texto vazio (e todo vídeo do YouTube saía "Untitled").
+    caption_override: row.caption_override ?? row.body ?? null,
+    title: row.title ?? null,
     options: JSON.parse(row.options || '{}'),
     adapter_state: JSON.parse(row.adapter_state || '{}'),
     external_post_id: row.external_post_id,

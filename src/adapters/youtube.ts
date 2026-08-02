@@ -77,7 +77,9 @@ export const youtubeAdapter: PlatformAdapter = {
     const options = target.options as { categoryId?: string; title?: string; madeForKids?: boolean };
     const metadata = {
       snippet: {
-        title: options.title ?? target.caption_override?.slice(0, 100) ?? 'Untitled',
+        // target.title vem de scheduled_posts.title (o que o dashboard preenche). options.title é o
+        // caminho antigo do CLI. Sem isso, todo vídeo saía "Untitled" mesmo com título preenchido.
+        title: options.title ?? target.title ?? target.caption_override?.slice(0, 100) ?? 'Untitled',
         description: target.caption_override ?? '',
         categoryId: options.categoryId ?? '22',
       },
