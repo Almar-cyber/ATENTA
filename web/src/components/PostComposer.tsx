@@ -835,11 +835,12 @@ export function PostComposer({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-4">
-        <Button size="lg" onClick={() => setPickerOpen(true)} disabled={submitting || !canSchedule}>
+      {/* No mobile os CTAs viram full-width empilhados (primário em cima); no desktop, inline à direita. */}
+      <div className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+        <Button size="lg" className="w-full sm:w-auto" onClick={() => setPickerOpen(true)} disabled={submitting || !canSchedule}>
           {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
         </Button>
-        <Button size="lg" variant="outline" onClick={() => submit(true)} disabled={submitting || !canDraft}>
+        <Button size="lg" variant="outline" className="w-full sm:w-auto" onClick={() => submit(true)} disabled={submitting || !canDraft}>
           Salvar como rascunho
         </Button>
       </div>

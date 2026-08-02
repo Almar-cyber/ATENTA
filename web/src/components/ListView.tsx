@@ -65,7 +65,7 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: Math.min(i * 0.015, 0.3) }}
-            className={`group/row flex items-center gap-3 rounded-lg px-3 py-3 transition-colors ${target.status === 'failed' || target.status === 'ambiguous' ? 'bg-destructive/10 hover:bg-destructive/15' : 'bg-muted/60 hover:bg-muted'}`}
+            className={`group/row flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-3 py-3 transition-colors ${target.status === 'failed' || target.status === 'ambiguous' ? 'bg-destructive/10 hover:bg-destructive/15' : 'bg-muted/60 hover:bg-muted'}`}
           >
             <PlatformAvatar platform={target.platform} />
             <div className="min-w-0 flex-1">
@@ -86,13 +86,16 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
               ))}
               {target.media.length > 1 && <span className="text-xs text-muted-foreground">+{target.media.length - 1}</span>}
             </div>
+            {/* Badge + ações num grupo: no mobile ocupa a largura toda (desce pra 2ª linha) e o
+                conjunto flui/quebra alinhado à direita; no desktop fica inline à direita como antes. */}
+            <div className="flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:w-auto">
             <Badge className={`${STATUS_META[target.status].className} shrink-0`} variant="secondary">
               {STATUS_META[target.status].label}
             </Badge>
-            {/* Ações são terciárias: ficam discretas e só ganham cor no hover da linha. Antes o
-                "Cancelar" (destrutivo, raro) era o elemento mais pesado da linha e o "Duplicar"
-                (comum) quase sumia — hierarquia invertida. */}
-            <div className="flex shrink-0 justify-end gap-1 opacity-60 transition-opacity group-hover/row:opacity-100">
+            {/* Ações são terciárias: no desktop ficam discretas e só ganham cor no hover da linha;
+                no mobile ficam sempre visíveis (não há hover no touch). Antes o "Cancelar"
+                (destrutivo, raro) era o mais pesado da linha e o "Duplicar" quase sumia. */}
+            <div className="flex flex-wrap justify-end gap-1 opacity-100 transition-opacity sm:opacity-60 sm:group-hover/row:opacity-100">
               {target.status === 'draft' && (
                 <Button size="sm" variant="ghost" onClick={() => act(() => queueTarget(target.id), 'Movido para a fila.')}>
                   p/ fila
@@ -128,6 +131,7 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
                   Excluir
                 </Button>
               )}
+            </div>
             </div>
           </motion.div>
         </Fragment>

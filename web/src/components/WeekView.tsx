@@ -70,7 +70,7 @@ export function WeekView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <Button size="icon" variant="outline" className="size-8" onClick={() => setWeekStart((w) => addDays(w, -7))}>
           <ChevronLeft className="size-4" />
         </Button>
