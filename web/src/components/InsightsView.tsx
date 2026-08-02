@@ -121,7 +121,6 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
   } else {
     const best = byPlatform[0];
     const worst = byPlatform.length > 1 ? byPlatform[byPlatform.length - 1] : null;
-    const insights = computeInsights(metrics);
     body = (
       <div className="space-y-5">
         {/* Números gerais */}
@@ -138,24 +137,7 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
         </div>
 
         {/* Insights estatísticos (sem IA): melhor horário, formato, post... */}
-        {insights.length > 0 && (
-          <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destaques</div>
-            <div className="space-y-2">
-              {insights.map((ins) => (
-                <div key={ins.id} className="flex items-start gap-3 rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]">
-                  <div className={`grid size-8 shrink-0 place-items-center rounded-full ${ins.tone === 'bad' ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}>
-                    {ins.tone === 'bad' ? <TrendingDown className="size-4" /> : <Lightbulb className="size-4" />}
-                  </div>
-                  <div className="min-w-0 leading-snug">
-                    <div className="font-semibold">{ins.headline}</div>
-                    {ins.detail && <div className="text-xs text-muted-foreground">{ins.detail}</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <Destaques metrics={metrics} />
 
         {/* Rede que mais/menos performou */}
         {best && (
@@ -212,6 +194,31 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
       </CardHeader>
       <CardContent className="min-h-0 flex-1 overflow-auto">{body}</CardContent>
     </Card>
+  );
+}
+
+// Bloco de insights estatísticos (sem IA). Reusado na visão geral (todas as redes) e no detalhe de
+// cada rede (só os posts dela) — as guardas de amostra em computeInsights evitam ruído com poucos.
+function Destaques({ metrics }: { metrics: PostMetricRow[] }) {
+  const insights = computeInsights(metrics);
+  if (insights.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destaques</div>
+      <div className="space-y-2">
+        {insights.map((ins) => (
+          <div key={ins.id} className="flex items-start gap-3 rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]">
+            <div className={`grid size-8 shrink-0 place-items-center rounded-full ${ins.tone === 'bad' ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}>
+              {ins.tone === 'bad' ? <TrendingDown className="size-4" /> : <Lightbulb className="size-4" />}
+            </div>
+            <div className="min-w-0 leading-snug">
+              <div className="font-semibold">{ins.headline}</div>
+              {ins.detail && <div className="text-xs text-muted-foreground">{ins.detail}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -322,6 +329,9 @@ function PlatformDetail({ platform, metrics, followers }: { platform: Platform; 
         <Stat icon={<PlatformIcon platform={platform} className="size-3.5" />} label="Posts" value={n(metrics.length)} />
         {followers != null && <Stat icon={<UserPlus className="size-3.5" />} label="Seguidores" value={n(followers)} />}
       </div>
+
+      {/* Insights só desta rede (melhor post/horário/dia dela). */}
+      <Destaques metrics={metrics} />
 
       <div className="space-y-3">
         {metrics.map((m) => (
