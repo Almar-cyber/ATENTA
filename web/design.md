@@ -88,6 +88,11 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   mobile). No mobile os CTAs do header dividem a linha (`flex-1`), os avatares de conta somem
   (`hidden sm:flex`) e o botão de Filtros vira **só ícone** (`hidden sm:inline` no rótulo). Os
   filtros moram num popover (`FilterMenu`), não soltos na barra.
+- **Card clicável vs estático**: no sistema brutalista, o sinal de "clicável" é **levantar no hover e
+  afundar no clique** (como os botões). Card de navegação/drill usa
+  `transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--brand)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none cursor-pointer`;
+  card expansível (não navega) usa só `cursor-pointer hover:bg-muted/40`. Card **estático** (stat,
+  destaque) não tem hover nenhum — é assim que se distingue um do outro num relance.
 - **Scroll**: o container das views é `overflow-hidden` — **quem rola é cada view por dentro**. Nas
   vistas de calendário (Semana/Mês) a barra de navegação é `shrink-0` (fixa) e só a grade rola, com
   o cabeçalho de dias `sticky top-0`. Sem isso, rolar levava a nav junto.

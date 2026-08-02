@@ -162,7 +162,7 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
                 key={p.platform}
                 type="button"
                 onClick={() => setSelected(p.platform)}
-                className="flex w-full items-center gap-3 rounded-xl border-2 border-brand bg-card px-4 py-3 text-left shadow-[3px_3px_0_0_var(--brand)] transition-transform hover:-translate-y-0.5"
+                className="flex w-full cursor-pointer items-center gap-3 rounded-xl border-2 border-brand bg-card px-4 py-3 text-left shadow-[3px_3px_0_0_var(--brand)] transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--brand)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none"
               >
                 <PlatformIcon platform={p.platform} className="size-6 shrink-0" />
                 <div className="min-w-0 flex-1">
@@ -287,7 +287,7 @@ function PostCard({ m, isVideoNet }: { m: PostMetricRow; isVideoNet: boolean }) 
 
   return (
     <div className="rounded-xl border-2 border-brand bg-card shadow-[3px_3px_0_0_var(--brand)]">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-3 p-3 text-left">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full cursor-pointer items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-muted/40">
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold leading-snug">
             {m.caption || <span className="text-muted-foreground">sem legenda</span>}
