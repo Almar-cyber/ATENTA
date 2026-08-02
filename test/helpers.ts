@@ -4,6 +4,7 @@ import migration0001 from '../migrations/0001_init.sql?raw';
 // troca do unique da tabela accounts) nem de 0003_grid_previews, e reaplicar o rebuild de accounts
 // em cada resetDb só adicionaria fragilidade. next_attempt_at é 0004 aqui (era 0002 na branch).
 import migration0004 from '../migrations/0004_next_attempt_at.sql?raw';
+import migration0005 from '../migrations/0005_metrics.sql?raw';
 import { adapters } from '../src/adapters/index.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from '../src/lib/types.js';
 
@@ -13,13 +14,14 @@ import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTa
  * time; the migrations contain no semicolons inside string literals, which would break this.
  */
 export async function resetDb(): Promise<void> {
-  for (const table of ['post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
+  // Filhas (post_metrics, account_metrics) primeiro: elas referenciam post_targets/accounts.
+  for (const table of ['post_metrics', 'account_metrics', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
     await env.DB.prepare(`drop table if exists ${table}`).run();
   }
-  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt']) {
+  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics']) {
     await env.DB.prepare(`drop index if exists ${index}`).run();
   }
-  for (const sql of splitStatements(`${migration0001}\n${migration0004}`)) {
+  for (const sql of splitStatements(`${migration0001}\n${migration0004}\n${migration0005}`)) {
     await env.DB.prepare(sql).run();
   }
 }

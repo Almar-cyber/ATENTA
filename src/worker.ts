@@ -5,6 +5,9 @@ import { checkDashboardAuth } from './lib/auth.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
 import { notify } from './lib/notify.js';
+import { metricsFetchers } from './metrics/index.js';
+import { nextMetricsAt } from './metrics/cadence.js';
+import type { PostMetricsSnapshot } from './metrics/index.js';
 import { OAUTH_STATE_COOKIE, clearStateCookie, decodeState, getCookie } from './lib/oauth-state.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
@@ -40,6 +43,25 @@ conta da ferramenta.
 
 Contato: alexia01native@gmail.com`;
 
+const TERMS_OF_SERVICE_TEXT = `ALMAR Social Scheduler — Termos de Servico
+
+Esta ferramenta (ALMAR Social Scheduler) e uma ferramenta pessoal de agendamento de posts,
+operada e usada exclusivamente por ALMAR para publicar nas suas proprias contas do YouTube,
+LinkedIn, Facebook, Instagram, Pinterest e TikTok. Nao e um servico oferecido a terceiros, nao
+tem outros usuarios e nao pode ser contratado ou acessado por ninguem alem do proprietario.
+
+Uso: a ferramenta agenda e publica conteudo (texto, imagem e video) nas contas conectadas pelo
+proprio proprietario, respeitando os termos de uso e as politicas de conteudo de cada plataforma
+(YouTube, LinkedIn, Facebook, Instagram, Pinterest, TikTok).
+
+Responsabilidade: o proprietario e o unico responsavel pelo conteudo publicado atraves da
+ferramenta. Nao ha garantia de disponibilidade continua do servico.
+
+Alteracoes: estes termos podem ser atualizados a qualquer momento, sem aviso previo, dado que
+esta e uma ferramenta de uso pessoal e nao comercial.
+
+Contato: alexia01native@gmail.com`;
+
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runPoller(env));
@@ -61,6 +83,9 @@ export default {
     // literally appear in the URL to prove ownership; the suffix is otherwise ignored.
     if (/^\/privacy(\/.*)?$/.test(url.pathname)) {
       return new Response(PRIVACY_POLICY_TEXT, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    }
+    if (/^\/terms(\/.*)?$/.test(url.pathname)) {
+      return new Response(TERMS_OF_SERVICE_TEXT, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     }
 
     const authError = checkDashboardAuth(request, env);
@@ -85,6 +110,89 @@ async function runPoller(env: Env): Promise<void> {
   await stepClaimAndPublishDue(env);
   await stepRecheckProcessing(env);
   await stepSweeps(env);
+  // Coleta de métricas é estritamente secundária à publicação: qualquer erro dela (schema, rede,
+  // etc.) fica contido aqui e nunca derruba as etapas de publish acima.
+  try {
+    await stepCollectMetrics(env);
+  } catch (err) {
+    console.error('[metrics] stepCollectMetrics falhou:', err);
+  }
+}
+
+// Sentinela que remove um destino da fila de coleta pra sempre (rede sem coletor, sem published_at,
+// ou passado o horizonte). É uma data absurdamente futura, então nunca volta a ser `<= agora`.
+const METRICS_NEVER = '9999-12-31T00:00:00.000Z';
+const METRICS_COLLECT_BATCH = 10;
+
+// Step 4 — coleta de métricas dos posts publicados (Fase A, design-analytics.md). Aditivo e
+// tolerante: erro de coleta nunca derruba a varredura (mesma regra do notify). A cadência (quão
+// espaçado é o próximo snapshot) vem de metrics/cadence.ts pela idade do post.
+async function stepCollectMetrics(env: Env): Promise<void> {
+  const now = nowIso();
+  const { results } = await env.DB.prepare(
+    `select pt.* from post_targets pt
+     join accounts a on a.id = pt.account_id
+     where pt.status = 'published' and a.status = 'active'
+       and (pt.next_metrics_at is null or pt.next_metrics_at <= ?)
+     order by pt.next_metrics_at asc
+     limit ?`
+  )
+    .bind(now, METRICS_COLLECT_BATCH)
+    .all<any>();
+
+  for (const row of results ?? []) {
+    const target = rowToPostTarget(row);
+    const fetcher = metricsFetchers[target.platform];
+    if (!fetcher || !target.published_at) {
+      await setNextMetricsAt(env, target.id, METRICS_NEVER);
+      continue;
+    }
+    const account = await getAccount(env, target.account_id);
+    if (!account) {
+      await setNextMetricsAt(env, target.id, METRICS_NEVER);
+      continue;
+    }
+
+    try {
+      const snap = await fetcher.fetchPostMetrics(target, account, env);
+      if (snap) await insertPostMetrics(env, target, snap);
+    } catch (err) {
+      console.error(`[metrics] ${target.platform}/${target.id} falhou:`, err);
+    }
+
+    const next = nextMetricsAt(new Date(target.published_at), new Date(now));
+    await setNextMetricsAt(env, target.id, next ?? METRICS_NEVER);
+  }
+}
+
+async function setNextMetricsAt(env: Env, targetId: string, at: string): Promise<void> {
+  await env.DB.prepare(`update post_targets set next_metrics_at = ? where id = ?`).bind(at, targetId).run();
+}
+
+async function insertPostMetrics(env: Env, target: PostTarget, snap: PostMetricsSnapshot): Promise<void> {
+  await env.DB.prepare(
+    `insert into post_metrics
+       (id, post_target_id, external_post_id, platform, fetched_at,
+        impressions, reach, likes, comments, shares, saves, video_views, avg_watch_seconds, raw)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      target.id,
+      target.external_post_id ?? '',
+      target.platform,
+      nowIso(),
+      snap.impressions ?? null,
+      snap.reach ?? null,
+      snap.likes ?? null,
+      snap.comments ?? null,
+      snap.shares ?? null,
+      snap.saves ?? null,
+      snap.video_views ?? null,
+      snap.avg_watch_seconds ?? null,
+      JSON.stringify(snap.raw ?? {})
+    )
+    .run();
 }
 
 // Step 0 — unconditional token-health scan. Runs every invocation, independent of whether
