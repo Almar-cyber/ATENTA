@@ -598,7 +598,8 @@ export function PostComposer({
         </Button>
       </div>
       {/* Estreito: rola tudo junto (uma barra só). Largo: duas colunas com scroll independente. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+      {/* pb-4 pra a sombra deslocada dos cards do último bloco não ser cortada pelo scroll. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-4 md:flex-row md:overflow-hidden md:pb-0">
         {/* No mobile a coluna tem altura natural (shrink-0) e quem rola é o container acima — se
             fosse flex-1, ela encolheria abaixo do conteúdo e a mídia transbordava por cima da
             pré-visualização (visível com muitos arquivos). No desktop volta a flex-1 com scroll próprio. */}

@@ -198,7 +198,8 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
           </p>
         </div>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 overflow-auto">{body}</CardContent>
+      {/* pb-6 pra a sombra deslocada dos cards do último bloco não ser cortada pelo scroll. */}
+      <CardContent className="min-h-0 flex-1 overflow-auto pb-6">{body}</CardContent>
     </Card>
   );
 }
