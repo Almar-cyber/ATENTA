@@ -666,6 +666,7 @@ export async function renderLandingPage(env: Env): Promise<string> {
       <ul>
         <li><a href="/privacy">Política de Privacidade</a></li>
         <li><a href="/terms">Termos de Serviço</a></li>
+        <li><a href="/data-deletion">Excluir meus dados</a></li>
         <li><a href="mailto:contato@omangue.co">contato@omangue.co</a></li>
         <li>Estúdio Mangue — <a href="https://omangue.co">omangue.co</a></li>
       </ul>

@@ -80,36 +80,75 @@ ${bodyHtml}
 </html>`;
 }
 
+// ATENÇÃO ao mexer aqui: estas páginas e a landing (src/landingPage.ts) são lidas pelo MESMO
+// revisor, na mesma sessão. A versão anterior descrevia o ATENTA! como "ferramenta pessoal,
+// operada exclusivamente por ALMAR, sem outros usuários" enquanto a landing vendia plano grátis e
+// pago — contradição que reprova submissão. Se o produto mudar de natureza, os dois arquivos mudam
+// juntos.
+
 export function renderPrivacyPolicy(env: Env): Promise<string> {
   return renderLegalPage(
     env,
     'Política de Privacidade',
     'Política de Privacidade',
-    `<h1>ATENTA!</h1>
-<p>ATENTA! é uma ferramenta pessoal de agendamento de posts, criada por Estúdio Mangue
-(omangue.co) e operada por ALMAR para publicar nas suas próprias contas do YouTube, LinkedIn,
-Facebook, Instagram, Pinterest e TikTok. Não é um serviço oferecido a terceiros nem a outros
-usuários.</p>
+    `<h1>Política de Privacidade do ATENTA!</h1>
+<p>O ATENTA! é uma plataforma de agendamento e planejamento de publicações para YouTube, LinkedIn,
+Facebook, Instagram, Pinterest e TikTok, operada por <b>Estúdio Mangue</b> (omangue.co). Esta
+política explica quais dados tratamos, por quê, e como você exerce seus direitos.</p>
 
-<h2>Dados coletados</h2>
+<h2>Dados que tratamos</h2>
 <ul>
-<li>Tokens de acesso/atualização (OAuth) das contas conectadas pelo próprio proprietário.</li>
-<li>Metadados dos posts agendados (legenda, horário, plataforma de destino).</li>
+<li><b>Cadastro:</b> seu e-mail e os dados necessários para manter sua conta e o plano contratado.</li>
+<li><b>Contas sociais conectadas:</b> os tokens de acesso/atualização (OAuth) que <i>você</i>
+autoriza, mais o identificador e o nome público de cada conta, para exibirmos qual perfil está
+conectado.</li>
+<li><b>Conteúdo que você agenda:</b> legendas, títulos, imagens e vídeos, além da data e das contas
+de destino.</li>
+<li><b>Métricas das suas publicações:</b> curtidas, comentários, alcance, visualizações e contagem
+de seguidores, lidos das APIs oficiais de cada rede, para montar seus indicadores.</li>
+</ul>
+<p><b>Nunca pedimos nem armazenamos a senha das suas redes sociais.</b> A autorização acontece na
+tela de consentimento da própria plataforma.</p>
+
+<h2>Para que usamos</h2>
+<p>Exclusivamente para prestar o serviço que você contratou: publicar o conteúdo que você agendou,
+nas contas que você escolheu, no horário que você marcou, e mostrar os resultados dessas
+publicações no seu painel. Não usamos seus dados para publicidade, nem para treinar modelos, nem
+para qualquer finalidade que você não tenha solicitado.</p>
+
+<h2>Como armazenamos</h2>
+<p>Os tokens OAuth são criptografados com <b>AES-256-GCM</b> antes de gravados; a chave existe
+apenas como secret do servidor e nunca é devolvida por nenhum endpoint da API. Os dados ficam na
+infraestrutura da <b>Cloudflare</b> (banco D1 e armazenamento de arquivos R2), nosso único
+subprocessador de infraestrutura. Cada conta só enxerga os próprios dados.</p>
+
+<h2>Com quem compartilhamos</h2>
+<ul>
+<li><b>Com as redes sociais que você conectou</b> — e só o necessário para publicar: o conteúdo do
+post em si.</li>
+<li><b>Com a Cloudflare</b>, como infraestrutura de hospedagem e banco de dados.</li>
+</ul>
+<p>Não vendemos, alugamos nem cedemos seus dados a ninguém, em nenhuma hipótese.</p>
+
+<h2>Por quanto tempo guardamos</h2>
+<ul>
+<li><b>Tokens:</b> até você desconectar a conta aqui, revogar o acesso nas configurações da rede
+social, ou encerrar sua conta no ATENTA!.</li>
+<li><b>Arquivos de mídia:</b> apagados automaticamente do nosso armazenamento <b>30 dias após a
+publicação</b> — a partir daí o arquivo vive na própria rede social, e é de lá que o painel o
+exibe. Mídia de post ainda não publicado não é apagada.</li>
+<li><b>Posts e métricas:</b> enquanto sua conta existir, ou até você excluí-los.</li>
 </ul>
 
-<h2>Como os dados são armazenados</h2>
-<p>Os tokens são criptografados (AES-256-GCM) antes de serem salvos num banco de dados privado
-(Cloudflare D1), acessível apenas pelo proprietário da ferramenta.</p>
+<h2>Seus direitos (LGPD)</h2>
+<p>A Lei Geral de Proteção de Dados (Lei 13.709/2018) garante que você possa confirmar o
+tratamento, acessar, corrigir, portar, e pedir a <b>eliminação</b> dos seus dados, além de revogar
+consentimento a qualquer momento. No painel você já desconecta contas e exclui posts sozinho; para
+apagar tudo, veja <a href="/data-deletion">como excluir seus dados</a> ou escreva para
+contato@omangue.co. Respondemos em até 15 dias.</p>
 
-<h2>O que NÃO fazemos</h2>
-<ul>
-<li>Não compartilhamos, vendemos ou usamos esses dados para publicidade.</li>
-<li>Não coletamos dados de nenhum outro usuário ou visitante.</li>
-</ul>
-
-<h2>Retenção</h2>
-<p>Os tokens ficam armazenados até o proprietário revogar o acesso do app ou remover a conta da
-ferramenta.</p>`
+<h2>Alterações</h2>
+<p>Se mudarmos algo relevante nesta política, avisamos por e-mail antes de a mudança valer.</p>`
   );
 }
 
@@ -118,24 +157,87 @@ export function renderTermsOfService(env: Env): Promise<string> {
     env,
     'Termos de Serviço',
     'Termos de Serviço',
-    `<h1>ATENTA!</h1>
-<p>ATENTA! é uma ferramenta pessoal de agendamento de posts, criada por Estúdio Mangue
-(omangue.co) e operada exclusivamente por ALMAR para publicar nas suas próprias contas do
-YouTube, LinkedIn, Facebook, Instagram, Pinterest e TikTok. Não é um serviço oferecido a
-terceiros, não tem outros usuários e não pode ser contratado ou acessado por ninguém além do
-proprietário.</p>
+    `<h1>Termos de Serviço do ATENTA!</h1>
+<p>O ATENTA! é uma plataforma de agendamento e planejamento de publicações para YouTube, LinkedIn,
+Facebook, Instagram, Pinterest e TikTok, operada por <b>Estúdio Mangue</b> (omangue.co). Ao criar
+uma conta, você concorda com estes termos.</p>
 
-<h2>Uso</h2>
-<p>A ferramenta agenda e publica conteúdo (texto, imagem e vídeo) nas contas conectadas pelo
-próprio proprietário, respeitando os termos de uso e as políticas de conteúdo de cada plataforma
-(YouTube, LinkedIn, Facebook, Instagram, Pinterest, TikTok).</p>
+<h2>O que o serviço faz</h2>
+<p>Você conecta suas contas de rede social, monta a publicação (legenda, imagens ou vídeo, formato
+e data) e o ATENTA! publica no horário marcado, através das APIs oficiais de cada plataforma.
+Depois, lê as métricas dessas publicações para montar seus indicadores.</p>
 
-<h2>Responsabilidade</h2>
-<p>O proprietário é o único responsável pelo conteúdo publicado através da ferramenta. Não há
-garantia de disponibilidade contínua do serviço.</p>
+<h2>Sua conta</h2>
+<p>Você é responsável por manter suas credenciais em segurança e por tudo que for publicado a
+partir da sua conta. Só conecte perfis que você tem autorização para operar.</p>
+
+<h2>Conteúdo</h2>
+<p>O conteúdo que você agenda é seu, e você continua sendo o único responsável por ele —
+inclusive por respeitar os termos de uso e as políticas de conteúdo de cada rede social, além da
+legislação aplicável e de direitos de terceiros. Não reivindicamos propriedade sobre nada do que
+você publica. Podemos suspender contas que usem o serviço para spam, fraude ou conteúdo ilegal.</p>
+
+<h2>Planos e pagamento</h2>
+<p>O plano gratuito é permanente e não exige cartão, dentro dos limites publicados na página
+inicial. Recursos além desses limites dependem de assinatura paga, informada antes da contratação.
+Se a assinatura for cancelada ou encerrada, a conta volta ao plano gratuito e o conteúdo já criado
+continua acessível — apenas os limites do plano gratuito voltam a valer.</p>
+
+<h2>Cancelamento</h2>
+<p>Você pode desconectar suas contas e encerrar a sua a qualquer momento, sem multa nem fidelidade
+(veja <a href="/data-deletion">exclusão de dados</a>).</p>
+
+<h2>Limites de responsabilidade</h2>
+<p>Fazemos o possível para que cada publicação saia no horário, mas dependemos das APIs das redes
+sociais, que podem ficar indisponíveis, mudar regras ou recusar conteúdo por decisão delas. O
+serviço é oferecido "como está", sem garantia de disponibilidade ininterrupta, e não respondemos
+por lucros cessantes decorrentes de falha de publicação.</p>
 
 <h2>Alterações</h2>
-<p>Estes termos podem ser atualizados a qualquer momento, sem aviso prévio, dado que esta é uma
-ferramenta de uso pessoal e não comercial.</p>`
+<p>Podemos atualizar estes termos; mudanças relevantes são avisadas por e-mail antes de valer. O
+foro é o da comarca do Recife/PE, e aplica-se a legislação brasileira.</p>`
+  );
+}
+
+// Página EXIGIDA pelo Meta: o campo "Exclusão de dados do usuário" só aceita um callback de
+// exclusão (endpoint que a Meta chama) ou uma URL de instruções. Esta é a URL de instruções — sem
+// ela o app fica inelegível para submissão, e o valor que estava lá apontava para facebook.com.
+export function renderDataDeletion(env: Env): Promise<string> {
+  return renderLegalPage(
+    env,
+    'Exclusão de dados',
+    'Exclusão de dados',
+    `<h1>Como excluir seus dados do ATENTA!</h1>
+<p>Você decide o que fica e o que sai, e não precisa pedir autorização para nada disso.</p>
+
+<h2>1. Desconectar uma rede social</h2>
+<p>No painel, abra <b>Conexões</b> e remova a conta. Isso apaga o token de acesso daquela rede do
+nosso banco imediatamente. As publicações que já saíram continuam no ar na rede social — quem
+controla isso é você, por lá.</p>
+<p>Você também pode cortar o acesso pelo lado da plataforma, sem passar por aqui:</p>
+<ul>
+<li><b>Facebook / Instagram:</b> Configurações → Central de Contas → Aplicativos e sites</li>
+<li><b>YouTube (Google):</b> myaccount.google.com → Segurança → Apps de terceiros</li>
+<li><b>LinkedIn:</b> Configurações → Privacidade de dados → Serviços de terceiros permitidos</li>
+<li><b>Pinterest:</b> Configurações → Segurança → Apps</li>
+<li><b>TikTok:</b> Configurações → Segurança → Gerenciar permissões de apps</li>
+</ul>
+
+<h2>2. Apagar publicações e mídia</h2>
+<p>Cada post agendado pode ser excluído no painel, o que remove também os arquivos ligados a ele.
+Arquivos de posts já publicados são apagados automaticamente do nosso armazenamento 30 dias depois
+da publicação.</p>
+
+<h2>3. Excluir a conta inteira</h2>
+<p>Escreva para <b><a href="mailto:contato@omangue.co">contato@omangue.co</a></b> a partir do e-mail
+cadastrado, com o assunto <b>"Excluir minha conta"</b>. Apagamos tudo — cadastro, tokens, posts,
+arquivos e métricas — em até <b>15 dias</b>, e confirmamos por e-mail quando terminar. Não é
+preciso justificar o pedido.</p>
+<p>Se você não tiver mais acesso ao e-mail cadastrado, escreva do endereço que puder e informe
+quais contas sociais estavam conectadas, para conseguirmos localizar o cadastro.</p>
+
+<h2>O que não conseguimos apagar</h2>
+<p>Publicações que já foram ao ar pertencem à sua conta na rede social e só podem ser removidas lá
+— nós não temos permissão para apagar conteúdo do seu perfil.</p>`
   );
 }

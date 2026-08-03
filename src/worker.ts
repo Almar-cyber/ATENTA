@@ -1,6 +1,6 @@
 import { adapters } from './adapters/index.js';
 import { handleApiRequest } from './api.js';
-import { renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
+import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
 import { renderLandingPage } from './landingPage.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { checkDashboardAuth } from './lib/auth.js';
@@ -67,6 +67,11 @@ export default {
     }
     if (/^\/terms(\/.*)?$/.test(url.pathname)) {
       return new Response(await renderTermsOfService(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+    // Exigida pelo Meta no campo "Exclusão de dados do usuário" — sem uma URL de instruções (ou um
+    // callback de exclusão), o app fica inelegível para submissão.
+    if (/^\/data-deletion(\/.*)?$/.test(url.pathname)) {
+      return new Response(await renderDataDeletion(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     // Página pública do produto na raiz, ANTES do gate: o App Review de cada plataforma exige um
