@@ -112,10 +112,10 @@ describe('isolação entre donos', () => {
     const body = (await res.json()) as { accounts: unknown[] };
     expect(body.accounts.length).toBeGreaterThan(0);
 
-    // E sem cookie nenhum não se enxerga nada — o oposto do mesmo teste.
+    // E sem cookie nenhum a API recusa — antes ela respondia lista vazia, o que era pior: uma
+    // resposta 200 sem dado é indistinguível de "esse dono não tem nada".
     const anon = await call(new Request(`${ORIGIN}/api/accounts`));
-    const anonBody = (await anon.json()) as { accounts: unknown[] };
-    expect(anonBody.accounts).toHaveLength(0);
+    expect(anon.status).toBe(401);
   });
 
   it('GET /api/accounts só devolve as contas do próprio dono', async () => {

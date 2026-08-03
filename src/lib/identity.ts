@@ -15,9 +15,10 @@ import { createAuth } from './auth-server.js';
 // vínculo com posts, contas conectadas e mídia; o id é estável pela vida da conta.
 
 /**
- * Dono usado enquanto não há sessão — o modo single-operador de antes do login. Continua existindo
- * porque os dados que já estão no banco nasceram com ele; sai de cena quando a migração de adoção
- * rodar e o gate de Basic Auth for substituído pelo de sessão.
+ * Dono das linhas criadas ANTES de existir login. Não é uma conta: é um texto, sem e-mail e sem
+ * senha, e desde que o gate passou a exigir sessão ninguém consegue se apresentar como ele. Só
+ * continua aqui porque os callbacks de OAuth o usam como último recurso quando o state não traz
+ * dono; some de vez quando a adoção migrar as linhas antigas para uma conta de verdade.
  */
 export const SINGLE_OPERATOR = 'owner';
 
@@ -37,16 +38,4 @@ export async function sessionUser(request: Request, env: Env): Promise<{ id: str
     // no app inteiro. Sem sessão comprovada, trata-se como não autenticado.
     return null;
   }
-}
-
-/**
- * O `owner_id` desta requisição.
- *
- * Enquanto o gate de Basic Auth ainda existir, quem passa por ele sem sessão continua sendo o
- * SINGLE_OPERATOR — é o que mantém o app funcionando durante a transição, sem trancar a operadora
- * do lado de fora antes de ela ter uma conta.
- */
-export async function currentUser(request: Request, env: Env): Promise<string> {
-  const user = await sessionUser(request, env);
-  return user?.id ?? SINGLE_OPERATOR;
 }

@@ -32,10 +32,6 @@ export interface Env {
   // teria. Sem o secret, o alerta é só log (comportamento anterior). Ver src/lib/notify.ts.
   ALERT_WEBHOOK_URL?: string;
 
-  // Gates the dashboard + /api/* (see src/lib/auth.ts) — single shared password, any username.
-  // Optional: unset means no gate at all, i.e. the dashboard and API are publicly reachable.
-  DASHBOARD_PASSWORD?: string;
-
   YOUTUBE_CLIENT_ID: string;
   YOUTUBE_CLIENT_SECRET: string;
 

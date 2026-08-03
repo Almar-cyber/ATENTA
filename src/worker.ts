@@ -3,7 +3,6 @@ import { handleApiRequest } from './api.js';
 import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
 import { renderLandingPage } from './landingPage.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
-import { checkDashboardAuth } from './lib/auth.js';
 import { createAuth } from './lib/auth-server.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
@@ -12,7 +11,7 @@ import { metricsFetchers } from './metrics/index.js';
 import { nextMetricsAt } from './metrics/cadence.js';
 import type { PostMetricsSnapshot } from './metrics/index.js';
 import { OAUTH_STATE_COOKIE, clearStateCookie, decodeState, getCookie } from './lib/oauth-state.js';
-import { SINGLE_OPERATOR } from './lib/identity.js';
+import { SINGLE_OPERATOR, sessionUser } from './lib/identity.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
 
@@ -94,16 +93,25 @@ export default {
       return createAuth(request, env).handler(request);
     }
 
-    const authError = checkDashboardAuth(request, env);
-    if (authError) return authError;
-
-    if (url.pathname.startsWith('/api/')) {
-      return handleApiRequest(request, url, env);
+    // O SPA e seus assets são PÚBLICOS. Não há segredo no bundle: sem sessão ele renderiza a tela
+    // de entrar, e todo dado vem do /api, que é o que precisa de guarda. Antes daqui rodava o gate
+    // de Basic Auth, e era ele que deixava a própria tela de entrar inalcançável — /app respondia
+    // 401 e a caixa do navegador aparecia por cima da marca.
+    if (!url.pathname.startsWith('/api/')) {
+      return env.ASSETS.fetch(request);
     }
 
-    // Everything else is the React SPA (web/ → dist/), served by the assets binding. With
-    // not_found_handling = "single-page-application", unknown paths return index.html.
-    return env.ASSETS.fetch(request);
+    // Daqui pra baixo é API, e API exige sessão. 401 em JSON e SEM WWW-Authenticate de propósito:
+    // aquele header é o que faz o navegador abrir a caixa de senha dele por cima do app.
+    const user = await sessionUser(request, env);
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Sessão expirada. Entre de novo.' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return handleApiRequest(request, url, env, user.id);
   },
 };
 

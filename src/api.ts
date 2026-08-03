@@ -4,7 +4,6 @@ import { getAccountTokens } from './lib/tokens.js';
 import { fetchWithRetry } from './lib/http.js';
 import { buildAuthUrl, isOAuthPlatform, OAUTH_CLIENT_ID_ENV } from './lib/oauth-urls.js';
 import { encodeState, setStateCookie } from './lib/oauth-state.js';
-import { currentUser } from './lib/identity.js';
 import type { Env } from './lib/env.js';
 import type { Account, MediaAsset, Platform, PostTarget } from './lib/types.js';
 
@@ -49,12 +48,14 @@ async function checkQuota(owner: string, incoming: number, env: Env): Promise<Re
   );
 }
 
-export async function handleApiRequest(request: Request, url: URL, env: Env): Promise<Response> {
+/**
+ * `owner` chega pronto do worker.ts, que já provou a sessão antes de chamar aqui — não há caminho
+ * até esta função sem dono autenticado. Daqui pra baixo todo handler recebe `owner` e TODA query
+ * filtra por ele.
+ */
+export async function handleApiRequest(request: Request, url: URL, env: Env, owner: string): Promise<Response> {
   const { pathname } = url;
   const method = request.method;
-  // Dono de tudo que esta requisição ler ou escrever. Ponto único de entrada da identidade —
-  // daqui pra baixo todo handler recebe `owner` e TODA query filtra por ele. Ver design-multiuser.md.
-  const owner = await currentUser(request, env);
 
   if (pathname === '/api/accounts' && method === 'GET') return listAccounts(owner, env);
 
