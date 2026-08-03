@@ -54,7 +54,7 @@ export async function handleApiRequest(request: Request, url: URL, env: Env): Pr
   const method = request.method;
   // Dono de tudo que esta requisição ler ou escrever. Ponto único de entrada da identidade —
   // daqui pra baixo todo handler recebe `owner` e TODA query filtra por ele. Ver design-multiuser.md.
-  const owner = currentUser(request, env);
+  const owner = await currentUser(request, env);
 
   if (pathname === '/api/accounts' && method === 'GET') return listAccounts(owner, env);
 

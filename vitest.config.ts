@@ -23,6 +23,9 @@ export default defineConfig({
           // A real 32-byte AES-256 key (all 0x07). Only the auth-classification test encrypts
           // anything with it; nothing here talks to a real platform.
           TOKEN_ENCRYPTION_KEY: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=',
+          // Assina os cookies de sessão nos testes de isolação, que criam contas de verdade
+          // pelo /api/auth. Valor fixo e público de propósito: é um banco em memória.
+          AUTH_SECRET: 'chave-de-teste-nao-usar-em-producao-0000',
         },
       },
     }),

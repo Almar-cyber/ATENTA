@@ -4,6 +4,7 @@ import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from '.
 import { renderLandingPage } from './landingPage.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { checkDashboardAuth } from './lib/auth.js';
+import { createAuth } from './lib/auth-server.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
 import { notify } from './lib/notify.js';
@@ -85,6 +86,12 @@ export default {
     // sem a imagem e o revisor vê um quadro quebrado (o gate abaixo devolvia 401 no /hero.jpg).
     if (LANDING_PUBLIC_ASSETS.has(url.pathname)) {
       return env.ASSETS.fetch(request);
+    }
+
+    // Rotas de autenticação (entrar, criar conta, sair, recuperar senha). Públicas por definição —
+    // é por elas que se obtém a credencial, então não podem ficar atrás do gate que elas destravam.
+    if (url.pathname.startsWith('/api/auth/')) {
+      return createAuth(request, env).handler(request);
     }
 
     const authError = checkDashboardAuth(request, env);

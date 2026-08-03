@@ -12,14 +12,6 @@ import { resetDb } from './helpers.js';
 
 const ORIGIN = 'https://atenta.omangue.co';
 
-// O Cloudflare Access injeta este header; currentUser() o transforma no owner_id.
-function asUser(email: string, path: string, init: RequestInit = {}): Request {
-  return new Request(`${ORIGIN}${path}`, {
-    ...init,
-    headers: { ...(init.headers ?? {}), 'Cf-Access-Authenticated-User-Email': email },
-  });
-}
-
 async function call(request: Request): Promise<Response> {
   const ctx = createExecutionContext();
   const res = await worker.fetch(request, env, ctx);
@@ -27,8 +19,36 @@ async function call(request: Request): Promise<Response> {
   return res;
 }
 
-const ALICE = 'alice@exemplo.com';
-const BOB = 'bob@exemplo.com';
+/**
+ * Cria uma conta DE VERDADE pelo /api/auth e devolve o id do usuário mais o cookie de sessão.
+ *
+ * Por que não falsificar a identidade: a versão anterior desta suíte injetava um header
+ * (Cf-Access-Authenticated-User-Email) que o currentUser() lia. Quando a identidade passou a vir da
+ * sessão, o header virou nada — e aí TODO teste "Alice não vê o recurso de Bob" passou por vazio,
+ * porque ninguém era ninguém e todas as respostas vinham vazias. Um teste que passa quando a
+ * autenticação inteira sai do ar não estava provando isolação. Sessão real fecha esse buraco.
+ */
+async function register(email: string): Promise<{ id: string; cookie: string }> {
+  const res = await call(
+    new Request(`${ORIGIN}/api/auth/sign-up/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'senha-de-teste-123', name: email }),
+    })
+  );
+  if (!res.ok) throw new Error(`sign-up falhou (${res.status}): ${await res.text()}`);
+  const body = (await res.json()) as { user: { id: string } };
+  const setCookie = res.headers.get('set-cookie');
+  if (!setCookie) throw new Error('sign-up não devolveu cookie de sessão');
+  return { id: body.user.id, cookie: setCookie.split(';')[0] };
+}
+
+function asUser(user: { cookie: string }, path: string, init: RequestInit = {}): Request {
+  return new Request(`${ORIGIN}${path}`, {
+    ...init,
+    headers: { ...(init.headers ?? {}), Cookie: user.cookie },
+  });
+}
 
 /** Cria uma conta + um post publicado pertencentes a `owner`. Devolve os ids. */
 async function seedOwner(owner: string, tag: string) {
@@ -68,24 +88,44 @@ async function seedOwner(owner: string, tag: string) {
 }
 
 describe('isolação entre donos', () => {
+  let alice: Awaited<ReturnType<typeof register>>;
   let bob: Awaited<ReturnType<typeof seedOwner>>;
 
   beforeEach(async () => {
     await resetDb();
-    await seedOwner(ALICE, 'alice');
-    bob = await seedOwner(BOB, 'bob');
+    // Duas contas de verdade; o owner_id de cada uma é o user.id que o better-auth gerou.
+    alice = await register('alice@exemplo.com');
+    const bobUser = await register('bob@exemplo.com');
+    await seedOwner(alice.id, 'alice');
+    bob = await seedOwner(bobUser.id, 'bob');
+  });
+
+  // GUARDA DO ARNÊS. Todo teste abaixo é da forma "A não vê o recurso de B", e essa forma passa
+  // sozinha quando ninguém está autenticado — foi assim que 12 destes 13 passaram por vazio depois
+  // que a identidade saiu do header e foi pra sessão. Este teste afirma o POSITIVO: se a sessão
+  // deixar de identificar Alice, ele quebra antes de qualquer outro e explica o motivo.
+  it('a sessão identifica o dono (sem isso, os testes abaixo passam por vazio)', async () => {
+    const res = await call(asUser(alice, '/api/accounts'));
+    const body = (await res.json()) as { accounts: unknown[] };
+    expect(body.accounts.length).toBeGreaterThan(0);
+
+    // E sem cookie nenhum não se enxerga nada — o oposto do mesmo teste.
+    const anon = await call(new Request(`${ORIGIN}/api/accounts`));
+    const anonBody = (await anon.json()) as { accounts: unknown[] };
+    expect(anonBody.accounts).toHaveLength(0);
   });
 
   it('GET /api/accounts só devolve as contas do próprio dono', async () => {
-    const res = await call(asUser(ALICE, '/api/accounts'));
+    const res = await call(asUser(alice, '/api/accounts'));
     const body = (await res.json()) as { accounts: Array<{ id: string }> };
     expect(body.accounts.map((a) => a.id)).toEqual(['acc-alice']);
   });
 
   it('GET /api/posts não devolve posts de outro dono', async () => {
-    const res = await call(asUser(ALICE, '/api/posts'));
+    const res = await call(asUser(alice, '/api/posts'));
     const body = (await res.json()) as { posts: Array<{ body: string }> };
-    expect(JSON.stringify(body)).not.toContain('segredo de bob');
+    expect(JSON.stringify(body)).toContain('segredo de alice'); // vê o próprio…
+    expect(JSON.stringify(body)).not.toContain('segredo de bob'); // …e só o próprio
   });
 
   it('GET /api/metrics não devolve métricas de outro dono', async () => {
@@ -94,26 +134,29 @@ describe('isolação entre donos', () => {
        values ('m-bob', 'pt-bob', 'x', 'instagram', '2026-01-02T12:00:00Z', 999)`
     ).run();
     await env.DB.prepare(`update post_targets set status = 'published', published_at = '2026-01-01T12:00:00Z' where id = 'pt-bob'`).run();
-    const res = await call(asUser(ALICE, '/api/metrics'));
+    const res = await call(asUser(alice, '/api/metrics'));
     const body = (await res.json()) as { metrics: unknown[] };
     expect(body.metrics).toHaveLength(0);
   });
 
   it('GET /api/metrics/followers não devolve contas de outro dono', async () => {
-    const res = await call(asUser(ALICE, '/api/metrics/followers'));
+    const res = await call(asUser(alice, '/api/metrics/followers'));
     const body = (await res.json()) as { followers: Array<{ account_id: string }> };
+    // every() sobre lista vazia é true: sem esta primeira linha, o teste passaria com zero contas.
+    expect(body.followers.length).toBeGreaterThan(0);
     expect(body.followers.every((f) => f.account_id === 'acc-alice')).toBe(true);
   });
 
   it('GET /api/grid-previews não devolve prévias de outro dono', async () => {
-    const res = await call(asUser(ALICE, '/api/grid-previews?platform=instagram'));
+    const res = await call(asUser(alice, '/api/grid-previews?platform=instagram'));
     const body = (await res.json()) as { previews: Array<{ id: string }> };
+    expect(body.previews.map((p) => p.id)).toContain('gp-alice');
     expect(body.previews.map((p) => p.id)).not.toContain('gp-bob');
   });
 
   it('PATCH /api/posts/:id de outro dono é 404 e NÃO altera o dado', async () => {
     const res = await call(
-      asUser(ALICE, `/api/posts/${bob.postId}`, {
+      asUser(alice, `/api/posts/${bob.postId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: 'invadido' }),
@@ -126,7 +169,7 @@ describe('isolação entre donos', () => {
 
   it('POST /api/posts mirando conta de outro dono é recusado', async () => {
     const res = await call(
-      asUser(ALICE, '/api/posts', {
+      asUser(alice, '/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -144,28 +187,28 @@ describe('isolação entre donos', () => {
   });
 
   it('DELETE /api/post-targets/:id de outro dono é 404 e NÃO apaga', async () => {
-    const res = await call(asUser(ALICE, `/api/post-targets/${bob.targetId}`, { method: 'DELETE' }));
+    const res = await call(asUser(alice, `/api/post-targets/${bob.targetId}`, { method: 'DELETE' }));
     expect(res.status).toBe(404);
     const row = await env.DB.prepare(`select id from post_targets where id = ?`).bind(bob.targetId).first();
     expect(row).toBeTruthy();
   });
 
   it('POST /api/post-targets/:id/cancel de outro dono não muda o status', async () => {
-    const res = await call(asUser(ALICE, `/api/post-targets/${bob.targetId}/cancel`, { method: 'POST' }));
+    const res = await call(asUser(alice, `/api/post-targets/${bob.targetId}/cancel`, { method: 'POST' }));
     expect(res.status).toBeGreaterThanOrEqual(400);
     const row = await env.DB.prepare(`select status from post_targets where id = ?`).bind(bob.targetId).first<{ status: string }>();
     expect(row?.status).toBe('draft');
   });
 
   it('POST /api/post-targets/:id/queue de outro dono não muda o status', async () => {
-    const res = await call(asUser(ALICE, `/api/post-targets/${bob.targetId}/queue`, { method: 'POST' }));
+    const res = await call(asUser(alice, `/api/post-targets/${bob.targetId}/queue`, { method: 'POST' }));
     expect(res.status).toBeGreaterThanOrEqual(400);
     const row = await env.DB.prepare(`select status from post_targets where id = ?`).bind(bob.targetId).first<{ status: string }>();
     expect(row?.status).toBe('draft');
   });
 
   it('DELETE /api/grid-previews/:id de outro dono é 404 e NÃO apaga', async () => {
-    const res = await call(asUser(ALICE, `/api/grid-previews/${bob.previewId}`, { method: 'DELETE' }));
+    const res = await call(asUser(alice, `/api/grid-previews/${bob.previewId}`, { method: 'DELETE' }));
     expect(res.status).toBe(404);
     const row = await env.DB.prepare(`select id from grid_previews where id = ?`).bind(bob.previewId).first();
     expect(row).toBeTruthy();
@@ -173,7 +216,7 @@ describe('isolação entre donos', () => {
 
   it('POST /api/posts/reschedule não move posts de outro dono', async () => {
     const res = await call(
-      asUser(ALICE, '/api/posts/reschedule', {
+      asUser(alice, '/api/posts/reschedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ post_ids: ['sp-alice', bob.postId] }),
@@ -188,7 +231,7 @@ describe('isolação entre donos', () => {
   });
 
   it('GET /api/feed/:accountId de conta de outro dono é 404', async () => {
-    const res = await call(asUser(ALICE, `/api/feed/${bob.accountId}`));
+    const res = await call(asUser(alice, `/api/feed/${bob.accountId}`));
     expect(res.status).toBe(404);
   });
 });

@@ -1,36 +1,52 @@
 import type { Env } from './env.js';
+import { createAuth } from './auth-server.js';
 
 // Identidade de quem está usando o app. Ponto ÚNICO onde "quem é o usuário" entra no sistema —
-// tudo que precisa saber o dono de um dado chama currentUser(). Ver design-multiuser.md §3.
+// tudo que precisa saber o dono de um dado chama currentUser(), e daí pra baixo todo handler
+// recebe `owner` e TODA query filtra por ele.
 //
-// Duas fontes, nesta ordem:
-//  1. Cloudflare Access (Zero Trust): quando o Worker está atrás de uma aplicação do Access, ele
-//     injeta o e-mail autenticado no header Cf-Access-Authenticated-User-Email. Esse é o modo
-//     multi-usuário: cada pessoa entra com o e-mail/Google dela e vira um dono distinto.
-//  2. Fallback single-operador: sem Access, todo mundo que passar pelo gate de Basic Auth é o
-//     MESMO dono (SINGLE_OPERATOR). É o comportamento de hoje, preservado.
+// A fonte é a SESSÃO do better-auth: cookie assinado, validado contra a tabela `session` no D1.
+// Nada aqui lê header de requisição. A versão anterior confiava no header
+// Cf-Access-Authenticated-User-Email do Cloudflare Access, o que só seria seguro se o Worker fosse
+// inalcançável por fora do Access — e não era: a URL *.workers.dev responde direto, e por ela
+// qualquer um mandaria o header na mão e se passaria por qualquer dono.
 //
-// Segurança: o header do Access só é confiável porque o Access fica NA FRENTE do Worker e
-// sobrescreve qualquer valor que o cliente tente injetar. Se um dia o Worker for exposto por uma
-// rota que não passa pelo Access, a validação do JWT (Cf-Access-Jwt-Assertion contra o JWKS da
-// equipe) passa a ser obrigatória — ver design-multiuser.md §3, Passo 1.
-
-/** Dono usado quando não há Cloudflare Access — o modo single-operador de hoje. */
-export const SINGLE_OPERATOR = 'owner';
-
-const ACCESS_EMAIL_HEADER = 'Cf-Access-Authenticated-User-Email';
+// O dono é o `user.id`, não o e-mail. E-mail muda (a pessoa troca de endereço) e levaria junto o
+// vínculo com posts, contas conectadas e mídia; o id é estável pela vida da conta.
 
 /**
- * Quem está fazendo esta requisição. Devolve o e-mail autenticado pelo Cloudflare Access, ou
- * SINGLE_OPERATOR quando o Access não está na frente (instalação de um operador só).
+ * Dono usado enquanto não há sessão — o modo single-operador de antes do login. Continua existindo
+ * porque os dados que já estão no banco nasceram com ele; sai de cena quando a migração de adoção
+ * rodar e o gate de Basic Auth for substituído pelo de sessão.
  */
-export function currentUser(request: Request, _env: Env): string {
-  const email = request.headers.get(ACCESS_EMAIL_HEADER);
-  if (email && email.includes('@')) return email.toLowerCase();
-  return SINGLE_OPERATOR;
+export const SINGLE_OPERATOR = 'owner';
+
+/**
+ * Quem está fazendo esta requisição, ou `null` se não houver sessão válida.
+ *
+ * Devolver null em vez de lançar é de propósito: quem chama decide se o caso é 401 (o /api) ou
+ * mandar pra tela de entrar (o SPA).
+ */
+export async function sessionUser(request: Request, env: Env): Promise<{ id: string; email: string } | null> {
+  try {
+    const session = await createAuth(request, env).api.getSession({ headers: request.headers });
+    if (!session?.user?.id) return null;
+    return { id: session.user.id, email: session.user.email };
+  } catch {
+    // Ler a sessão está no caminho de TODA requisição; uma falha de banco aqui não pode virar 500
+    // no app inteiro. Sem sessão comprovada, trata-se como não autenticado.
+    return null;
+  }
 }
 
-/** Há Cloudflare Access na frente? (útil pra UI decidir se mostra "sair"/troca de conta.) */
-export function isAccessEnabled(request: Request): boolean {
-  return !!request.headers.get(ACCESS_EMAIL_HEADER);
+/**
+ * O `owner_id` desta requisição.
+ *
+ * Enquanto o gate de Basic Auth ainda existir, quem passa por ele sem sessão continua sendo o
+ * SINGLE_OPERATOR — é o que mantém o app funcionando durante a transição, sem trancar a operadora
+ * do lado de fora antes de ela ter uma conta.
+ */
+export async function currentUser(request: Request, env: Env): Promise<string> {
+  const user = await sessionUser(request, env);
+  return user?.id ?? SINGLE_OPERATOR;
 }

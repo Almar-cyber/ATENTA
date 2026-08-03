@@ -16,6 +16,11 @@ export interface Env {
   // Wrangler secrets (`wrangler secret put NAME`) — never committed, never in .env.
   TOKEN_ENCRYPTION_KEY: string;
 
+  // Chave que assina os cookies de sessão (src/lib/auth-server.ts). Sem ela o better-auth cai num
+  // valor de desenvolvimento conhecido publicamente — qualquer um forjaria uma sessão. Gerar com
+  // `openssl rand -base64 32` e gravar com `wrangler secret put AUTH_SECRET`.
+  AUTH_SECRET: string;
+
   // Opcional: webhook (ntfy.sh ou Discord) pra onde o poller empurra alertas de falha/reauth/
   // ambíguo/timeout — os Cron Triggers não têm o e-mail de "workflow falhou" que o GitHub Actions
   // teria. Sem o secret, o alerta é só log (comportamento anterior). Ver src/lib/notify.ts.
