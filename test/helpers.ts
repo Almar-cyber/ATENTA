@@ -11,6 +11,7 @@ import migration0007 from '../migrations/0007_media_owner_quota.sql?raw';
 // 0009 traz user/session/account/verification — sem elas o better-auth não cria conta, e a
 // suíte de isolação depende de sessão de verdade pra distinguir um dono do outro.
 import migration0009 from '../migrations/0009_auth.sql?raw';
+import migration0010 from '../migrations/0010_signup_invites.sql?raw';
 import { adapters } from '../src/adapters/index.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from '../src/lib/types.js';
 
@@ -21,13 +22,13 @@ import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTa
  */
 export async function resetDb(): Promise<void> {
   // Filhas (post_metrics, account_metrics) primeiro: elas referenciam post_targets/accounts.
-  for (const table of ['session', 'account', 'verification', 'user', 'post_metrics', 'account_metrics', 'grid_previews', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
+  for (const table of ['signup_invites', 'session', 'account', 'verification', 'user', 'post_metrics', 'account_metrics', 'grid_previews', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
     await env.DB.prepare(`drop table if exists ${table}`).run();
   }
   for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics', 'grid_previews_platform_sort', 'idx_accounts_owner', 'idx_scheduled_posts_owner', 'idx_grid_previews_owner', 'session_userId_idx', 'account_userId_idx', 'verification_identifier_idx', 'idx_media_assets_owner']) {
     await env.DB.prepare(`drop index if exists ${index}`).run();
   }
-  for (const sql of splitStatements(`${migration0001}\n${migration0002}\n${migration0003}\n${migration0004}\n${migration0005}\n${migration0006}\n${migration0007}\n${migration0009}`)) {
+  for (const sql of splitStatements(`${migration0001}\n${migration0002}\n${migration0003}\n${migration0004}\n${migration0005}\n${migration0006}\n${migration0007}\n${migration0009}\n${migration0010}`)) {
     await env.DB.prepare(sql).run();
   }
 }

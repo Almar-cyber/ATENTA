@@ -11,7 +11,23 @@
 // D1 é suporte nativo desde a 1.5 — passa-se o binding direto, sem adaptador. Ressalva que vale
 // lembrar: D1 não tem transação interativa, então a lib usa batch() para atomicidade.
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import type { Env } from './env.js';
+
+/**
+ * Este e-mail pode criar conta agora?
+ *
+ * Com SIGNUP_MODE=open, sim — é o estado final, depois do App Review. Enquanto isso o padrão é
+ * fechado: só quem está em `signup_invites`. O padrão é o modo restritivo de propósito — esquecer
+ * de configurar deve travar o cadastro, não escancará-lo.
+ */
+async function canSignUp(email: string, env: Env): Promise<boolean> {
+  if (env.SIGNUP_MODE === 'open') return true;
+  const row = await env.DB.prepare(`select email from signup_invites where email = ?`)
+    .bind(email.toLowerCase())
+    .first<{ email: string }>();
+  return !!row;
+}
 
 /**
  * Instância do better-auth para ESTA requisição.
@@ -43,6 +59,33 @@ export function createAuth(request: Request, env: Env) {
     session: {
       expiresIn: 60 * 60 * 24 * 30, // 30 dias
       updateAge: 60 * 60 * 24, // renova a sessão no máximo 1x/dia
+    },
+
+    databaseHooks: {
+      user: {
+        create: {
+          // O portão do convite mora AQUI, e não numa checagem antes de chamar o handler, porque
+          // este é o único ponto por onde toda criação de usuário passa — hoje e-mail+senha,
+          // amanhã login social. Um `if` na rota de sign-up seria contornável pela próxima rota
+          // que criasse conta.
+          before: async (user) => {
+            if (await canSignUp(user.email, env)) return;
+            throw new APIError('FORBIDDEN', {
+              message:
+                'O cadastro está fechado durante os testes. Se você recebeu um convite, use o mesmo e-mail que foi convidado.',
+            });
+          },
+          // Marca o convite como usado só DEPOIS da conta existir: se a criação falhar no meio, o
+          // convite continua valendo em vez de queimar sem ter virado conta.
+          after: async (user) => {
+            await env.DB.prepare(
+              `update signup_invites set used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') where email = ? and used_at is null`
+            )
+              .bind(user.email.toLowerCase())
+              .run();
+          },
+        },
+      },
     },
 
     advanced: {

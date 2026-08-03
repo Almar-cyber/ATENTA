@@ -13,6 +13,12 @@ export interface Env {
   // uploads fine, it just isn't usable by platforms that require a fetchable URL — see README).
   MEDIA_PUBLIC_BASE_URL?: string;
 
+  // Quem pode criar conta. Ausente ou qualquer outro valor = fechado: só e-mails na tabela
+  // signup_invites (fase de testadores). 'open' libera pra qualquer um — é a virada de chave
+  // depois do App Review. O padrão restritivo é de propósito: esquecer de configurar deve travar
+  // o cadastro, não escancarar.
+  SIGNUP_MODE?: 'open' | string;
+
   // Wrangler secrets (`wrangler secret put NAME`) — never committed, never in .env.
   TOKEN_ENCRYPTION_KEY: string;
 

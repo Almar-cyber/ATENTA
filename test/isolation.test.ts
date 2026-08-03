@@ -29,6 +29,9 @@ async function call(request: Request): Promise<Response> {
  * autenticação inteira sai do ar não estava provando isolação. Sessão real fecha esse buraco.
  */
 async function register(email: string): Promise<{ id: string; cookie: string }> {
+  // Os testes rodam com o cadastro FECHADO, que é o padrão de produção — então cada conta precisa
+  // do convite antes. Rodar a suíte em modo aberto esconderia uma quebra no portão de convite.
+  await env.DB.prepare(`insert into signup_invites (email) values (?)`).bind(email.toLowerCase()).run();
   const res = await call(
     new Request(`${ORIGIN}/api/auth/sign-up/email`, {
       method: 'POST',
