@@ -15,6 +15,10 @@ import { SINGLE_OPERATOR } from './lib/identity.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
 
+// Arquivos que a landing pública usa. Lista explícita em vez de liberar tudo em /assets: o resto
+// do bundle é do painel, que continua atrás do gate.
+const LANDING_PUBLIC_ASSETS = new Set(['/hero.jpg', '/atenta-wordmark.png', '/favicon-32.png', '/apple-touch-icon.png', '/atenta-icon.svg']);
+
 const CLAIM_BATCH_SIZE = 5;
 const PROCESSING_RECHECK_BATCH_SIZE = 10;
 const PUBLISHING_STALE_MINUTES = 30;
@@ -57,6 +61,12 @@ export default {
     // reprovava sem ver o que o app faz. O painel em si mora em /app pra baixo.
     if (url.pathname === '/' && !url.searchParams.has('connected') && !url.searchParams.has('connect_error')) {
       return new Response(await renderLandingPage(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+
+    // Assets que a landing referencia precisam ser públicos junto com ela — senão a página abre
+    // sem a imagem e o revisor vê um quadro quebrado (o gate abaixo devolvia 401 no /hero.jpg).
+    if (LANDING_PUBLIC_ASSETS.has(url.pathname)) {
+      return env.ASSETS.fetch(request);
     }
 
     const authError = checkDashboardAuth(request, env);

@@ -13,6 +13,7 @@
 // CDN. O wordmark vem do binding ASSETS como data: URI (bypassa o gate, é chamada de binding); a
 // foto do hero é servida pelo mesmo binding como arquivo normal.
 import type { Env } from './lib/env.js';
+import { PLATFORM_GLYPHS } from './lib/platform-glyphs.js';
 
 // Kreon/Francois One (do rascunho) não estão no projeto e exigiriam Google Fonts — o que quebraria
 // a autocontenção. Stack serifada nativa aproxima a intenção da headline sem requisição externa.
@@ -71,8 +72,13 @@ const STYLE = `
   }
   .card h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
   .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
-  .nets { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
-  .nets li { border: 3px solid var(--brand); border-radius: 999px; padding: 0.35em 1em; font-weight: 600; }
+  .nets { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
+  .nets li {
+    display: flex; align-items: center; gap: 0.55rem;
+    background: #fff; border: 3px solid var(--ink); border-radius: 999px;
+    padding: 0.5em 1.1em 0.5em 0.75em; font-weight: 600;
+  }
+  .nets svg { width: 22px; height: 22px; flex: 0 0 22px; }
   ol { padding-left: 1.3rem; margin: 0; }
   ol li { margin-bottom: 0.6rem; }
   .band { background: var(--primary); }
@@ -152,7 +158,10 @@ export async function renderLandingPage(env: Env): Promise<string> {
   <div class="wrap">
     <h2>Redes disponíveis</h2>
     <ul class="nets">
-      <li>Instagram</li><li>Facebook</li><li>YouTube</li><li>LinkedIn</li><li>Pinterest</li><li>TikTok</li>
+      ${PLATFORM_GLYPHS.map(
+        (n) =>
+          `<li><svg viewBox="0 0 24 24" fill="${n.color}" aria-hidden="true"><path d="${n.path}"/></svg>${n.label}</li>`
+      ).join('')}
     </ul>
   </div>
 </section>
