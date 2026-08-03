@@ -72,29 +72,17 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
   }
 
   return (
-    <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-background px-4 py-10">
-      {motionOk && (
-        <video
-          className="absolute inset-0 z-0 h-full w-full object-cover"
-          src={BACKGROUND_VIDEO}
-          autoPlay
-          loop
-          muted
-          playsInline
-          aria-hidden
-        />
-      )}
-      {/* Véu por cima do vídeo. O card é opaco e se defenderia sozinho, mas o wordmark, o texto
-          legal do rodapé e os toasts de erro ficam DIRETO sobre o vídeo — sem isto, a legibilidade
-          deles passa a depender do quadro que estiver passando. */}
-      <div aria-hidden className="absolute inset-0 z-0 bg-background/45 backdrop-blur-[3px]" />
-
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25, ease: [0.2, 0.7, 0.3, 1] }}
-        className="relative z-10 w-full max-w-sm"
-      >
+    // Split: formulário à esquerda, vídeo à direita. Separar os dois é o que permite o vídeo ficar
+    // LIMPO — enquanto ele era fundo do formulário, todo texto por cima dependia de um véu, e o véu
+    // era o que o transformava em textura borrada. Cada lado agora resolve o seu.
+    <div className="flex min-h-dvh">
+      <div className="flex w-full flex-col items-center justify-center bg-background px-4 py-10 lg:w-1/2">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: [0.2, 0.7, 0.3, 1] }}
+          className="w-full max-w-sm"
+        >
         <img src="/atenta-wordmark.png" alt="ATENTA!" className="mx-auto mb-8 h-11 w-auto" />
 
         <form
@@ -181,7 +169,24 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
           </a>
           .
         </p>
-      </motion.div>
+        </motion.div>
+      </div>
+
+      {/* Vídeo, sem véu nenhum. Some abaixo de lg: numa tela estreita não existe "lado direito", e
+          espremê-lo numa faixa de 40% de altura só empurraria o formulário pra fora da dobra. */}
+      {motionOk && (
+        <div className="relative hidden overflow-hidden bg-secondary lg:block lg:w-1/2">
+          <video
+            className="absolute inset-0 h-full w-full object-cover"
+            src={BACKGROUND_VIDEO}
+            autoPlay
+            loop
+            muted
+            playsInline
+            aria-hidden
+          />
+        </div>
+      )}
     </div>
   );
 }
