@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, CheckCircle2, Link2, Plus } from 'lucide-react';
+import { BarChart3, CheckCircle2, Link2, LogOut, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
@@ -9,6 +9,14 @@ import type { Post } from '@/lib/types';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { PostComposer } from '@/components/PostComposer';
 import { PlatformAvatar } from '@/components/PlatformAvatar';
 import { AlertBanner } from '@/components/AlertBanner';
@@ -20,16 +28,22 @@ import { InsightsView } from '@/components/InsightsView';
 import { ConnectionsView } from '@/components/ConnectionsView';
 import { FilterMenu } from '@/components/FilterMenu';
 import { PostDialog } from '@/components/PostDialog';
+import { AuthView } from '@/components/AuthView';
+import { useSession, signOut, type SessionUser } from '@/lib/auth';
 import type { DialogSelection } from '@/components/PostDialog';
 
 function Header({
   onNewPost,
   onOpenConnections,
   onOpenInsights,
+  user,
+  onSignedOut,
 }: {
   onNewPost: () => void;
   onOpenConnections: () => void;
   onOpenInsights: () => void;
+  user: SessionUser;
+  onSignedOut: () => void;
 }) {
   const { accounts } = useScheduler();
   return (
@@ -76,6 +90,40 @@ function Header({
           <Plus className="size-4" />
           Novo post
         </Button>
+        {/* Num app multi-conta, saber EM QUAL conta você está deixou de ser detalhe: o mesmo
+            navegador pode ter entrado com outro e-mail. Por isso o e-mail aparece no menu, e não
+            só um botão "Sair" solto. O menu também afasta o Sair do CTA primário ao lado. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="lg" variant="outline" aria-label="Sua conta" className="px-3">
+              <span className="grid size-5 place-items-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
+                {(user.name || user.email).trim().charAt(0).toUpperCase()}
+              </span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuLabel className="font-normal">
+              <span className="block text-xs text-muted-foreground">Conectado como</span>
+              <span className="block truncate font-medium">{user.email}</span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={async () => {
+                try {
+                  await signOut();
+                } finally {
+                  // Mesmo se o servidor recusar, revalidar é o certo: ou a sessão caiu (e a UI
+                  // acompanha), ou continua válida (e a pessoa vê que não saiu, em vez de olhar
+                  // uma tela de login que ainda tem sessão viva por baixo).
+                  onSignedOut();
+                }
+              }}
+            >
+              <LogOut className="size-4" />
+              Sair
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
@@ -117,7 +165,7 @@ function accountFilter(posts: Post[], accountId: string): Post[] {
   return out;
 }
 
-function Dashboard() {
+function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () => void }) {
   const { posts, accounts, filters, setFilters, reload } = useScheduler();
   const [view, setView] = useState<View>('list');
   const [screen, setScreen] = useState<'scheduler' | 'connections' | 'insights'>('scheduler');
@@ -163,6 +211,8 @@ function Dashboard() {
         onNewPost={openComposer}
         onOpenConnections={() => setScreen('connections')}
         onOpenInsights={() => setScreen('insights')}
+        user={user}
+        onSignedOut={onSignedOut}
       />
       <AlertBanner
         onSeeFailures={() => {
@@ -254,9 +304,20 @@ function Dashboard() {
 }
 
 export default function App() {
+  const { session, refresh } = useSession();
+
+  // `loading` renderiza vazio de propósito: mostrar a tela de entrar enquanto a sessão é conferida
+  // faria quem já está logado ver um pisca de login a cada refresh. Fundo da marca em vez de
+  // branco puro pra troca não dar flash.
+  if (session.status === 'loading') return <div className="min-h-dvh bg-background" />;
+
+  if (session.status === 'out') return <AuthView onAuthenticated={() => void refresh()} />;
+
+  // O SchedulerProvider só monta DEPOIS de haver sessão: ele dispara o carregamento de contas e
+  // posts no mount, e sem sessão essas chamadas voltariam vazias e ficariam em cache no estado.
   return (
     <SchedulerProvider>
-      <Dashboard />
+      <Dashboard user={session.user} onSignedOut={() => void refresh()} />
     </SchedulerProvider>
   );
 }
