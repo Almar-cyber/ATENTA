@@ -15,6 +15,19 @@ import { Label } from '@/components/ui/label';
 
 type Mode = 'in' | 'up' | 'forgot';
 
+// Fundo em vídeo desta tela.
+//
+// `muted` e `playsInline` não são enfeite — são o que TORNA o autoplay possível: navegador nenhum
+// inicia vídeo com som sozinho, e no iOS, sem playsInline, o vídeo sequestra a tela cheia em vez de
+// ficar no fundo. `loop` fecha a emenda; `aria-hidden` tira do leitor de tela, porque é decoração e
+// anunciá-lo só atrapalharia quem está tentando entrar.
+//
+// O arquivo está numa CDN de terceiro que não controlamos: se sumir de lá, o fundo simplesmente não
+// pinta (o container já tem a cor de fundo por baixo) e a tela continua utilizável. Valeria hospedar
+// no nosso R2 se ele virar permanente.
+const BACKGROUND_VIDEO =
+  'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260314_131748_f2ca2a28-fed7-44c8-b9a9-bd9acdd5ec31.mp4';
+
 const COPY: Record<Mode, { title: string; cta: string; alt: Mode; altLabel: string }> = {
   in: { title: 'Entrar', cta: 'Entrar', alt: 'up', altLabel: 'Não tenho conta' },
   up: { title: 'Criar conta', cta: 'Criar conta', alt: 'in', altLabel: 'Já tenho conta' },
@@ -27,6 +40,9 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  // Lido uma vez, no primeiro render: quem pediu menos movimento no sistema não recebe um vídeo em
+  // laço na tela inteira. Sem o vídeo a tela fica no fundo sólido de sempre, sem buraco nenhum.
+  const [motionOk] = useState(() => !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
   const copy = COPY[mode];
 
@@ -56,12 +72,28 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center bg-background px-4 py-10">
+    <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-background px-4 py-10">
+      {motionOk && (
+        <video
+          className="absolute inset-0 z-0 h-full w-full object-cover"
+          src={BACKGROUND_VIDEO}
+          autoPlay
+          loop
+          muted
+          playsInline
+          aria-hidden
+        />
+      )}
+      {/* Véu por cima do vídeo. O card é opaco e se defenderia sozinho, mas o wordmark, o texto
+          legal do rodapé e os toasts de erro ficam DIRETO sobre o vídeo — sem isto, a legibilidade
+          deles passa a depender do quadro que estiver passando. */}
+      <div aria-hidden className="absolute inset-0 z-0 bg-background/45 backdrop-blur-[3px]" />
+
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: [0.2, 0.7, 0.3, 1] }}
-        className="w-full max-w-sm"
+        className="relative z-10 w-full max-w-sm"
       >
         <img src="/atenta-wordmark.png" alt="ATENTA!" className="mx-auto mb-8 h-11 w-auto" />
 
