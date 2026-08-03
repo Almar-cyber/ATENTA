@@ -45,10 +45,24 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
       u.searchParams.set('state', state);
       u.searchParams.set(
         'scope',
-        // instagram_manage_insights + read_insights são pra Fase A de analytics (métricas de post):
-        // sem eles, os fetchers de IG/FB voltam null. Só tem efeito ao (re)conectar — contas já
-        // conectadas antes precisam passar pelo consentimento de novo pra ganhar o escopo.
-        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,read_insights,business_management'
+        // Cada escopo aqui precisa ter uma chamada que o justifique — o App Review da Meta reprova
+        // app que pede permissão sem demonstrar uso, e cada uma some num caso de uso a defender:
+        //   pages_show_list          → GET /me/accounts (listar as Páginas pra você escolher)
+        //   pages_read_engagement    → ler nome/id da Página conectada
+        //   pages_manage_posts       → POST /{page}/photos e /{page}/feed (publicar no Facebook)
+        //   instagram_basic          → achar o instagram_business_account da Página e o @username
+        //   instagram_content_publish→ POST /{ig}/media e /{ig}/media_publish
+        //   instagram_manage_insights→ insights do post + followers_count
+        //   read_insights            → post_impressions da Página
+        //
+        // business_management SAIU: era pedido desde o commit da tela de Conexões, mas nenhuma
+        // chamada nossa toca /businesses. Permissão de alto escrutínio sem uso demonstrável atrasa
+        // ou derruba a análise. Se um dia /me/accounts deixar de enxergar Página de Business
+        // Manager, volta — com a chamada que a justifica junto.
+        //
+        // Escopo novo só tem efeito ao (re)conectar: conta já conectada precisa passar pelo
+        // consentimento de novo pra ganhá-lo.
+        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,read_insights'
       );
       return u.toString();
     }
