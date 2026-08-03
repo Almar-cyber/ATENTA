@@ -75,8 +75,8 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
     // Split: formulário à esquerda, vídeo à direita. Separar os dois é o que permite o vídeo ficar
     // LIMPO — enquanto ele era fundo do formulário, todo texto por cima dependia de um véu, e o véu
     // era o que o transformava em textura borrada. Cada lado agora resolve o seu.
-    <div className="flex min-h-dvh">
-      <div className="flex w-full flex-col items-center justify-center bg-background px-4 py-10 lg:w-1/2">
+    <div className="flex min-h-dvh bg-secondary">
+      <div className="flex w-full flex-col items-center justify-center px-4 py-10 lg:w-1/2">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -172,19 +172,42 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
         </motion.div>
       </div>
 
-      {/* Vídeo, sem véu nenhum. Some abaixo de lg: numa tela estreita não existe "lado direito", e
-          espremê-lo numa faixa de 40% de altura só empurraria o formulário pra fora da dobra. */}
+      {/* Vídeo. Some abaixo de lg: numa tela estreita não existe "lado direito", e espremê-lo numa
+          faixa de 40% de altura só empurraria o formulário pra fora da dobra.
+
+          COSTURA COM O LADO ESQUERDO — antes o vídeo sangrava até a borda, sem moldura nenhuma, e
+          os dois lados liam como produtos diferentes colados. Três coisas os aproximam:
+
+          1. MESMA MOLDURA. O painel recebe a receita brutalista do card do formulário (borda roxa
+             de 2px, canto arredondado, sombra sólida deslocada). Deixa de ser papel de parede e
+             passa a ser uma peça do mesmo sistema, ao lado de outra.
+          2. MESMA PALETA. Uma camada roxa em multiply puxa os azuis da cena pro --brand, e a
+             legenda sai no amarelo --primary, que é a cor do botão logo ao lado. O amarelo já
+             existia no vídeo (o brilho da tela, as flores) — só está sendo reconhecido.
+          3. MESMO ASSUNTO. Uma frase do produto sobre o vídeo, em vez de imagem muda: o que estava
+             decorando passa a dizer algo, como o resto da tela. */}
       {motionOk && (
-        <div className="relative hidden overflow-hidden bg-secondary lg:block lg:w-1/2">
-          <video
-            className="absolute inset-0 h-full w-full object-cover"
-            src={BACKGROUND_VIDEO}
-            autoPlay
-            loop
-            muted
-            playsInline
-            aria-hidden
-          />
+        <div className="hidden p-5 lg:block lg:w-1/2">
+          <div className="relative h-full overflow-hidden rounded-2xl border-2 border-brand shadow-[6px_6px_0_0_var(--brand)]">
+            <video
+              className="absolute inset-0 h-full w-full object-cover"
+              src={BACKGROUND_VIDEO}
+              autoPlay
+              loop
+              muted
+              playsInline
+              aria-hidden
+            />
+            <div aria-hidden className="absolute inset-0 bg-brand/30 mix-blend-multiply" />
+            {/* Degradê só no pé, onde a legenda mora — véu na área inteira foi o que apagou o vídeo
+                na primeira versão. */}
+            <div aria-hidden className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-brand/80 to-transparent" />
+            <p className="absolute inset-x-0 bottom-0 p-7 text-2xl font-bold leading-tight text-primary">
+              Planeje o feed inteiro
+              <br />
+              antes de publicar a primeira peça.
+            </p>
+          </div>
         </div>
       )}
     </div>
