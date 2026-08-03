@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { requestPasswordReset, signIn, signUp } from '@/lib/auth';
@@ -40,9 +40,42 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  // Lido uma vez, no primeiro render: quem pediu menos movimento no sistema não recebe um vídeo em
-  // laço na tela inteira. Sem o vídeo a tela fica no fundo sólido de sempre, sem buraco nenhum.
+  // Quem pediu menos movimento no sistema recebe o vídeo PARADO no primeiro quadro, não a ausência
+  // dele: o painel, a moldura e a legenda continuam existindo, e só o movimento sai. Esconder o
+  // painel inteiro abriria um buraco na composição pra quem só queria menos animação.
   const [motionOk] = useState(() => !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // O atributo `autoplay` sozinho não garante reprodução. Ele é um PEDIDO, e o navegador recusa em
+  // situações comuns: Safari com "Nunca reproduzir automaticamente" no site, Modo de Baixo Consumo
+  // (iOS e macOS), economia de bateria do Chrome, e aba aberta em segundo plano. Nesses casos o
+  // vídeo fica congelado no primeiro quadro sem erro nenhum no console — parece que não carregou.
+  //
+  // Daí este efeito: pede play() na montagem e, se for recusado, tenta de novo na primeira
+  // interação da pessoa (que é o gesto que libera a política de autoplay) e sempre que a aba volta
+  // a ficar visível.
+  useEffect(() => {
+    if (!motionOk) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const play = () => void video.play().catch(() => {});
+    play();
+
+    const onVisible = () => {
+      if (!document.hidden) play();
+    };
+    // `once` não serve aqui: se a primeira tentativa acontecer com a aba oculta, ela é recusada de
+    // novo e não haveria segunda chance.
+    document.addEventListener('pointerdown', play);
+    document.addEventListener('keydown', play);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      document.removeEventListener('pointerdown', play);
+      document.removeEventListener('keydown', play);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [motionOk]);
 
   const copy = COPY[mode];
 
@@ -169,7 +202,7 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
           </a>
           .
         </p>
-        </motion.div>
+      </motion.div>
       </div>
 
       {/* Vídeo. Some abaixo de lg: numa tela estreita não existe "lado direito", e espremê-lo numa
@@ -186,30 +219,34 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
              existia no vídeo (o brilho da tela, as flores) — só está sendo reconhecido.
           3. MESMO ASSUNTO. Uma frase do produto sobre o vídeo, em vez de imagem muda: o que estava
              decorando passa a dizer algo, como o resto da tela. */}
-      {motionOk && (
-        <div className="hidden p-5 lg:block lg:w-1/2">
-          <div className="relative h-full overflow-hidden rounded-2xl border-2 border-brand shadow-[6px_6px_0_0_var(--brand)]">
-            <video
-              className="absolute inset-0 h-full w-full object-cover"
-              src={BACKGROUND_VIDEO}
-              autoPlay
-              loop
-              muted
-              playsInline
-              aria-hidden
-            />
-            <div aria-hidden className="absolute inset-0 bg-brand/30 mix-blend-multiply" />
-            {/* Degradê só no pé, onde a legenda mora — véu na área inteira foi o que apagou o vídeo
-                na primeira versão. */}
-            <div aria-hidden className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-brand/80 to-transparent" />
-            <p className="absolute inset-x-0 bottom-0 p-7 text-2xl font-bold leading-tight text-primary">
+      <div className="hidden p-5 lg:block lg:w-1/2">
+        <div className="relative h-full overflow-hidden rounded-2xl border-2 border-brand shadow-[6px_6px_0_0_var(--brand)]">
+          <video
+            ref={videoRef}
+            className="absolute inset-0 h-full w-full object-cover"
+            src={BACKGROUND_VIDEO}
+            // `muted` e `playsInline` são pré-requisito do autoplay, não estilo: navegador nenhum
+            // inicia vídeo com som sozinho, e no iOS, sem playsInline, ele abre em tela cheia.
+            autoPlay={motionOk}
+            loop
+            muted
+            playsInline
+            // O arquivo tem 14 MB. Sem isto o navegador busca só os metadados e o painel fica
+            // parado esperando, o que se confunde com "não está tocando".
+            preload="auto"
+            aria-hidden
+          />
+          <div aria-hidden className="absolute inset-0 bg-brand/30 mix-blend-multiply" />
+          {/* Degradê só no pé, onde a legenda mora — véu na área inteira foi o que apagou o vídeo
+              na primeira versão. */}
+          <div aria-hidden className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-brand/80 to-transparent" />
+          <p className="absolute inset-x-0 bottom-0 p-7 text-2xl font-bold leading-tight text-primary">
               Planeje o feed inteiro
               <br />
               antes de publicar a primeira peça.
-            </p>
-          </div>
+          </p>
         </div>
-      )}
+      </div>
     </div>
   );
 }
