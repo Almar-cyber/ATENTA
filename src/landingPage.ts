@@ -164,11 +164,21 @@ const STYLE = `
   .feat { display: grid; gap: 1.1rem; grid-template-columns: 1fr; }
   @media (min-width: 760px) { .feat { grid-template-columns: 1fr 1fr; gap: 1.4rem; } }
   .card { border: 3px solid var(--brand); box-shadow: 6px 6px 0 0 var(--brand); border-radius: 20px; padding: 1.7rem; background: #fff; }
+  /* Selo BRANCO, não amarelo: o olho e a lupa já têm amarelo dentro (íris e lente), e sobre fundo
+     amarelo eles sumiriam. Com os quatro no mesmo quadro branco, o amarelo vira o miolo do desenho
+     em vez do fundo — e os dois pictogramas de traço não ficam com peso visual diferente dos dois
+     desenhos de marca, que era o desequilíbrio de ter só metade com selo. */
   .ico {
-    width: 44px; height: 44px; border-radius: 12px; background: var(--primary); border: 2px solid var(--brand);
+    width: 52px; height: 52px; border-radius: 14px; background: #fff; border: 2.5px solid var(--brand);
     display: grid; place-items: center; margin-bottom: 1rem; color: var(--brand);
   }
-  .ico svg { width: 22px; height: 22px; }
+  .ico svg { width: 24px; height: 24px; }
+  .ico .eye { width: 36px; height: 24px; }
+  .ico .lens { width: 30px; height: 30px; }
+
+  /* Olho grande da seção de recursos: é o argumento da marca ("repare antes de publicar") dito em
+     desenho, no lugar onde o texto faz esse mesmo argumento. */
+  .eyemark { width: 84px; height: 56px; margin-bottom: 0.9rem; }
   .card h3 { margin: 0 0 0.7rem; font-size: 1.15rem; }
   .card ul { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 0.95rem; }
   .card li { margin-bottom: 0.5rem; padding-left: 1.35rem; position: relative; }
@@ -187,15 +197,19 @@ const STYLE = `
   }
   .steps li {
     counter-increment: s; background: #fff; border: 3px solid var(--brand); border-radius: 18px;
-    padding: 1.4rem 1.4rem 1.4rem 1.4rem;
+    padding: 1.4rem; position: relative;
   }
+  /* O número virou selo de canto: com o doodle no card, o círculo grande no topo empurrava o
+     texto pra baixo e disputava a atenção com o desenho. */
   .steps li::before {
-    content: counter(s); display: grid; place-items: center; width: 38px; height: 38px;
-    border-radius: 50%; border: 3px solid var(--brand); font-family: ${SERIF}; font-size: 1.2rem;
-    margin-bottom: 0.85rem; color: var(--brand);
+    content: counter(s); position: absolute; top: 0.9rem; right: 0.9rem;
+    display: grid; place-items: center; width: 30px; height: 30px;
+    border-radius: 50%; border: 2.5px solid var(--brand); font-family: ${SERIF}; font-size: 1rem;
+    color: var(--brand); background: #fff;
   }
   .steps b { display: block; margin-bottom: 0.25rem; }
   .steps span { color: var(--muted); font-size: 0.95rem; }
+  .steps .doodle { width: 100%; height: 118px; object-fit: contain; margin-bottom: 0.9rem; }
 
   /* ---------- Bloco de dados ---------- */
   .privacy { border: 3px solid var(--brand); border-radius: 20px; padding: 1.8rem; display: grid; gap: 1.5rem; grid-template-columns: 1fr; }
@@ -259,6 +273,29 @@ const STYLE = `
     @keyframes riseShot { from { opacity: 0; transform: translateY(24px) scale(.97); } to { opacity: 1; transform: none; } }
     .hero [data-in] { animation: rise .6s var(--ease) both; animation-delay: var(--d, 0ms); }
     .hero .shot { animation: riseShot .75s var(--ease) both; animation-delay: 260ms; }
+
+    /* O olho olha em volta. É o único movimento em laço da página, e existe porque é o nome do
+       produto virando gesto — não decoração. Ciclo longo (9s) e pausa longa em cada posição:
+       movimento de fundo que se percebe de canto de olho não pode competir com a leitura. */
+    @keyframes look {
+      0%, 20%   { transform: translateX(0) }
+      26%, 44%  { transform: translateX(4.5px) }
+      50%, 68%  { transform: translateX(-4.5px) }
+      74%, 100% { transform: translateX(0) }
+    }
+    .eye .iris { animation: look 9s var(--ease) infinite; }
+
+    /* A lupa varre. Mesmo raciocínio: gesto pequeno, ciclo longo. */
+    @keyframes sweep {
+      0%, 100% { transform: translate(0, 0) }
+      35%      { transform: translate(3px, -2.5px) }
+      70%      { transform: translate(-2.5px, 2px) }
+    }
+    .lens .scan { animation: sweep 7s ease-in-out infinite; }
+
+    /* Doodle boiando de leve no card. 5px em 6s: some se você olhar direto, dá vida se não olhar. */
+    @keyframes bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-5px) } }
+    .steps .doodle { animation: bob 6s ease-in-out infinite; animation-delay: var(--d, 0ms); }
   }
 `;
 
@@ -322,13 +359,41 @@ async function logoDataUri(env: Env): Promise<string | null> {
 // Ícones de traço (24×24, mesma linguagem dos Lucide do painel), inline pra não puxar biblioteca.
 const ICONS: Record<string, string> = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
-  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   send: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
-  chart: '<path d="M3 3v18h18"/><path d="m7 14 3.5-3.5L14 14l5-5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
 };
 
 const icon = (name: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+
+// ---- Motivos da marca: o olho e a lupa ----
+//
+// O nome é ATENTA! — o produto é sobre REPARAR nas coisas (ver o post antes de sair, ver o feed
+// antes de publicar, ver o que funcionou). Um olho e uma lupa dizem isso sem legenda, e são a
+// única ilustração aqui desenhada pra marca em vez de emprestada.
+//
+// O olho já foi tentado dentro do ponto de exclamação do logo e saiu de lá por ilegibilidade no
+// tamanho pequeno. Aqui ele tem espaço — é ilustração, não letra.
+//
+// Inline (não <img>) porque a íris se move por CSS, e `<img>` não roda folha de estilo nossa.
+const eyeSvg = (cls = '') => `
+  <svg class="eye ${cls}" viewBox="0 0 48 32" fill="none" aria-hidden="true">
+    <path d="M2 16Q24 0 46 16" stroke="var(--brand)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M2 16Q24 32 46 16" stroke="var(--brand)" stroke-width="3" stroke-linecap="round"/>
+    <g class="iris">
+      <circle cx="24" cy="16" r="8.5" fill="var(--primary)" stroke="var(--brand)" stroke-width="3"/>
+      <circle cx="24" cy="16" r="3.4" fill="var(--brand)"/>
+    </g>
+    <path d="M24 3.2V0M36.5 6.4 38 3.7M11.5 6.4 10 3.7" stroke="var(--brand)" stroke-width="2.4" stroke-linecap="round"/>
+  </svg>`;
+
+const lensSvg = () => `
+  <svg class="lens" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+    <g class="scan">
+      <circle cx="20" cy="20" r="14.5" fill="var(--primary)" stroke="var(--brand)" stroke-width="3.4"/>
+      <path d="M13.5 14.5A9 9 0 0 1 20.5 10.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+    </g>
+    <path d="m30.5 30.5 13 13" stroke="var(--brand)" stroke-width="5" stroke-linecap="round"/>
+  </svg>`;
 
 // Promessa + 3 bullets de RESULTADO. O padrão do mercado é nunca listar recurso técnico solto.
 const FEATURES = [
@@ -344,6 +409,7 @@ const FEATURES = [
   {
     ico: 'eye',
     h: 'Veja o post exato antes de sair',
+
     li: [
       'A pré-visualização usa a proporção real de cada formato',
       'Avisa quando a legenda passa do limite da rede',
@@ -360,7 +426,7 @@ const FEATURES = [
     ],
   },
   {
-    ico: 'chart',
+    ico: 'lens',
     h: 'Descubra o que funcionou',
     li: [
       'Curtidas, alcance, comentários e seguidores por post',
@@ -370,12 +436,15 @@ const FEATURES = [
   },
 ];
 
+// Doodles do Open Doodles (CC0), recoloridos pro par roxo/amarelo — ver web/doodles-license.md.
+// Cada um foi escolhido pelo gesto do passo: abrir a caixa (começar), sentar e montar, olhar a tela,
+// flutuar (sai sozinha) e comemorar.
 const STEPS = [
-  ['Conecte suas contas.', 'Você autoriza pela tela de consentimento da própria rede social. Nunca pedimos a sua senha.'],
-  ['Monte o post.', 'Legenda, imagens ou vídeo, o formato (post, reel, story) e a data.'],
-  ['Confira como vai ficar.', 'A pré-visualização mostra a peça na proporção real; a grade mostra o feed inteiro.'],
-  ['A publicação sai sozinha.', 'No horário marcado, o ATENTA! publica nas contas escolhidas.'],
-  ['Acompanhe o resultado.', 'As métricas de cada post chegam automaticamente no painel.'],
+  ['unboxing', 'Conecte suas contas.', 'Você autoriza pela tela de consentimento da própria rede social. Nunca pedimos a sua senha.'],
+  ['sitting-reading', 'Monte o post.', 'Legenda, imagens ou vídeo, o formato (post, reel, story) e a data.'],
+  ['selfie', 'Confira como vai ficar.', 'A pré-visualização mostra a peça na proporção real; a grade mostra o feed inteiro.'],
+  ['levitate', 'A publicação sai sozinha.', 'No horário marcado, o ATENTA! publica nas contas escolhidas.'],
+  ['dancing', 'Acompanhe o resultado.', 'As métricas de cada post chegam automaticamente no painel.'],
 ];
 
 // As duas primeiras são as objeções específicas do mercado BR que a mLabs trata no FAQ dela:
@@ -391,7 +460,7 @@ const FAQ = [
   },
   {
     q: 'Preciso colocar cartão para começar?',
-    a: 'Não. O plano gratuito é permanente e não pede cartão: uma conta conectada e dez posts por mês, sem prazo para acabar.',
+    a: 'Não. O plano gratuito é permanente e não pede cartão: uma conta conectada e dez posts por mês, sem prazo para acabar. Você só paga se quiser passar desses limites — e aí escolhe, ninguém cobra sozinho.',
   },
   {
     q: 'Quais redes posso conectar?',
@@ -451,7 +520,10 @@ export async function renderLandingPage(env: Env): Promise<string> {
         <a class="cta" href="/app">Comece grátis ${ARROW}</a>
         <a class="cta ghost" href="#como-funciona">Ver como funciona</a>
       </div>
-      <p class="nocard" data-in style="--d:260ms">Não pedimos cartão. O plano gratuito não expira.</p>
+      <!-- O limite entra na frase de propósito. "Grátis, sem cartão" sozinho faz a pessoa entender
+           "tudo de graça", conectar a segunda conta e bater numa parede — promessa mal calibrada
+           numa página que passa por revisão de plataforma. Os números vêm de FREE_LIMITS. -->
+      <p class="nocard" data-in style="--d:260ms">Não pedimos cartão. O plano gratuito não expira: 1 conta conectada e 10 posts por mês.</p>
     </div>
     <div class="shot">
       <picture>
@@ -476,19 +548,20 @@ export async function renderLandingPage(env: Env): Promise<string> {
 
 <section class="sec" id="recursos">
   <div class="wrap">
-    <p class="eyebrow" data-reveal>Por que o ATENTA!</p>
+    <div data-reveal>${eyeSvg('eyemark')}</div>
+    <p class="eyebrow" data-reveal style="--d:40ms">Por que o ATENTA!</p>
     <h2 data-reveal style="--d:60ms">O feed é o seu cartão de visita</h2>
     <p class="lede" data-reveal style="--d:110ms">
       A maioria das ferramentas mostra <em>quando</em> o post sai. O ATENTA! mostra também
       <em>como ele vai ficar</em> — no formato certo de cada rede e no lugar certo do seu perfil.
     </p>
     <div class="feat">
-      ${FEATURES.map(
-        (f, i) =>
-          `<div class="card" data-reveal style="--d:${i * 80}ms"><div class="ico">${icon(f.ico)}</div><h3>${f.h}</h3><ul>${f.li
-            .map((x) => `<li>${x}</li>`)
-            .join('')}</ul></div>`
-      ).join('')}
+      ${FEATURES.map((f, i) => {
+        const glyph = f.ico === 'eye' ? eyeSvg() : f.ico === 'lens' ? lensSvg() : icon(f.ico);
+        return `<div class="card" data-reveal style="--d:${i * 80}ms"><div class="ico">${glyph}</div><h3>${f.h}</h3><ul>${f.li
+          .map((x) => `<li>${x}</li>`)
+          .join('')}</ul></div>`;
+      }).join('')}
     </div>
   </div>
 </section>
@@ -502,7 +575,8 @@ export async function renderLandingPage(env: Env): Promise<string> {
     </p>
     <ol class="steps">
       ${STEPS.map(
-        ([b, s], i) => `<li data-reveal style="--d:${i * 70}ms"><b>${b}</b><span>${s}</span></li>`
+        ([doodle, b, s], i) =>
+          `<li data-reveal style="--d:${i * 70}ms"><img class="doodle" src="/doodles/${doodle}.svg" alt="" loading="lazy" width="200" height="150"><b>${b}</b><span>${s}</span></li>`
       ).join('')}
     </ol>
   </div>
@@ -544,7 +618,7 @@ export async function renderLandingPage(env: Env): Promise<string> {
 <section class="band sec">
   <div class="wrap final">
     <h2 data-reveal>Comece a planejar seu feed hoje</h2>
-    <p class="lede" data-reveal style="--d:60ms">Grátis para sempre no plano inicial. Sem cartão, sem fidelidade.</p>
+    <p class="lede" data-reveal style="--d:60ms">O plano gratuito não expira: 1 conta conectada e 10 posts por mês, sem cartão e sem fidelidade. Cresceu, você assina.</p>
     <a class="cta" href="/app" data-reveal style="--d:120ms">Comece grátis ${ARROW}</a>
   </div>
 </section>

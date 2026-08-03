@@ -17,7 +17,20 @@ import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTa
 
 // Arquivos que a landing pública usa. Lista explícita em vez de liberar tudo em /assets: o resto
 // do bundle é do painel, que continua atrás do gate.
-const LANDING_PUBLIC_ASSETS = new Set(['/hero.webp', '/hero.png', '/atenta-wordmark.png', '/favicon-32.png', '/apple-touch-icon.png', '/atenta-icon.svg']);
+const LANDING_PUBLIC_ASSETS = new Set([
+  '/hero.webp',
+  '/hero.png',
+  '/atenta-wordmark.png',
+  '/favicon-32.png',
+  '/apple-touch-icon.png',
+  '/atenta-icon.svg',
+  // Doodles dos passos (Open Doodles, CC0, recoloridos — ver web/doodles-license.md).
+  '/doodles/unboxing.svg',
+  '/doodles/sitting-reading.svg',
+  '/doodles/selfie.svg',
+  '/doodles/levitate.svg',
+  '/doodles/dancing.svg',
+]);
 
 const CLAIM_BATCH_SIZE = 5;
 const PROCESSING_RECHECK_BATCH_SIZE = 10;
