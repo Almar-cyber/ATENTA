@@ -45,6 +45,11 @@ const STYLE = `
   :root {
     --brand: #52277F; --primary: #FCEC0E; --ink: #010101; --muted: #5b5560;
     --nav-h: 64px;
+    /* Largura da coluna da página. Vive num token porque a barra fixa, as seções e a calha
+       esquerda do hero PRECISAM sair do mesmo número — se divergirem, o logo, os títulos e o
+       texto do hero deixam de bater na mesma vertical. */
+    --page: 1280px;
+    --gutter: 1.5rem;
     /* Uma curva só pra tudo que entra: sai rápido, desacelera ao chegar. */
     --ease: cubic-bezier(.2,.7,.3,1);
   }
@@ -60,7 +65,7 @@ const STYLE = `
   section[id] { scroll-margin-top: calc(var(--nav-h) + 12px); }
   :focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; border-radius: 4px; }
 
-  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 1.5rem; }
+  .wrap { max-width: var(--page); margin: 0 auto; padding: 0 var(--gutter); }
   .sec { padding: 4.5rem 0; }
   .eyebrow {
     display: inline-block; margin: 0 0 0.6rem; font-size: 0.78rem; font-weight: 700;
@@ -78,7 +83,7 @@ const STYLE = `
     transition: background .25s ease, border-color .25s ease, box-shadow .25s ease;
   }
   .nav.stuck { background: #fff; border-bottom-color: var(--brand); box-shadow: 0 4px 14px -10px #000; }
-  .nav-in { max-width: 1060px; margin: 0 auto; padding: 0 1.5rem; height: 100%; display: flex; align-items: center; gap: 1.5rem; }
+  .nav-in { max-width: var(--page); margin: 0 auto; padding: 0 var(--gutter); height: 100%; display: flex; align-items: center; gap: 1.5rem; }
   .nav img, .nav .mark { height: 26px; width: auto; }
   .nav-links { display: none; margin-left: auto; gap: 1.5rem; }
   .nav-links a {
@@ -132,16 +137,33 @@ const STYLE = `
   }
   .sub { font-size: 1.06rem; margin: 0 0 1.75rem; max-width: 46ch; color: #2b2630; }
   .hero-actions { display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; }
-  /* No celular, botão de larguras diferentes empilhado fica desalinhado; os dois ocupam a linha. */
-  @media (max-width: 560px) { .hero-actions .cta { width: 100%; justify-content: center; } }
+  /* Quando os dois botões não cabem lado a lado, eles quebram e ficam desalinhados (larguras
+     diferentes). Duas faixas sofrem disso: o celular e o desktop estreito, onde a coluna de texto
+     já dividiu espaço com a imagem. Nas duas, cada um ocupa a linha inteira. */
+  @media (max-width: 560px), (min-width: 880px) and (max-width: 1100px) {
+    .hero-actions .cta { width: 100%; justify-content: center; }
+  }
   .nocard { margin: 1rem 0 0; font-size: 0.9rem; font-weight: 600; color: #3b3540; }
   /* A moldura dupla inclinada faz parte da imagem (exportada do Figma com alpha) — nada de borda
      ou rotação no CSS, que duplicaria o efeito. */
   .shot img { width: 100%; max-width: min(520px, 100%); margin-inline: auto; height: auto; }
+  /* No desktop a imagem SAI da coluna da página e avança até a borda direita. A moldura é recortada
+     com alpha, então encostar na borda lê como peça flutuando fora do quadro; dentro da coluna
+     centralizada ela ficava pequena e sobrava amarelo vazio dos dois lados.
+     O hero abre mão do .wrap, mas a calha esquerda é calculada a partir de --page — é isso que
+     mantém o texto do hero na mesma vertical do logo e dos títulos das seções.
+     A direita tem freio: passando de --bleed-max o sangramento para de crescer, senão em tela
+     ultralarga a imagem foge pro canto e a composição fica torta pra direita. */
   @media (min-width: 880px) {
-    .hero { padding: 4rem 0 5rem; }
-    .hero-in { grid-template-columns: 1.05fr 0.95fr; gap: 4rem; }
-    .shot img { max-width: 520px; }
+    .hero { padding: 2.5rem 0; --bleed-max: 1660px; }
+    .hero-in {
+      max-width: none;
+      padding-left: max(var(--gutter), calc((100vw - var(--page)) / 2 + var(--gutter)));
+      padding-right: max(0px, calc((100vw - var(--bleed-max)) / 2));
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      gap: 2.5rem;
+    }
+    .shot img { max-width: none; margin-inline: 0; }
   }
 
   /* ---------- Faixa de redes ---------- */
