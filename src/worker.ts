@@ -11,7 +11,7 @@ import { metricsFetchers } from './metrics/index.js';
 import { nextMetricsAt } from './metrics/cadence.js';
 import type { PostMetricsSnapshot } from './metrics/index.js';
 import { OAUTH_STATE_COOKIE, clearStateCookie, decodeState, getCookie } from './lib/oauth-state.js';
-import { SINGLE_OPERATOR, sessionUser } from './lib/identity.js';
+import { sessionUser } from './lib/identity.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
 
@@ -618,17 +618,33 @@ async function handleOAuthCallback(platform: OAuthCallbackPlatform, request: Req
 // Valida o `state`. Fluxo pelo navegador (endpoint /api/connect) manda `{ n: nonce }` e um cookie
 // oauth_state igual — comparamos os dois (CSRF). Fluxo antigo do CLI manda `{ displayName }` sem
 // cookie — aceito e usado como nome de fallback. Retorna o nome de fallback, ou uma Response de erro.
-function checkState(request: Request, url: URL): { fallbackName?: string; owner?: string } | Response {
+function checkState(request: Request, url: URL): { owner: string } | Response {
   const parsed = decodeState(url.searchParams.get('state'));
   if (parsed.n) {
     const cookie = getCookie(request, OAUTH_STATE_COOKIE);
     if (!cookie || cookie !== parsed.n) return new Response('state inválido (csrf)', { status: 400 });
     // `o` é o dono que iniciou a conexão (gravado por /api/connect). O callback vem da plataforma,
     // sem sessão nossa — é o state que diz de quem é a conta que está sendo conectada.
+    //
+    // SEM DONO A CONEXÃO É RECUSADA, e isso não é rigor à toa: a conta seria gravada com token
+    // válido e ninguém conseguiria vê-la nunca, porque toda consulta filtra por owner_id. O poller
+    // continuaria publicando por um dono fantasma. Falhar aqui, com a plataforma ainda na tela, é
+    // muito melhor que criar esse buraco em silêncio.
+    if (!parsed.o) {
+      return new Response(
+        'conexão sem dono: recomece pelo botão Conectar dentro do app, com a sessão aberta.',
+        { status: 400 }
+      );
+    }
     return { owner: parsed.o };
   }
-  if (parsed.displayName) return { fallbackName: parsed.displayName };
-  return new Response('missing ?state=', { status: 400 });
+  // Fluxo antigo dos CLIs (`npm run <rede>-auth-url`): mandava só `{ displayName }`, de quando havia
+  // um operador só e todo dado nascia com owner_id='owner'. Com login de verdade não há como saber
+  // de quem seria a conta, então ele sai de cena em vez de virar o buraco descrito acima.
+  return new Response(
+    'este fluxo de linha de comando não vale mais: conecte pelo botão Conectar em Conexões, dentro do app.',
+    { status: 400 }
+  );
 }
 
 // Sucesso: volta pro SPA (`/?connected=<plataforma>`), que abre o modal de "conta conectada".
@@ -671,14 +687,14 @@ async function handleLinkedinCallback(code: string, request: Request, url: URL, 
   if (!userinfoRes.ok) return new Response(`linkedin userinfo failed: ${userinfoRes.status}`, { status: 502 });
   const userinfo = (await userinfoRes.json()) as { sub: string; name?: string };
   const memberUrn = `urn:li:person:${userinfo.sub}`;
-  const displayName = userinfo.name || checked.fallbackName || 'LinkedIn';
+  const displayName = userinfo.name || 'LinkedIn';
 
   const { ciphertext, iv } = await encryptJSON(
     { access_token: tokenJson.access_token, member_urn: memberUrn },
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'linkedin', displayName, memberUrn, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner ?? SINGLE_OPERATOR);
+  await upsertAccount(env, 'linkedin', displayName, memberUrn, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner);
 
   return connectedRedirect(url, 'linkedin');
 }
@@ -735,7 +751,7 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
   const ts = nowIso();
   for (const page of pagesJson.data) {
     const { ciphertext, iv } = await encryptJSON({ access_token: page.access_token }, env.TOKEN_ENCRYPTION_KEY);
-    await upsertAccount(env, 'facebook', page.name, page.id, ciphertext, iv, ts, {}, null, checked.owner ?? SINGLE_OPERATOR);
+    await upsertAccount(env, 'facebook', page.name, page.id, ciphertext, iv, ts, {}, null, checked.owner);
 
     const igRes = await fetchWithRetry(
       `https://graph.facebook.com/${GRAPH_VERSION}/${page.id}?fields=instagram_business_account{username}&access_token=${encodeURIComponent(page.access_token)}`
@@ -743,7 +759,7 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
     const igJson = igRes.ok ? ((await igRes.json()) as { instagram_business_account?: { id: string; username?: string } }) : {};
     const ig = igJson.instagram_business_account;
     if (ig?.id) {
-      await upsertAccount(env, 'instagram', ig.username || page.name, ig.id, ciphertext, iv, ts, {}, null, checked.owner ?? SINGLE_OPERATOR);
+      await upsertAccount(env, 'instagram', ig.username || page.name, ig.id, ciphertext, iv, ts, {}, null, checked.owner);
     }
   }
 
@@ -763,7 +779,7 @@ async function upsertAccount(
   ts: string,
   extra: Record<string, unknown> = {},
   expiresAt: string | null = null,
-  owner: string = SINGLE_OPERATOR
+  owner: string
 ): Promise<void> {
   // O `and owner_id = ?` mantém contas de donos diferentes separadas mesmo quando é a MESMA conta
   // da rede (duas pessoas podem conectar o mesmo Instagram nas suas próprias áreas).
@@ -815,7 +831,7 @@ async function handlePinterestCallback(code: string, request: Request, url: URL,
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
   });
   const userJson = userRes.ok ? ((await userRes.json()) as { username?: string }) : {};
-  const username = userJson.username || checked.fallbackName || 'Pinterest';
+  const username = userJson.username || 'Pinterest';
 
   const boardsRes = await fetchWithRetry('https://api.pinterest.com/v5/boards', {
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
@@ -839,7 +855,7 @@ async function handlePinterestCallback(code: string, request: Request, url: URL,
     nowIso(),
     defaultBoard ? { default_board_id: defaultBoard.id } : {},
     expiresAt,
-    checked.owner ?? SINGLE_OPERATOR
+    checked.owner
   );
 
   return connectedRedirect(url, 'pinterest');
@@ -875,14 +891,14 @@ async function handleTiktokCallback(code: string, request: Request, url: URL, en
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
   });
   const infoJson = infoRes.ok ? ((await infoRes.json()) as { data?: { user?: { display_name?: string } } }) : {};
-  const displayName = infoJson.data?.user?.display_name || checked.fallbackName || 'TikTok';
+  const displayName = infoJson.data?.user?.display_name || 'TikTok';
 
   const { ciphertext, iv } = await encryptJSON(
     { access_token: tokenJson.access_token, refresh_token: tokenJson.refresh_token },
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner ?? SINGLE_OPERATOR);
+  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner);
 
   return connectedRedirect(url, 'tiktok');
 }
@@ -930,14 +946,14 @@ async function handleYoutubeCallback(code: string, request: Request, url: URL, e
     ? ((await chRes.json()) as { items?: Array<{ id: string; snippet?: { title?: string } }> })
     : {};
   const channel = chJson.items?.[0];
-  const displayName = channel?.snippet?.title || checked.fallbackName || 'YouTube';
+  const displayName = channel?.snippet?.title || 'YouTube';
 
   const { ciphertext, iv } = await encryptJSON(
     { access_token: tokenJson.access_token, refresh_token: tokenJson.refresh_token },
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'youtube', displayName, channel?.id ?? '', ciphertext, iv, nowIso(), {}, expiresAt, checked.owner ?? SINGLE_OPERATOR);
+  await upsertAccount(env, 'youtube', displayName, channel?.id ?? '', ciphertext, iv, nowIso(), {}, expiresAt, checked.owner);
 
   return connectedRedirect(url, 'youtube');
 }

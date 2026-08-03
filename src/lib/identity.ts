@@ -15,14 +15,6 @@ import { createAuth } from './auth-server.js';
 // vínculo com posts, contas conectadas e mídia; o id é estável pela vida da conta.
 
 /**
- * Dono das linhas criadas ANTES de existir login. Não é uma conta: é um texto, sem e-mail e sem
- * senha, e desde que o gate passou a exigir sessão ninguém consegue se apresentar como ele. Só
- * continua aqui porque os callbacks de OAuth o usam como último recurso quando o state não traz
- * dono; some de vez quando a adoção migrar as linhas antigas para uma conta de verdade.
- */
-export const SINGLE_OPERATOR = 'owner';
-
-/**
  * Quem está fazendo esta requisição, ou `null` se não houver sessão válida.
  *
  * Devolver null em vez de lançar é de propósito: quem chama decide se o caso é 401 (o /api) ou

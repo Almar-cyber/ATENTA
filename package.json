@@ -10,13 +10,7 @@
     "build": "npm run web:build",
     "dev": "npm run web:build && wrangler dev",
     "deploy": "npm run web:build && wrangler deploy",
-    "enqueue": "tsx src/cli/enqueue.ts",
     "queue": "tsx src/cli/queue.ts",
-    "youtube-auth": "tsx src/cli/youtube-auth.ts",
-    "linkedin-auth-url": "tsx src/cli/linkedin-auth-url.ts",
-    "meta-auth-url": "tsx src/cli/meta-auth-url.ts",
-    "pinterest-auth-url": "tsx src/cli/pinterest-auth-url.ts",
-    "tiktok-auth-url": "tsx src/cli/tiktok-auth-url.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

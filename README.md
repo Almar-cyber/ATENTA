@@ -36,14 +36,17 @@ npm run deploy                               # builda o front (web/ → dist/) e
 # Ver "Autenticação" na seção Dashboard.
 ```
 
-Para os CLIs locais (`enqueue`, `youtube-auth`, `*-auth-url`), copiar `.env.example` para `.env` e preencher `D1_ACCOUNT_ID` / `D1_DATABASE_ID` / `D1_API_TOKEN` (um API token com permissão de D1 Edit, criado no dashboard da Cloudflare). **Importante**: não nomeie essas variáveis `CF_ACCOUNT_ID`/`CF_API_TOKEN` — o Wrangler carrega esse mesmo `.env` sozinho e trata esses dois nomes como credenciais de autenticação da Cloudflare, o que quebra silenciosamente todo comando `wrangler` (secret put, deploy, ...) rodado nessa pasta.
+Para o CLI local que sobrou (`queue`, só leitura), copiar `.env.example` para `.env` e preencher `D1_ACCOUNT_ID` / `D1_DATABASE_ID` / `D1_API_TOKEN` (um API token com permissão de D1 Edit, criado no dashboard da Cloudflare). **Importante**: não nomeie essas variáveis `CF_ACCOUNT_ID`/`CF_API_TOKEN` — o Wrangler carrega esse mesmo `.env` sozinho e trata esses dois nomes como credenciais de autenticação da Cloudflare, o que quebra silenciosamente todo comando `wrangler` (secret put, deploy, ...) rodado nessa pasta.
 
 ## Conectar contas pelo app (Conexões)
 
 Depois de deployado, dá pra conectar LinkedIn / Meta (Instagram + Facebook) / Pinterest / TikTok
 **direto no dashboard**: header → **Conexões** → botão **Conectar** de cada rede. O fluxo abre o
 consentimento da plataforma e, ao voltar, o Worker grava a conta (nome puxado automático da API) e
-mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando como alternativa.
+mostra "conta conectada com sucesso". **É o único caminho** — os CLIs `*-auth-url` e `youtube-auth`
+foram removidos: eles gravavam a conta sem dono, e desde que a identidade passou a vir da sessão uma
+conta sem dono é invisível pra todo mundo (toda consulta filtra por `owner_id`), com o token válido e
+o poller publicando por um fantasma. O callback agora recusa conexão sem dono no `state`.
 
 - **Múltiplas contas por rede** (ex.: dois Instagrams): a migração `0002_accounts_multi.sql` troca o
   `unique(platform)` por `unique(platform, external_account_id)` — **já aplicada no remoto**. Na Meta,
@@ -55,7 +58,7 @@ mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando
   não resolve (foi assim que ela falhou duas vezes antes). Os dados e os ids são preservados.
 - **YouTube também conecta pelo navegador** — precisa de uma credencial OAuth do tipo **Web application**
   no Google Cloud (a de "Desktop app" que o CLI usa só aceita redirect loopback), com o redirect
-  `…/oauth/callback/youtube` registrado. O CLI (`npm run youtube-auth`) continua valendo.
+  `…/oauth/callback/youtube` registrado.
   Se a conta Google já autorizou o app antes, o callback adota a linha que o CLI havia criado sem
   `external_account_id` em vez de tentar inserir uma segunda — era isso que derrubava o Worker com
   "Error 1101" no meio do consentimento.
@@ -67,7 +70,7 @@ mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando
 1. No [Google Cloud Console](https://console.cloud.google.com/): criar projeto → ativar "YouTube Data API v3" → tela de consentimento OAuth (External, publicar em "In production" para não expirar o refresh_token em 7 dias) → criar credencial OAuth do tipo **Desktop app** (isso é o que habilita o redirect loopback `http://127.0.0.1:8783/callback`).
 2. `wrangler secret put YOUTUBE_CLIENT_ID` e `wrangler secret put YOUTUBE_CLIENT_SECRET` (Worker).
 3. Preencher as mesmas duas chaves + `TOKEN_ENCRYPTION_KEY` no `.env` local (o script de auth roda fora do Worker).
-4. `npm run youtube-auth -- --account="Meu Canal"` — abre a URL de consentimento, você loga com a conta dona do canal, e o script grava o token já criptografado direto no D1.
+4. Conecte pelo app: header → **Conexões** → **Conectar** no YouTube.
 5. Se o canal aceita vídeos de mais de 15min, confirmar que já passou pela verificação de telefone do YouTube (separada da verificação do Google Cloud).
 
 ## Fase 1 — LinkedIn
@@ -75,7 +78,7 @@ mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando
 1. Acesse [developer.linkedin.com](https://developer.linkedin.com) → **My apps** (canto superior direito) → **Create app**. Pede uma LinkedIn Page associada — dá pra criar uma ali mesmo se não tiver. Depois, adicionar os produtos "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn" (ambos self-serve, sem aprovação de parceiro) → em Auth, registrar o redirect URI exato: `https://social-scheduler.zona21.workers.dev/oauth/callback/linkedin`.
 2. `wrangler secret put LINKEDIN_CLIENT_ID` e `wrangler secret put LINKEDIN_CLIENT_SECRET` (Worker).
 3. Preencher `LINKEDIN_CLIENT_ID` no `.env` local (o secret fica só no Worker, que faz a troca de código por token).
-4. `npm run linkedin-auth-url -- --account="Meu Perfil" --redirect-base=https://social-scheduler.zona21.workers.dev` — abre a URL impressa, loga, e o Worker cria/atualiza a conta no D1 automaticamente ao receber o redirect.
+4. Conecte pelo app: header → **Conexões** → **Conectar**.
 5. **Sem refresh token nessa camada self-serve**: o acesso expira em 60 dias; passado esse prazo (ou quando o poller marcar `needs_reauth`), repetir o passo 4.
 
 ## Fase 2 — Instagram + Facebook (Meta Graph API)
@@ -83,7 +86,7 @@ mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando
 1. No [Meta for Developers](https://developers.facebook.com/apps/): criar app tipo "Business" → adicionar os produtos "Facebook Login" (dá acesso ao fluxo OAuth) → em Configurações → Básico, anotar App ID/Secret → em Facebook Login → Configurações, registrar o redirect URI exato: `https://social-scheduler.zona21.workers.dev/oauth/callback/meta`.
 2. `wrangler secret put META_APP_ID` e `wrangler secret put META_APP_SECRET` (Worker).
 3. Preencher `META_APP_ID` no `.env` local.
-4. `npm run meta-auth-url -- --account="Minha Marca" --redirect-base=https://social-scheduler.zona21.workers.dev` — abre a URL, você loga e concede acesso a **uma** Page (o fluxo assume só uma; se aparecer seletor com várias, desmarque as outras). O Worker troca o código por um token de usuário, estende pra long-lived, busca a Page e, se ela tiver uma conta Instagram Business vinculada, cria as duas linhas (`facebook` e `instagram`) no D1 de uma vez.
+4. Conecte pelo app: header → **Conexões** → **Conectar**.
 5. **Token de Page praticamente não expira** (só morre com troca de senha, revogação, ou ~90 dias sem uso) — por isso não tem refresh automático implementado; se `needs_reauth` aparecer, repetir o passo 4.
 6. **Instagram exige o domínio customizado do R2** (ver Pendências) — o container de mídia é criado com uma URL pública que a Meta busca sozinha. Facebook só precisa disso pra posts com foto/vídeo (post só-texto funciona sem).
 
@@ -92,7 +95,7 @@ mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando
 1. No [Pinterest Developers](https://developers.pinterest.com/apps/): criar app → em Redirect URIs, registrar `https://social-scheduler.zona21.workers.dev/oauth/callback/pinterest` → pedir acesso Trial (automático) e, quando for usar de verdade, solicitar **Standard access** (exige um vídeo curto demonstrando o fluxo de publicação — sem isso os Pins só ficam visíveis em modo Sandbox, só pra você).
 2. `wrangler secret put PINTEREST_CLIENT_ID` e `wrangler secret put PINTEREST_CLIENT_SECRET` (Worker).
 3. Preencher `PINTEREST_CLIENT_ID` no `.env` local.
-4. `npm run pinterest-auth-url -- --account="Meu Perfil" --redirect-base=https://social-scheduler.zona21.workers.dev` — o Worker troca o código por token, busca seus boards e usa o primeiro como padrão (`accounts.extra.default_board_id`; dá pra sobrescrever por post com `options.board_id`).
+4. Conecte pelo app: header → **Conexões** → **Conectar**.
 5. Pinterest não tem agendamento nativo — timing é 100% o poller, igual LinkedIn/Instagram/TikTok. Imagem publica direto; vídeo passa por registro + poll (igual o Instagram).
 
 ## Fase 4 — TikTok
@@ -100,7 +103,7 @@ mostra "conta conectada com sucesso". Os CLIs `*-auth-url` continuam funcionando
 1. No [TikTok Developers](https://developers.tiktok.com/apps/): criar app → adicionar o produto "Content Posting API" e submeter a auditoria (vídeo de demonstração do fluxo + política de privacidade — **submeta isso o quanto antes**, é o maior gargalo de tempo do projeto todo, de dias a semanas) → registrar o redirect URI: `https://social-scheduler.zona21.workers.dev/oauth/callback/tiktok`.
 2. `wrangler secret put TIKTOK_CLIENT_KEY` e `wrangler secret put TIKTOK_CLIENT_SECRET` (Worker).
 3. Preencher `TIKTOK_CLIENT_KEY` no `.env` local.
-4. `npm run tiktok-auth-url -- --account="Minha Conta" --redirect-base=https://social-scheduler.zona21.workers.dev`.
+4. Conecte pelo app: header → **Conexões** → **Conectar**.
 5. **Enquanto a auditoria não passa**: posts saem forçados `SELF_ONLY` numa conta de sandbox, não públicos de verdade. `src/adapters/tiktok.ts` está com confiança menor que os outros — os nomes exatos de campos vieram de padrões documentados, não de um teste real contra a API; testar com um post real antes de confiar 100% nele.
 
 ## Dashboard
@@ -274,20 +277,11 @@ avisos. As demais redes têm um formato só e nem mostram o seletor.
 Posts criados antes disso não têm o campo `format` gravado; o adapter cai na regra antiga
 (`as_story`, e vídeo = Reel), então nada muda pra eles.
 
-## Enfileirando um post (via CLI, alternativa ao dashboard)
+## Enfileirando um post
 
-```bash
-npm run enqueue -- --platform=youtube --account="Meu Canal" --scheduled_for=2026-08-01T12:00:00Z --caption="..."
-```
+Pelo dashboard: **Novo post**. O CLI `enqueue` foi removido — ele criava o post sem `owner_id`, que
+com login de verdade nasceria invisível (toda consulta filtra por dono).
 
-Isso só cria as linhas em `scheduled_posts`/`post_targets` — falta anexar mídia via `post_target_media` (ainda não tem CLI pra isso, mas o dashboard cobre esse caso). Pra fazer manualmente:
-
-```bash
-wrangler r2 object put social-scheduler-media/meu-video.mp4 --file=./meu-video.mp4
-# public_url = https://scheduler-media.omangue.co/meu-video.mp4
-wrangler d1 execute social-scheduler --remote --command "insert into media_assets (id, storage_key, public_url, mime_type, size_bytes) values ('...', 'meu-video.mp4', 'https://scheduler-media.omangue.co/meu-video.mp4', 'video/mp4', 12345)"
-wrangler d1 execute social-scheduler --remote --command "insert into post_target_media (post_target_id, media_asset_id) values ('...', '...')"
-```
 
 ## Rodando localmente
 
