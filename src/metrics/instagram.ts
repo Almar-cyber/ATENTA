@@ -19,6 +19,27 @@ const GRAPH_VERSION = 'v21.0';
 // todas as outras métricas do pedido estivessem disponíveis. Sem descer degraus, adicionar uma
 // métrica nova quebraria a coleta das antigas em silêncio, que é exatamente o tipo de falha muda que
 // este arquivo já produziu uma vez.
+/**
+ * Reel e Story falam outro dialeto.
+ *
+ * `ig_reels_avg_watch_time` não existe em foto; `navigation` (avanços, voltas, saídas) e `replies`
+ * só existem em Story. Pedir tudo junto derruba a chamada inteira com "(#100) Invalid parameter",
+ * então cada formato tem a própria escada — e todas caem na escada de feed no último degrau, que é
+ * o denominador comum.
+ */
+export const REEL_METRIC_LADDER = [
+  'reach,likes,comments,saved,shares,total_interactions,views,ig_reels_avg_watch_time,ig_reels_video_view_total_time,clips_replays_count',
+  'reach,likes,comments,saved,shares,views,ig_reels_avg_watch_time',
+  'reach,likes,comments,saved,shares,views',
+];
+
+export const STORY_METRIC_LADDER = [
+  'reach,views,replies,navigation,profile_visits,follows',
+  'reach,views,replies,navigation',
+  'reach,replies',
+  'reach',
+];
+
 export const MEDIA_METRIC_LADDER = [
   'reach,likes,comments,saved,shares,total_interactions,views,follows,profile_visits',
   'reach,likes,comments,saved,shares,total_interactions,views',
@@ -47,7 +68,17 @@ export const instagramMetrics: MetricsFetcher = {
     const tokens = await getAccountTokens<MetaTokens>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
     if (!tokens?.access_token) return null;
 
-    for (const metrics of MEDIA_METRIC_LADDER) {
+    // O formato escolhido no compositor decide o dialeto. Post antigo (sem `format` gravado) cai
+    // na escada de feed, que é o comportamento de antes.
+    const formato = (target.options as { format?: string } | undefined)?.format;
+    const escada =
+      formato === 'reel'
+        ? [...REEL_METRIC_LADDER, ...MEDIA_METRIC_LADDER]
+        : formato === 'story'
+          ? [...STORY_METRIC_LADDER, ...MEDIA_METRIC_LADDER]
+          : MEDIA_METRIC_LADDER;
+
+    for (const metrics of escada) {
       const url = `https://graph.facebook.com/${GRAPH_VERSION}/${target.external_post_id}/insights?metric=${metrics}&access_token=${encodeURIComponent(tokens.access_token)}`;
       const res = await fetchWithRetry(url, { method: 'GET' });
       const body = await res.text();
@@ -65,6 +96,11 @@ export const instagramMetrics: MetricsFetcher = {
         follows: pick(parsed.data, 'follows'),
         profile_visits: pick(parsed.data, 'profile_visits'),
         interactions: pick(parsed.data, 'total_interactions'),
+        // Reel: a API dá em MILISSEGUNDOS; a coluna é em segundos.
+        avg_watch_seconds: (() => {
+          const ms = pick(parsed.data, 'ig_reels_avg_watch_time');
+          return ms === undefined ? undefined : ms / 1000;
+        })(),
         raw: parsed.data,
       };
     }
@@ -90,13 +126,17 @@ export const instagramMetrics: MetricsFetcher = {
     // As duas abaixo são independentes e OPCIONAIS: cada uma falha por conta própria (conta nova
     // demais, público pequeno demais — a Meta esconde demografia de perfil com menos de 100
     // seguidores) sem levar junto a contagem de seguidores, que é o dado que nunca pode faltar.
-    const [online, demo] = await Promise.all([
+    const [online, demo, diarias] = await Promise.all([
       fetchOnlineFollowers(base, token),
       fetchDemographics(base, token),
+      fetchDailyAccountInsights(base, token),
     ]);
 
     return {
       followers: parsed.followers_count,
+      reach: diarias?.reach,
+      profile_views: diarias?.profile_views,
+      link_clicks: diarias?.website_clicks,
       online_followers: online,
       demographics: demo,
       raw: parsed,
@@ -147,6 +187,38 @@ async function fetchDemographics(base: string, token: string): Promise<Record<st
       if (json?.data?.length) return json as Record<string, unknown>;
     } catch {
       /* tenta o próximo vocabulário */
+    }
+  }
+  return null;
+}
+
+/**
+ * Alcance, visitas ao perfil e cliques no link — do dia.
+ *
+ * As colunas `reach` e `profile_views` de account_metrics existiam desde a primeira migração de
+ * métricas e nunca foram preenchidas: o coletor só buscava followers_count. `website_clicks` é o
+ * que fecha o ciclo — alcance diz quantos viram, engajamento quantos reagiram, e o clique quantos
+ * SAÍRAM da rede pra ir aonde a pessoa queria.
+ */
+async function fetchDailyAccountInsights(
+  base: string,
+  token: string
+): Promise<{ reach?: number; profile_views?: number; website_clicks?: number } | null> {
+  // Escada aqui também: a Meta aposentou métricas de conta ao longo do tempo (impressions saiu,
+  // views entrou), e um nome inválido derruba o pedido inteiro.
+  for (const metric of ['reach,profile_views,website_clicks', 'reach,profile_views', 'reach']) {
+    try {
+      const res = await fetchWithRetry(`${base}/insights?metric=${metric}&period=day&access_token=${token}`);
+      if (!res.ok) continue;
+      const json = safeParseJson(await res.text()) as InsightsResponse | undefined;
+      if (!json?.data?.length) continue;
+      return {
+        reach: pick(json.data, 'reach'),
+        profile_views: pick(json.data, 'profile_views'),
+        website_clicks: pick(json.data, 'website_clicks'),
+      };
+    } catch {
+      /* próximo degrau */
     }
   }
   return null;

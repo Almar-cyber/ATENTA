@@ -255,8 +255,9 @@ async function stepCollectAccountMetrics(env: Env): Promise<void> {
       if (snap) {
         await env.DB.prepare(
           `insert into account_metrics
-             (id, account_id, fetched_at, followers, reach, profile_views, online_followers, demographics, raw)
-           values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, account_id, fetched_at, followers, reach, profile_views, link_clicks,
+              online_followers, demographics, raw)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
           .bind(
             crypto.randomUUID(),
@@ -265,6 +266,7 @@ async function stepCollectAccountMetrics(env: Env): Promise<void> {
             snap.followers ?? null,
             snap.reach ?? null,
             snap.profile_views ?? null,
+            snap.link_clicks ?? null,
             snap.online_followers ? JSON.stringify(snap.online_followers) : null,
             snap.demographics ? JSON.stringify(snap.demographics) : null,
             JSON.stringify(snap.raw ?? {})

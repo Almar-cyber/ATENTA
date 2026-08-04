@@ -38,6 +38,8 @@ export interface AccountMetricsSnapshot {
   followers?: number;
   reach?: number;
   profile_views?: number;
+  /** Cliques no link do perfil (bio do Instagram, site da Página). */
+  link_clicks?: number;
   /** Seguidores online por hora do dia (chave '0'..'23'). */
   online_followers?: Record<string, number> | null;
   /** Faixa etária, gênero, cidade e país de quem segue. */
