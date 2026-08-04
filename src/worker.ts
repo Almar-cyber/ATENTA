@@ -560,7 +560,24 @@ type OAuthCallbackPlatform = 'linkedin' | 'meta' | 'pinterest' | 'tiktok' | 'you
 
 // Campos que cada provedor usa pra reportar recusa no redirect (OAuth 2.0 padrão + os próprios do
 // TikTok e da Meta). É daqui que sai o motivo quando a autorização falha.
-const OAUTH_ERROR_FIELDS = ['error', 'error_description', 'error_reason', 'error_code', 'errCode', 'log_id'] as const;
+// Cada provedor nomeia o campo do motivo de um jeito, e capturar o conjunto todo é o que evita
+// receber um número solto sem explicação. `error_message` é da Meta e faltava — foi assim que um
+// "error_code=1349187" chegou na tela sem uma linha de texto junto, impossível de diagnosticar.
+// `error_user_title`/`error_user_msg` são o texto que a própria Meta escreveu PARA a pessoa: quando
+// existem, dizem mais que qualquer código.
+const OAUTH_ERROR_FIELDS = [
+  'error',
+  'error_description',
+  'error_message',
+  'error_reason',
+  'error_user_title',
+  'error_user_msg',
+  'error_code',
+  'error_subcode',
+  'errCode',
+  'errMsg',
+  'log_id',
+] as const;
 
 /** Resumo legível de uma recusa reportada pelo provedor, ou null se não houver. */
 function describeProviderError(platform: string, url: URL): string | null {
