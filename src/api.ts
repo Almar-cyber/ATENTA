@@ -1044,7 +1044,20 @@ async function getCommenters(accountId: string, owner: string, env: Env): Promis
     .bind(accountId)
     .all<Record<string, unknown>>();
 
-  return jsonResponse({ commenters: results ?? [] });
+  // O TOTAL vem separado, e não do `length` da lista acima, porque aquela é truncada em 20: numa
+  // conta com 102 pessoas, contar as linhas devolvidas diria "20 pessoas comentaram com você" —
+  // um número que parece certo e está errado, a pior espécie de erro num painel.
+  const total = await env.DB.prepare(
+    `select count(distinct external_user_id) as pessoas, count(*) as comentarios
+       from post_comments where account_id = ?`
+  )
+    .bind(accountId)
+    .first<{ pessoas: number; comentarios: number }>();
+
+  return jsonResponse({
+    commenters: results ?? [],
+    total: total ?? { pessoas: 0, comentarios: 0 },
+  });
 }
 
 async function fetchInstagramFeed(account: Account, env: Env): Promise<FeedItem[]> {

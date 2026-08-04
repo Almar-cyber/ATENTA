@@ -17,6 +17,26 @@ design — leia antes de criar telas ou componentes novos, pra manter tudo coere
 4. **Movimento com propósito.** Animações comunicam mudança de estado (troca de view, item novo na
    fila, reordenação do grid), nunca decoram à toa. Duração curta (120–200ms).
 
+## Psicologia aplicada (referência: [growth.design/psychology](https://growth.design/psychology))
+
+Estes não são enfeite — são o critério pra decidir se uma tela está pronta. **Toda lista, grade ou
+bloco de números novo passa por eles antes de fechar.**
+
+| Princípio | O que exige | Onde já vale |
+| --- | --- | --- |
+| **Lei de Miller** (7±2) | Nunca despejar mais que ~6 itens de uma vez. O resto fica atrás de "ver mais". | `Comentaristas` (1 + 5 + resto), `Summary.proximos` (teto de 5) |
+| **Efeito Von Restorff** | Se um item é *estatisticamente* diferente, ele tem que **parecer** diferente. Lista onde tudo tem o mesmo peso visual não comunica nada. | 1º comentarista em destaque; pendência `grave` em vermelho |
+| **Posição serial** | O que importa vai no começo. O meio de uma lista longa é onde a informação morre. | Pendências ordenadas da mais urgente; ranking explícito |
+| **Lei de Hick** | Menos opções visíveis = decisão mais rápida. Cauda longa fica colapsada. | "Ver mais N pessoas"; filtros dentro do `FilterMenu`, não soltos na barra |
+| **Chunking + proximidade** | Agrupar por algo que **signifique** — e o agrupamento tem que sobreviver aos dados reais, não só ao caso imaginado. | Ideias por pilar; lista da Agenda por dia |
+| **Ancoragem** | Um número solto não tem escala. "20 pessoas" numa lista truncada mente; "102 pessoas comentaram" ancora. | Total em `Comentaristas`; "somando N publicações" no Painel |
+| **Carga cognitiva** | Data absoluta obriga conta de cabeça. Tempo relativo já entrega a conclusão. | `fmtQuando` (futuro), `fmtHaQuantoTempo` (passado) |
+
+**A regra que mais pega na prática**: agrupamento que parece óbvio no papel pode colapsar nos dados
+reais. "Comentou nos últimos 30 dias" parecia o corte natural pra `Comentaristas` — mas o comentário
+mais recente da conta real era de nove meses atrás, e *todo mundo* cairia num balde só. Antes de
+escolher um agrupamento, **consulte a distribuição real no banco**.
+
 ## Tokens
 
 Cores, raios e tipografia vêm do tema em `src/index.css` (variáveis CSS em `oklch`). A paleta é a da

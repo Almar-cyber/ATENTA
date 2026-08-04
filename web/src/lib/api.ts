@@ -304,7 +304,9 @@ export interface Commenter {
   ultimo: string;
 }
 
-export function getCommenters(accountId: string): Promise<{ commenters: Commenter[] }> {
+export function getCommenters(
+  accountId: string
+): Promise<{ commenters: Commenter[]; total: { pessoas: number; comentarios: number } }> {
   return req(`/api/accounts/${accountId}/commenters`);
 }
 

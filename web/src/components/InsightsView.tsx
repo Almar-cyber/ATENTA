@@ -9,7 +9,7 @@ import type { Platform } from '@/lib/types';
 import { PLATFORM_LABELS } from '@/lib/platforms';
 import { useScheduler } from '@/store';
 import { toast } from 'sonner';
-import { fmtDateTime } from '@/lib/format';
+import { fmtDateTime, fmtHaQuantoTempo } from '@/lib/format';
 import { PlatformIcon } from './PlatformIcon';
 import { TagChip } from './TagPicker';
 import { BestHoursChart } from './BestHoursChart';
@@ -749,8 +749,17 @@ function PlatformDetail({ platform, metrics, followerRows, thumbs }: { platform:
  * uma tela própria) porque é exatamente aqui que "Posts"/"Seguidores"/"Destaques" já respondem
  * outras perguntas sobre essa mesma conta.
  */
+/** Quantos aparecem antes do "ver todos" — 1 em destaque + 5 é o teto da memória de trabalho. */
+const COMENTARISTAS_VISIVEIS = 6;
+
+function nomeDe(c: Commenter): string {
+  return c.username ? `@${c.username}` : 'Conta sem nome público';
+}
+
 function Comentaristas({ accountId, multiplasContas }: { accountId: string | null; multiplasContas: boolean }) {
   const [lista, setLista] = useState<Commenter[] | null>(null);
+  const [total, setTotal] = useState<{ pessoas: number; comentarios: number } | null>(null);
+  const [verTodos, setVerTodos] = useState(false);
 
   useEffect(() => {
     if (!accountId) {
@@ -759,8 +768,13 @@ function Comentaristas({ accountId, multiplasContas }: { accountId: string | nul
     }
     let vivo = true;
     setLista(null);
+    setVerTodos(false);
     getCommenters(accountId)
-      .then((r) => vivo && setLista(r.commenters))
+      .then((r) => {
+        if (!vivo) return;
+        setLista(r.commenters);
+        setTotal(r.total);
+      })
       .catch(() => vivo && setLista([]));
     return () => {
       vivo = false;
@@ -783,27 +797,71 @@ function Comentaristas({ accountId, multiplasContas }: { accountId: string | nul
   // simplesmente não aparece — sem título vazio no meio da tela.
   if (!lista || lista.length === 0) return null;
 
+  const [primeiro, ...resto] = lista;
+  const visiveis = verTodos ? resto : resto.slice(0, COMENTARISTAS_VISIVEIS - 1);
+  const escondidos = resto.length - visiveis.length;
+
   return (
     <Secao titulo="Quem comenta com você">
-      <div className="grid gap-2 sm:grid-cols-2">
-        {lista.map((c) => (
+      {/* Ancoragem: "102 pessoas" antes da lista dá a escala do que se está olhando. Sem ela, vinte
+          linhas parecem ser TUDO — e o número real é cinco vezes maior. */}
+      {total && total.pessoas > 0 && (
+        <p className="mb-2 text-xs text-muted-foreground">
+          {nf.format(total.pessoas)} {total.pessoas === 1 ? 'pessoa comentou' : 'pessoas comentaram'} com você ·{' '}
+          {nf.format(total.comentarios)} {total.comentarios === 1 ? 'comentário' : 'comentários'} no total
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {/* EFEITO VON RESTORFF: quem lidera é destacado de propósito. Antes eram vinte cards
+            idênticos e nada se destacava — mas o primeiro colocado costuma ser estatisticamente
+            diferente (nesta conta, quase o dobro do segundo), e essa diferença tem que ser
+            visível sem precisar comparar números um a um. */}
+        <div className="flex items-center gap-3 rounded-xl border-2 border-brand bg-primary/10 p-4 shadow-[3px_3px_0_0_var(--brand)]">
+          <span className="grid size-11 shrink-0 place-items-center rounded-full bg-primary text-lg font-bold text-primary-foreground">
+            1
+          </span>
+          <div className="min-w-0 flex-1 leading-snug">
+            <div className="truncate text-base font-semibold">{nomeDe(primeiro)}</div>
+            <div className="text-xs text-muted-foreground">
+              {nf.format(primeiro.comentarios)} comentários · último {fmtHaQuantoTempo(primeiro.ultimo)}
+            </div>
+          </div>
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-accent-foreground">
+            quem mais fala
+          </span>
+        </div>
+
+        {/* LEI DE MILLER + PROXIMIDADE: os seguintes ficam numa lista compacta de uma linha cada,
+            visualmente subordinada ao primeiro. Não é um card gordo por pessoa — é uma sequência
+            que se lê de cima pra baixo, com a posição explícita fazendo o trabalho de ordenar. */}
+        {visiveis.map((c, i) => (
           <div
             key={c.external_user_id}
-            className="flex items-center gap-3 rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]"
+            className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2"
           >
-            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-accent-foreground">
-              <MessageCircle className="size-4" />
+            <span className="w-5 shrink-0 text-center text-sm font-semibold tabular-nums text-muted-foreground">
+              {i + 2}
             </span>
-            <div className="min-w-0 flex-1 leading-snug">
-              <div className="truncate font-semibold">{c.username ? `@${c.username}` : 'Conta sem nome público'}</div>
-              <div className="text-xs text-muted-foreground">
-                {c.comentarios} {c.comentarios === 1 ? 'comentário' : 'comentários'} · desde{' '}
-                {new Date(c.desde).toLocaleDateString('pt-BR')}
-              </div>
-            </div>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{nomeDe(c)}</span>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {nf.format(c.comentarios)} · último {fmtHaQuantoTempo(c.ultimo)}
+            </span>
           </div>
         ))}
       </div>
+
+      {/* LEI DE HICK: a cauda fica atrás de um clique. Vinte de uma vez não é generosidade, é
+          trabalho jogado em cima de quem só queria saber quem fala mais. */}
+      {escondidos > 0 && (
+        <button
+          type="button"
+          onClick={() => setVerTodos(true)}
+          className="mt-2 w-full cursor-pointer rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/40"
+        >
+          Ver mais {escondidos} {escondidos === 1 ? 'pessoa' : 'pessoas'}
+        </button>
+      )}
     </Secao>
   );
 }

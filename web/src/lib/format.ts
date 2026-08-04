@@ -25,6 +25,25 @@ export function fmtQuando(iso: string): string {
   return `${dia.replace('.,', '')} ${hora}`;
 }
 
+/**
+ * Quanto tempo FAZ: "ontem", "há 3 dias", "há 9 meses", "há 2 anos".
+ *
+ * Irmã da `fmtQuando` acima, virada pro passado. Existe pela mesma razão: "06/10/2020" obriga a
+ * conta de cabeça, e é a conta que carrega o significado — "há 6 anos" já diz que aquela pessoa
+ * some do mapa, sem ninguém precisar calcular.
+ */
+export function fmtHaQuantoTempo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const dias = Math.floor(ms / 86_400_000);
+  if (dias <= 0) return 'hoje';
+  if (dias === 1) return 'ontem';
+  if (dias < 30) return `há ${dias} dias`;
+  const meses = Math.floor(dias / 30);
+  if (meses < 12) return `há ${meses} ${meses === 1 ? 'mês' : 'meses'}`;
+  const anos = Math.floor(dias / 365);
+  return `há ${anos} ${anos === 1 ? 'ano' : 'anos'}`;
+}
+
 export function dayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
