@@ -459,10 +459,20 @@ export function PostComposer({
         }
       }
     }
+    // O TikTok EXIGE nível de privacidade escolhido (auditoria da Content Posting API — por isso o
+    // seletor nasce vazio, sem padrão). Isso vive aqui, e não só no `submit`, porque lá era um beco
+    // sem saída: o botão ficava habilitado, você abria o seletor de data, escolhia, confirmava — e
+    // só ENTÃO tomava um toast de erro. Três passos pra descobrir algo que era sabido desde o
+    // começo, contra os princípios "falhar na criação" e "nada de beco sem saída" (design.md §7).
+    // Como dica, ela desabilita o botão e aparece junto do campo que a causou.
+    if (selectedAccounts.some((a) => a.platform === 'tiktok') && !tiktokPrivacy) {
+      out.push({ field: 'rede', problem: true, text: 'Escolha o nível de privacidade do TikTok' });
+    }
+
     // Duas contas da mesma rede geravam a mesma dica duas vezes ("Instagram: 0/2200" repetido).
     const seen = new Set<string>();
     return out.filter((h) => (seen.has(h.text) ? false : (seen.add(h.text), true)));
-  }, [tabAccounts, body, queue, formats, captionOverrides, needsFeedRatio]);
+  }, [tabAccounts, body, queue, formats, captionOverrides, needsFeedRatio, selectedAccounts, tiktokPrivacy]);
 
   // O preview segue a aba: 'all' mostra todas as contas, uma aba de conta mostra só ela.
   const previewItems: KeyedPreviewInput[] = useMemo(
@@ -499,6 +509,11 @@ export function PostComposer({
   // Redes das contas escolhidas que têm mais de um formato possível.
   const formatPlatforms = Array.from(new Set(selectedAccounts.map((a) => a.platform))).filter(
     (p) => (PLATFORM_FORMATS[p]?.length ?? 0) > 1
+  );
+
+  /** Alguma rede escolhida tem campo próprio? Decide se o bloco "Ajustes por rede" existe. */
+  const temAjustesDeRede = selectedAccounts.some(
+    (a) => a.platform === 'youtube' || a.platform === 'pinterest' || a.platform === 'tiktok'
   );
 
   const hasBlockingProblem = hints.some((h) => h.problem);
@@ -644,11 +659,9 @@ export function PostComposer({
           <AccountPicker accounts={accounts} selected={selected} onChange={setSelected} />
         </div>
 
-        {selectedAccounts.length === 0 && (
-          <EmptyState size="sm" bordered>
-            Escolha ao menos uma conta acima para preencher o restante do post.
-          </EmptyState>
-        )}
+        {/* Sem estado vazio aqui de propósito: a coluna da direita já diz "Selecione ao menos uma
+            conta para ver como o post vai ficar", e as duas apareciam AO MESMO TEMPO, lado a lado,
+            dizendo a mesma coisa. Uma mensagem só, no lugar onde o resultado apareceria. */}
 
         {selectedAccounts.length > 0 && (
           <div className="space-y-4">
@@ -826,53 +839,87 @@ export function PostComposer({
           <span className="hidden sm:inline">— agrupa o desempenho por tema nos Insights.</span>
         </div>
 
-        {selectedAccounts.some((a) => a.platform === 'youtube') && (
-          <div className="space-y-1.5">
-            <Label htmlFor="f-title">Título do vídeo (YouTube)</Label>
-            <Input id="f-title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-        )}
+        {/* AJUSTES POR REDE, num bloco só.
+            Antes eram quatro campos soltos no fim de uma lista de dez blocos — sem agrupamento
+            nenhum, e com o único OBRIGATÓRIO (privacidade do TikTok) visualmente idêntico ao
+            opcional logo acima ("Board ID... opcional"), abaixo da dobra. Juntar o que é da mesma
+            natureza é o que a Lei de Miller pede; separar o obrigatório do resto é Von Restorff.
+            Ver "Psicologia aplicada" em web/design.md. */}
+        {temAjustesDeRede && (
+          <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ajustes por rede</p>
 
+            {/* O obrigatório vem PRIMEIRO e com moldura própria: é o único aqui que impede
+                agendar, e ficava por último, indistinguível de um campo opcional. */}
+            {selectedAccounts.some((a) => a.platform === 'tiktok') && (
+              <div className="space-y-1.5 rounded-lg border-2 border-brand bg-card p-2.5">
+                <div className="flex items-center gap-1.5">
+                  <PlatformIcon platform="tiktok" className="size-3.5 shrink-0" />
+                  <Label>Nível de privacidade</Label>
+                  <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-bold uppercase text-primary-foreground">
+                    obrigatório
+                  </span>
+                </div>
+                {/* Sem opção padrão pré-selecionada — exigência da auditoria da Content Posting API. */}
+                <Select value={tiktokPrivacy} onValueChange={setTiktokPrivacy}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Escolha antes de agendar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PUBLIC_TO_EVERYONE">Público</SelectItem>
+                    <SelectItem value="MUTUAL_FOLLOW_FRIENDS">Amigos</SelectItem>
+                    <SelectItem value="SELF_ONLY">Só eu</SelectItem>
+                  </SelectContent>
+                </Select>
+                <ComposerHints hints={hints} field="rede" />
+              </div>
+            )}
 
+            {selectedAccounts.some((a) => a.platform === 'youtube') && (
+              <>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <PlatformIcon platform="youtube" className="size-3.5 shrink-0" />
+                    <Label htmlFor="f-title">Título do vídeo</Label>
+                  </div>
+                  <Input id="f-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <PlatformIcon platform="youtube" className="size-3.5 shrink-0" />
+                    <Label>Quem pode ver</Label>
+                  </div>
+                  {/* Rótulos em português: os valores da API (public/unlisted/private) apareciam
+                      crus numa interface inteira em pt-BR. O valor enviado continua o mesmo. */}
+                  <Select value={ytPrivacy || 'default'} onValueChange={(v) => setYtPrivacy(v === 'default' ? '' : v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Padrão (só quem tem o link)</SelectItem>
+                      <SelectItem value="public">Público</SelectItem>
+                      <SelectItem value="unlisted">Só quem tem o link</SelectItem>
+                      <SelectItem value="private">Privado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
 
-        {selectedAccounts.some((a) => a.platform === 'youtube') && (
-          <div className="space-y-1.5">
-            <Label>Privacidade (YouTube)</Label>
-            <Select value={ytPrivacy || 'default'} onValueChange={(v) => setYtPrivacy(v === 'default' ? '' : v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">padrão (unlisted)</SelectItem>
-                <SelectItem value="public">public</SelectItem>
-                <SelectItem value="unlisted">unlisted</SelectItem>
-                <SelectItem value="private">private</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        {selectedAccounts.some((a) => a.platform === 'pinterest') && (
-          <div className="space-y-1.5">
-            <Label htmlFor="f-board">Board ID (Pinterest, opcional)</Label>
-            <Input id="f-board" value={pinBoard} onChange={(e) => setPinBoard(e.target.value)} placeholder="usa o board padrão da conta se vazio" />
-          </div>
-        )}
-
-        {selectedAccounts.some((a) => a.platform === 'tiktok') && (
-          <div className="space-y-1.5">
-            <Label>Nível de privacidade (TikTok) *</Label>
-            {/* Sem opção padrão pré-selecionada — exigência da auditoria da Content Posting API. */}
-            <Select value={tiktokPrivacy} onValueChange={setTiktokPrivacy}>
-              <SelectTrigger>
-                <SelectValue placeholder="Escolha antes de agendar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="PUBLIC_TO_EVERYONE">Público</SelectItem>
-                <SelectItem value="MUTUAL_FOLLOW_FRIENDS">Amigos</SelectItem>
-                <SelectItem value="SELF_ONLY">Só eu</SelectItem>
-              </SelectContent>
-            </Select>
+            {selectedAccounts.some((a) => a.platform === 'pinterest') && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <PlatformIcon platform="pinterest" className="size-3.5 shrink-0" />
+                  <Label htmlFor="f-board">Board (opcional)</Label>
+                </div>
+                <Input
+                  id="f-board"
+                  value={pinBoard}
+                  onChange={(e) => setPinBoard(e.target.value)}
+                  placeholder="Deixe vazio para usar o board padrão"
+                />
+              </div>
+            )}
           </div>
         )}
           </div>
@@ -896,12 +943,27 @@ export function PostComposer({
         </div>
       </div>
 
-      {/* No mobile os CTAs viram full-width empilhados (primário em cima); no desktop, inline à direita. */}
-      <div className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-        <Button size="lg" className="w-full sm:w-auto" onClick={() => setPickerOpen(true)} disabled={submitting || !canSchedule}>
+      {/* LEI DE HICK: um CTA primário, não dois de mesmo peso. "Agendar" e "Salvar como rascunho"
+          eram os dois `size="lg"` lado a lado, disputando o olho — e são ações de importância bem
+          diferente. O rascunho vira `ghost`, disponível sem competir.
+          A ordem no DESKTOP é [rascunho] [agendar], com o primário à direita (fim da leitura); no
+          mobile o primário sobe pro topo da pilha, onde o polegar chega primeiro. */}
+      <div className="flex flex-col gap-2 border-t px-5 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+        <Button
+          size="lg"
+          className="order-1 w-full sm:order-none sm:w-auto"
+          onClick={() => setPickerOpen(true)}
+          disabled={submitting || !canSchedule}
+        >
           {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
         </Button>
-        <Button size="lg" variant="outline" className="w-full sm:w-auto" onClick={() => submit(true)} disabled={submitting || !canDraft}>
+        <Button
+          size="lg"
+          variant="ghost"
+          className="order-2 w-full sm:order-first sm:w-auto"
+          onClick={() => submit(true)}
+          disabled={submitting || !canDraft}
+        >
           Salvar como rascunho
         </Button>
       </div>

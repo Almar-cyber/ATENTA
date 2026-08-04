@@ -4,7 +4,8 @@ import { InlineAlert } from '@/components/ui/inline-alert';
 // Cada dica sabe a qual campo pertence, pra ser renderizada junto dele (o aviso de mídia embaixo do
 // seletor de arquivos, o de legenda embaixo do textarea) em vez de tudo amontoado num bloco só.
 export interface Hint {
-  field: 'caption' | 'media';
+  /** `rede` = ajuste específico de plataforma (privacidade do TikTok, etc.). */
+  field: 'caption' | 'media' | 'rede';
   problem: boolean;
   text: string;
 }
