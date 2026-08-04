@@ -45,6 +45,13 @@ const ESCADA_DE_METRICAS = [
 ];
 
 export interface ResultadoSonda {
+  comentarios?: {
+    lidos: number;
+    com_autor: number;
+    exemplo_autor: string | null;
+    erro: string | null;
+    veredito: string;
+  };
   posts_com_metrica: number;
   corte_em: string | null;
   conta: string;
@@ -179,6 +186,7 @@ export async function probeInstagramHistory(account: Account, env: Env): Promise
 
   return {
     conta: account.display_name,
+    comentarios: await sondarComentarios(posts.slice(0, 5).map((p) => p.id), token),
     posts_com_metrica: postsComMetrica,
     corte_em: corteEm,
     permissoes_concedidas: permissoes,
@@ -216,6 +224,65 @@ async function temMetrica(mediaId: string, token: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * O `from.username` do comentário volta?
+ *
+ * A pergunta que decide se "quem conversa comigo" é construível. Desde ago/2024 o campo `username`
+ * exige `instagram_manage_comments`, e a doc diz que contas com papel no Business Manager podem
+ * precisar TAMBÉM de ads_read/ads_management — permissão difícil de justificar num agendador. Em
+ * Development Mode dá pra descobrir isso antes de submeter, em vez de depois.
+ */
+async function sondarComentarios(
+  mediaIds: string[],
+  token: string
+): Promise<ResultadoSonda['comentarios']> {
+  let lidos = 0;
+  let comAutor = 0;
+  let exemplo: string | null = null;
+  let erro: string | null = null;
+
+  for (const id of mediaIds) {
+    try {
+      const res = await fetchWithRetry(
+        `${GRAPH}/${id}/comments?fields=id,text,timestamp,from{id,username}&limit=25` +
+          `&access_token=${encodeURIComponent(token)}`
+      );
+      const json = (await res.json()) as {
+        data?: Array<{ from?: { username?: string } }>;
+        error?: { message?: string; code?: number };
+      };
+      if (!res.ok || json.error) {
+        erro = `${json.error?.code ?? res.status}: ${json.error?.message ?? 'sem detalhe'}`;
+        continue;
+      }
+      for (const c of json.data ?? []) {
+        lidos++;
+        if (c.from?.username) {
+          comAutor++;
+          exemplo ??= c.from.username;
+        }
+      }
+    } catch (err) {
+      erro = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  return {
+    lidos,
+    com_autor: comAutor,
+    exemplo_autor: exemplo,
+    erro,
+    veredito:
+      lidos === 0
+        ? erro
+          ? `nenhum comentário lido — ${erro}`
+          : 'nenhum comentário nos posts recentes (sem erro: a permissão pode estar OK)'
+        : comAutor === 0
+          ? 'comentários vêm, mas SEM autor — falta instagram_manage_comments (ou ads_read, se a Página for de Portfólio)'
+          : `${comAutor} de ${lidos} comentários vieram com autor. "Quem conversa comigo" é construível.`,
+  };
 }
 
 /** Índices espalhados no tempo: mais novo, 25%, 50%, 75% e mais antigo. */

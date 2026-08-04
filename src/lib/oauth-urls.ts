@@ -54,6 +54,7 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
         //   instagram_content_publish→ POST /{ig}/media e /{ig}/media_publish
         //   instagram_manage_insights→ insights do post + followers_count
         //   read_insights            → post_impressions da Página
+        //   instagram_manage_comments→ GET /{ig-media}/comments com o campo `from` (quem comentou)
         //
         //   business_management    → GET /me/accounts ENXERGAR Página de Portfólio de Negócios
         //
@@ -72,7 +73,7 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
         //
         // Escopo novo só tem efeito ao (re)conectar: conta já conectada precisa passar pelo
         // consentimento de novo pra ganhá-lo.
-        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,read_insights,business_management'
+        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,instagram_manage_comments,read_insights,business_management'
       );
       return u.toString();
     }
