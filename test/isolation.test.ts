@@ -124,6 +124,14 @@ describe('isolação entre donos', () => {
     expect(body.accounts.map((a) => a.id)).toEqual(['acc-alice']);
   });
 
+  it('DELETE /api/accounts/:id de outro dono é 404 e NÃO desconecta', async () => {
+    const res = await call(asUser(alice, `/api/accounts/${bob.accountId}`, { method: 'DELETE' }));
+    expect(res.status).toBe(404);
+    // A asserção que importa: 404 mas token apagado seria pior que não recusar.
+    const row = await env.DB.prepare(`select status from accounts where id = ?`).bind(bob.accountId).first<{ status: string }>();
+    expect(row?.status).toBe('active');
+  });
+
   it('GET /api/posts não devolve posts de outro dono', async () => {
     const res = await call(asUser(alice, '/api/posts'));
     const body = (await res.json()) as { posts: Array<{ body: string }> };

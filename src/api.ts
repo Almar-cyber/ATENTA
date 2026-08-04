@@ -1,4 +1,5 @@
 import { adapters } from './adapters/index.js';
+import { probeInstagramHistory } from './metrics/probe.js';
 import { nowIso, rowToAccount, rowToMediaAsset } from './lib/db.js';
 import { getAccountTokens } from './lib/tokens.js';
 import { fetchWithRetry } from './lib/http.js';
@@ -59,6 +60,9 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
 
   if (pathname === '/api/accounts' && method === 'GET') return listAccounts(owner, env);
 
+  const disconnectMatch = /^\/api\/accounts\/([^/]+)$/.exec(pathname);
+  if (disconnectMatch && method === 'DELETE') return disconnectAccount(disconnectMatch[1], owner, env);
+
   const connectMatch = /^\/api\/connect\/([^/]+)$/.exec(pathname);
   if (connectMatch && method === 'GET') return startConnect(connectMatch[1], url, owner, env);
 
@@ -91,6 +95,11 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   const metricsSeriesMatch = /^\/api\/metrics\/([^/]+)$/.exec(pathname);
   if (metricsSeriesMatch && method === 'GET') return getMetricsSeries(metricsSeriesMatch[1], owner, env);
 
+  // Sonda TEMPORÁRIA: mede até onde o Instagram devolve métrica de post antigo, pra decidir se o
+  // backfill de histórico vale a migração no schema. Some assim que a decisão for tomada.
+  const probeMatch = /^\/api\/metrics\/probe\/([^/]+)$/.exec(pathname);
+  if (probeMatch && method === 'GET') return runProbe(probeMatch[1], owner, env);
+
   // Prévias do planejador de grade (imagens sem post — só pra ver como o feed vai ficar).
   if (pathname === '/api/grid-previews' && method === 'GET') return listGridPreviews(url, owner, env);
   if (pathname === '/api/grid-previews' && method === 'POST') return createGridPreview(request, owner, env);
@@ -116,6 +125,84 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   if (updatePostMatch && method === 'PATCH') return updatePost(updatePostMatch[1], request, owner, env);
 
   return jsonResponse({ error: 'not found' }, 404);
+}
+
+/**
+ * Desconecta uma conta de rede social: o token sai do banco AGORA.
+ *
+ * A página /data-deletion promete exatamente isto ("remova a conta… apaga o token de acesso
+ * imediatamente"), e é lida pelos revisores das plataformas — promessa que o produto não cumpre é
+ * pior que funcionalidade ausente.
+ *
+ * Duas saídas, conforme o que já passou por esta conta:
+ *
+ * - Nunca publicou nada: a linha some inteira. Não há o que preservar.
+ * - Já tem histórico: o token é apagado e a conta vira 'disabled', mas a LINHA FICA. post_targets
+ *   referencia accounts(id) sem cascade, então apagar levaria junto o registro do que já foi
+ *   publicado — e some do painel um post que existe de verdade na rede social. O que a promessa
+ *   exige é a remoção da credencial, não a do histórico.
+ *
+ * E recusa enquanto houver post a caminho: desconectar no meio deixaria o poller tentando publicar
+ * numa conta sem token, virando falha silenciosa em vez de decisão consciente.
+ */
+async function disconnectAccount(accountId: string, owner: string, env: Env): Promise<Response> {
+  const account = await env.DB.prepare(`select id, display_name from accounts where id = ? and owner_id = ?`)
+    .bind(accountId, owner)
+    .first<{ id: string; display_name: string }>();
+  if (!account) return jsonResponse({ error: 'conta não encontrada' }, 404);
+
+  const pendentes = await env.DB.prepare(
+    `select count(*) as n from post_targets
+     where account_id = ? and status in ('draft','queued','publishing','processing')`
+  )
+    .bind(accountId)
+    .first<{ n: number }>();
+  if ((pendentes?.n ?? 0) > 0) {
+    return jsonResponse(
+      {
+        error:
+          `${account.display_name} tem ${pendentes?.n} post(s) ainda por publicar. ` +
+          'Cancele ou exclua esses posts antes de desconectar.',
+      },
+      409
+    );
+  }
+
+  const historico = await env.DB.prepare(`select count(*) as n from post_targets where account_id = ?`)
+    .bind(accountId)
+    .first<{ n: number }>();
+
+  if ((historico?.n ?? 0) === 0) {
+    await env.DB.prepare(`delete from accounts where id = ? and owner_id = ?`).bind(accountId, owner).run();
+    return jsonResponse({ ok: true, removida: true });
+  }
+
+  await env.DB.prepare(
+    `update accounts set token_ciphertext = null, token_iv = null, access_token_expires_at = null,
+     refresh_token_expires_at = null, scope = null, status = 'disabled', updated_at = ?
+     where id = ? and owner_id = ?`
+  )
+    .bind(nowIso(), accountId, owner)
+    .run();
+  return jsonResponse({ ok: true, removida: false, historico_preservado: historico?.n ?? 0 });
+}
+
+async function runProbe(accountId: string, owner: string, env: Env): Promise<Response> {
+  // Escopado pelo dono como todo o resto: a sonda lê o token de uma conta conectada, e ninguém
+  // pode apontá-la para a conta de outra pessoa.
+  const row = await env.DB.prepare(`select * from accounts where id = ? and owner_id = ?`)
+    .bind(accountId, owner)
+    .first();
+  if (!row) return jsonResponse({ error: 'conta não encontrada' }, 404);
+  const account = rowToAccount(row as never);
+  if (account.platform !== 'instagram') {
+    return jsonResponse({ error: 'a sonda hoje só cobre o Instagram' }, 400);
+  }
+  try {
+    return jsonResponse(await probeInstagramHistory(account, env));
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 502);
+  }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

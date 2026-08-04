@@ -1,4 +1,6 @@
-import { ArrowLeft } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, Unlink } from 'lucide-react';
+import { toast } from 'sonner';
 import { useScheduler } from '@/store';
 import type { Account, Platform } from '@/lib/types';
 import { PLATFORMS, PLATFORM_LABELS } from '@/lib/platforms';
@@ -20,7 +22,31 @@ function connectHref(platform: Platform): string {
 }
 
 export function ConnectionsView({ onBack }: { onBack: () => void }) {
-  const { accounts } = useScheduler();
+  const { accounts, reload } = useScheduler();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // Desconectar apaga o token no servidor. A confirmação existe porque a ação é irreversível pelo
+  // app — voltar exige passar pelo consentimento da rede social de novo.
+  async function disconnect(id: string, nome: string) {
+    if (!window.confirm(`Desconectar "${nome}"? O acesso é apagado agora, e reconectar exige passar pelo consentimento da rede de novo.`)) return;
+    setBusy(id);
+    try {
+      const res = await fetch(`/api/accounts/${id}`, { method: 'DELETE', credentials: 'include' });
+      const json = (await res.json().catch(() => null)) as { error?: string; removida?: boolean } | null;
+      if (!res.ok) throw new Error(json?.error ?? 'Não foi possível desconectar.');
+      toast.success(
+        json?.removida
+          ? `${nome} desconectada.`
+          : `${nome} desconectada — o histórico do que já foi publicado continua no painel.`
+      );
+      await reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Não foi possível desconectar.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
 
   return (
     <Card className="h-full">
@@ -53,11 +79,25 @@ export function ConnectionsView({ onBack }: { onBack: () => void }) {
                 <CardContent className="flex flex-1 flex-col gap-2">
                   {hasAccounts &&
                     platformAccounts.map((a) => (
-                      <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2">
+                      <div key={a.id} className="group flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2">
                         <span className="truncate text-sm">{a.display_name}</span>
-                        <Badge variant="secondary" className={STATUS_PILL[a.status].cls}>
-                          {STATUS_PILL[a.status].label}
-                        </Badge>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <Badge variant="secondary" className={STATUS_PILL[a.status].cls}>
+                            {STATUS_PILL[a.status].label}
+                          </Badge>
+                          {/* Sempre visível no toque, revelado no hover no mouse: ação destrutiva
+                              escondida atrás de hover é inalcançável em tela sensível ao toque. */}
+                          <button
+                            type="button"
+                            aria-label={`Desconectar ${a.display_name}`}
+                            title="Desconectar"
+                            disabled={busy === a.id}
+                            onClick={() => void disconnect(a.id, a.display_name)}
+                            className="rounded-md p-1 text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                          >
+                            <Unlink className="size-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
 
