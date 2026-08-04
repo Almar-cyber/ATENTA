@@ -18,6 +18,7 @@
 import { nowIso } from '../lib/db.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { fetchWithRetry } from '../lib/http.js';
+import { MEDIA_METRIC_LADDER } from './instagram.js';
 import type { Env } from '../lib/env.js';
 import type { Account } from '../lib/types.js';
 
@@ -46,6 +47,9 @@ export interface PostExterno {
 }
 
 export interface Metricas {
+  follows?: number | null;
+  profile_visits?: number | null;
+  interactions?: number | null;
   impressions?: number | null;
   reach?: number | null;
   likes?: number | null;
@@ -122,8 +126,9 @@ export async function gravar(
       await env.DB.prepare(
         `insert into post_metrics
            (id, post_target_id, external_post_id, platform, fetched_at,
-            impressions, reach, likes, comments, shares, saves, video_views, raw)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            impressions, reach, likes, comments, shares, saves, video_views,
+            follows, profile_visits, interactions, raw)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           crypto.randomUUID(),
@@ -138,6 +143,9 @@ export async function gravar(
           m.shares ?? null,
           m.saves ?? null,
           m.video_views ?? null,
+          m.follows ?? null,
+          m.profile_visits ?? null,
+          m.interactions ?? null,
           JSON.stringify(m.raw ?? {})
         )
         .run();
@@ -223,6 +231,10 @@ async function lerInsightsIg(mediaId: string, token: string): Promise<Metricas |
       likes: por.likes ?? null,
       comments: por.comments ?? null,
       shares: por.shares ?? null,
+      video_views: por.views ?? null,
+      follows: por.follows ?? null,
+      profile_visits: por.profile_visits ?? null,
+      interactions: por.total_interactions ?? null,
       raw: json.data,
     };
   } catch {

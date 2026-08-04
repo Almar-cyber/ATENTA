@@ -10,6 +10,7 @@ import { useScheduler } from '@/store';
 import { toast } from 'sonner';
 import { fmtDateTime } from '@/lib/format';
 import { PlatformIcon } from './PlatformIcon';
+import { BestHoursChart } from './BestHoursChart';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -93,8 +94,36 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
     const comments = byPlatform.reduce((s, p) => s + p.comments, 0);
     const views = byPlatform.reduce((s, p) => s + p.views, 0);
     const newFollowers = followers.reduce((s, f) => s + ((f.followers ?? 0) - (f.followers_first ?? f.followers ?? 0)), 0);
-    return { likes, comments, views, newFollowers };
-  }, [byPlatform, followers]);
+    const reach = (metrics ?? []).reduce((s, m) => s + (m.reach ?? 0), 0);
+    const saves = (metrics ?? []).reduce((s, m) => s + (m.saves ?? 0), 0);
+    const follows = (metrics ?? []).reduce((s, m) => s + (m.follows ?? 0), 0);
+    const profileVisits = (metrics ?? []).reduce((s, m) => s + (m.profile_visits ?? 0), 0);
+    return { likes, comments, views, newFollowers, reach, saves, follows, profileVisits };
+  }, [byPlatform, followers, metrics]);
+
+  /**
+   * Seguidores online por hora, somando as contas.
+   *
+   * Somar em vez de mostrar uma por uma: a pergunta é "a que horas eu publico", e ela tem uma
+   * resposta só. Separar por conta devolveria a decisão pro usuário em vez de respondê-la.
+   */
+  const onlineFollowers = useMemo(() => {
+    const total: Record<string, number> = {};
+    let achou = false;
+    for (const f of followers) {
+      if (!f.online_followers) continue;
+      try {
+        const porHora = JSON.parse(f.online_followers) as Record<string, number>;
+        for (const [hora, valor] of Object.entries(porHora)) {
+          total[hora] = (total[hora] ?? 0) + (Number(valor) || 0);
+          achou = true;
+        }
+      } catch {
+        /* snapshot corrompido não pode derrubar a tela */
+      }
+    }
+    return achou ? total : null;
+  }, [followers]);
 
   const followersByPlatform = useMemo(() => {
     const map = new Map<Platform, number>();
@@ -132,32 +161,62 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
     const best = byPlatform[0];
     const worst = byPlatform.length > 1 ? byPlatform[byPlatform.length - 1] : null;
     body = (
-      <div className="space-y-5">
-        {/* Números gerais */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat icon={<Heart className="size-3.5" />} label="Curtidas" value={n(totals.likes)} />
-          <Stat icon={<MessageCircle className="size-3.5" />} label="Comentários" value={n(totals.comments)} />
-          <Stat icon={<Play className="size-3.5" />} label="Views" value={n(totals.views)} />
-          <Stat
-            icon={<UserPlus className="size-3.5" />}
-            label="Novos seguidores"
-            value={followers.some((f) => f.followers != null) ? signed(totals.newFollowers) : '—'}
-            hint={followers.some((f) => f.followers != null) ? 'desde o início da coleta' : 'coletando…'}
-          />
-        </div>
-
-        {/* Insights estatísticos (sem IA): melhor horário, formato, post, tendência de seguidores... */}
-        <Destaques metrics={metrics} followers={followers} />
-
-        {/* Rede que mais/menos performou */}
-        {best && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Highlight kind="up" agg={best} />
-            {worst && <Highlight kind="down" agg={worst} />}
+      <div className="space-y-6">
+        <Secao titulo="Alcance e engajamento">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Stat icon={<Eye className="size-3.5" />} label="Alcance" value={n(totals.reach)} />
+            <Stat icon={<Heart className="size-3.5" />} label="Curtidas" value={n(totals.likes)} />
+            <Stat icon={<MessageCircle className="size-3.5" />} label="Comentários" value={n(totals.comments)} />
+            <Stat icon={<Play className="size-3.5" />} label="Views" value={n(totals.views)} />
           </div>
+        </Secao>
+
+        {/* O grupo que faltava: o painel dizia quanto aplaudiram, nunca o que a peça RENDEU. */}
+        <Secao titulo="O que isso rendeu">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Stat
+              icon={<UserPlus className="size-3.5" />}
+              label="Seguidores dos posts"
+              value={totals.follows > 0 ? signed(totals.follows) : '—'}
+              hint={totals.follows > 0 ? 'somados os posts do período' : 'coletando…'}
+            />
+            <Stat
+              icon={<ExternalLink className="size-3.5" />}
+              label="Visitas ao perfil"
+              value={totals.profileVisits > 0 ? n(totals.profileVisits) : '—'}
+              hint={totals.profileVisits > 0 ? 'vindas dos posts' : 'coletando…'}
+            />
+            <Stat
+              icon={<TrendingUp className="size-3.5" />}
+              label="Novos seguidores"
+              value={followers.some((f) => f.followers != null) ? signed(totals.newFollowers) : '—'}
+              hint={followers.some((f) => f.followers != null) ? 'desde o início da coleta' : 'coletando…'}
+            />
+            <Stat icon={<Bookmark className="size-3.5" />} label="Salvamentos" value={n(totals.saves)} />
+          </div>
+        </Secao>
+
+        {onlineFollowers && (
+          <Secao titulo="Quando publicar">
+            <div className="rounded-xl border-2 border-brand bg-card p-4 shadow-[3px_3px_0_0_var(--brand)]">
+              <BestHoursChart data={onlineFollowers} />
+            </div>
+          </Secao>
         )}
 
-        {/* Redes — clicáveis pro detalhe */}
+        <Secao titulo="Destaques">
+          <Destaques metrics={metrics} followers={followers} />
+        </Secao>
+
+        {best && (
+          <Secao titulo="Comparando as redes">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Highlight kind="up" agg={best} />
+              {worst && <Highlight kind="down" agg={worst} />}
+            </div>
+          </Secao>
+        )}
+
         <div>
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Por rede</div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -262,6 +321,20 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
 
 // Bloco de insights estatísticos (sem IA). Reusado na visão geral (todas as redes) e no detalhe de
 // cada rede (só os posts dela) — as guardas de amostra em computeInsights evitam ruído com poucos.
+/**
+ * Bloco com título. O board tinha cinco grupos de conteúdo empilhados sem separação nenhuma, e o
+ * olho não sabia onde um assunto terminava e o outro começava. Um título por grupo resolve mais que
+ * qualquer reorganização de cards.
+ */
+function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{titulo}</h3>
+      {children}
+    </section>
+  );
+}
+
 function Destaques({ metrics, followers = [] }: { metrics: PostMetricRow[]; followers?: FollowerRow[] }) {
   const insights = computeInsights(metrics, followers);
   if (insights.length === 0) return null;

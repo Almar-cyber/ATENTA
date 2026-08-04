@@ -24,6 +24,12 @@ export interface PostMetricsSnapshot {
   saves?: number;
   video_views?: number;
   avg_watch_seconds?: number;
+  /** Seguidores que ESTE post trouxe — a resposta pra "qual post me rendeu gente nova". */
+  follows?: number;
+  /** Quem foi ver o perfil por causa dele. */
+  profile_visits?: number;
+  /** total_interactions: o engajamento consolidado do jeito que a Meta calcula. */
+  interactions?: number;
   /** Corpo bruto da API, pro que é específico da rede (guardado em post_metrics.raw). */
   raw: unknown;
 }
@@ -32,6 +38,10 @@ export interface AccountMetricsSnapshot {
   followers?: number;
   reach?: number;
   profile_views?: number;
+  /** Seguidores online por hora do dia (chave '0'..'23'). */
+  online_followers?: Record<string, number> | null;
+  /** Faixa etária, gênero, cidade e país de quem segue. */
+  demographics?: Record<string, unknown> | null;
   raw: unknown;
 }
 

@@ -38,6 +38,11 @@ export interface PostMetricRow {
   shares: number | null;
   saves: number | null;
   video_views: number | null;
+  /** Seguidores que ESTE post trouxe. */
+  follows: number | null;
+  /** Visitas ao perfil originadas nele. */
+  profile_visits: number | null;
+  interactions: number | null;
   avg_watch_seconds: number | null;
 }
 
@@ -52,6 +57,10 @@ export interface FollowerRow {
   followers: number | null; // snapshot mais recente
   followers_first: number | null; // primeiro snapshot (pro delta)
   since: string | null;
+  /** JSON: seguidores online por hora ('0'..'23'). Null enquanto a rede não devolver. */
+  online_followers: string | null;
+  /** JSON: faixa etária, gênero, cidade e país de quem segue. */
+  demographics: string | null;
 }
 
 export function getFollowers(): Promise<{ followers: FollowerRow[] }> {

@@ -254,8 +254,9 @@ async function stepCollectAccountMetrics(env: Env): Promise<void> {
       const snap = await fetcher.fetchAccountMetrics(account, env);
       if (snap) {
         await env.DB.prepare(
-          `insert into account_metrics (id, account_id, fetched_at, followers, reach, profile_views, raw)
-           values (?, ?, ?, ?, ?, ?, ?)`
+          `insert into account_metrics
+             (id, account_id, fetched_at, followers, reach, profile_views, online_followers, demographics, raw)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
           .bind(
             crypto.randomUUID(),
@@ -264,6 +265,8 @@ async function stepCollectAccountMetrics(env: Env): Promise<void> {
             snap.followers ?? null,
             snap.reach ?? null,
             snap.profile_views ?? null,
+            snap.online_followers ? JSON.stringify(snap.online_followers) : null,
+            snap.demographics ? JSON.stringify(snap.demographics) : null,
             JSON.stringify(snap.raw ?? {})
           )
           .run();
@@ -278,8 +281,9 @@ async function insertPostMetrics(env: Env, target: PostTarget, snap: PostMetrics
   await env.DB.prepare(
     `insert into post_metrics
        (id, post_target_id, external_post_id, platform, fetched_at,
-        impressions, reach, likes, comments, shares, saves, video_views, avg_watch_seconds, raw)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        impressions, reach, likes, comments, shares, saves, video_views, avg_watch_seconds,
+        follows, profile_visits, interactions, raw)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       crypto.randomUUID(),
@@ -295,6 +299,9 @@ async function insertPostMetrics(env: Env, target: PostTarget, snap: PostMetrics
       snap.saves ?? null,
       snap.video_views ?? null,
       snap.avg_watch_seconds ?? null,
+      snap.follows ?? null,
+      snap.profile_visits ?? null,
+      snap.interactions ?? null,
       JSON.stringify(snap.raw ?? {})
     )
     .run();

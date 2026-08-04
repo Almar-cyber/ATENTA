@@ -1176,7 +1176,7 @@ async function listMetrics(owner: string, env: Env): Promise<Response> {
             -- No YouTube o conteúdo é o título (body vazio); cai nele quando não há legenda.
             coalesce(nullif(pt.caption_override, ''), nullif(sp.body, ''), sp.title) as caption,
             m.fetched_at, m.impressions, m.reach, m.likes, m.comments, m.shares, m.saves,
-            m.video_views, m.avg_watch_seconds
+            m.video_views, m.avg_watch_seconds, m.follows, m.profile_visits, m.interactions
        from post_targets pt
        join accounts a on a.id = pt.account_id
        join scheduled_posts sp on sp.id = pt.scheduled_post_id
@@ -1200,7 +1200,13 @@ async function listFollowers(owner: string, env: Env): Promise<Response> {
     `select a.id as account_id, a.platform, a.display_name,
             (select followers from account_metrics m where m.account_id = a.id order by m.fetched_at desc limit 1) as followers,
             (select followers from account_metrics m where m.account_id = a.id order by m.fetched_at asc limit 1) as followers_first,
-            (select fetched_at from account_metrics m where m.account_id = a.id order by m.fetched_at asc limit 1) as since
+            (select fetched_at from account_metrics m where m.account_id = a.id order by m.fetched_at asc limit 1) as since,
+            -- Retrato mais RECENTE que não seja nulo: nem toda coleta traz os dois (a Meta esconde
+            -- demografia de perfil pequeno), e pegar só o último snapshot devolveria nulo à toa.
+            (select online_followers from account_metrics m where m.account_id = a.id
+              and m.online_followers is not null order by m.fetched_at desc limit 1) as online_followers,
+            (select demographics from account_metrics m where m.account_id = a.id
+              and m.demographics is not null order by m.fetched_at desc limit 1) as demographics
        from accounts a where a.status = 'active' and a.owner_id = ?`
   )
     .bind(owner)
