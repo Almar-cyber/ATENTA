@@ -73,3 +73,24 @@ export function onPrefillMedia(fn: MediaListener): () => void {
 export function requestPrefillMedia(payload: PrefillMediaPayload): void {
   for (const fn of mediaListeners) fn(payload);
 }
+
+// ---------------------------------------------------------------------------
+// "Quero conectar uma conta"
+//
+// Nasce do estado vazio do AccountPicker, que fica DENTRO do modal do compositor: pra levar a
+// pessoa até Conexões é preciso fechar o modal e trocar a tela, e as duas coisas moram no App.
+// Passar callback por prop atravessaria PostComposer só de passagem — o mesmo prop-drilling que
+// este barramento existe pra evitar.
+// ---------------------------------------------------------------------------
+
+type ConnectListener = () => void;
+const connectListeners = new Set<ConnectListener>();
+
+export function onConnectRequest(fn: ConnectListener): () => void {
+  connectListeners.add(fn);
+  return () => connectListeners.delete(fn);
+}
+
+export function requestConnections(): void {
+  connectListeners.forEach((fn) => fn());
+}

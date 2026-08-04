@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { PostComposer } from '@/components/PostComposer';
+import { onConnectRequest } from '@/lib/composer-bus';
 import { PlatformAvatar } from '@/components/PlatformAvatar';
 import { AlertBanner } from '@/components/AlertBanner';
 import { ListView } from '@/components/ListView';
@@ -175,6 +176,16 @@ function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =
 
   const openComposer = useCallback(() => setComposerOpen(true), []);
   const closeComposer = useCallback(() => setComposerOpen(false), []);
+
+  // Pedido vindo do estado vazio do seletor de contas, lá dentro do compositor.
+  useEffect(
+    () =>
+      onConnectRequest(() => {
+        setComposerOpen(false);
+        setScreen('connections');
+      }),
+    []
+  );
 
   // OAuth round-trip: o callback do Worker redireciona pra /?connected=<rede> (ou connect_error).
   // Lê o param no mount, atualiza as contas, abre o modal de sucesso e limpa a URL.

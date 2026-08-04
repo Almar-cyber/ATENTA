@@ -47,7 +47,7 @@ export function EmptyState({
   className?: string;
   children?: React.ReactNode;
 }) {
-  const showArt = art && size === 'md';
+  const showArt = !!art;
 
   return (
     <div
@@ -59,7 +59,12 @@ export function EmptyState({
       )}
     >
       {showArt && (
-        <div className="relative mx-auto mb-6 grid size-40 place-items-center sm:size-48">
+        <div
+          className={cn(
+            'relative mx-auto grid place-items-center',
+            size === 'md' ? 'mb-6 size-40 sm:size-48' : 'mb-3 size-24'
+          )}
+        >
           <div aria-hidden className="absolute inset-0 rounded-full bg-secondary" />
           {/* alt vazio + aria-hidden: é decoração. O texto abaixo carrega a informação, e descrever
               o desenho só faria o leitor de tela repetir o assunto. */}
@@ -68,12 +73,17 @@ export function EmptyState({
             alt=""
             aria-hidden
             draggable={false}
-            className="animate-float relative h-28 w-auto select-none sm:h-32"
+            className={cn(
+              'animate-float relative w-auto select-none',
+              size === 'md' ? 'h-28 sm:h-32' : 'h-16'
+            )}
           />
         </div>
       )}
 
-      {title && <p className="text-lg font-semibold text-foreground">{title}</p>}
+      {title && (
+        <p className={cn('font-semibold text-foreground', size === 'md' ? 'text-lg' : 'text-sm')}>{title}</p>
+      )}
       {children && (
         <div
           className={cn(

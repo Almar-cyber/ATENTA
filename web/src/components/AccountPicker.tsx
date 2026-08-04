@@ -1,7 +1,9 @@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Link2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { requestConnections } from '@/lib/composer-bus';
 import type { Account } from '@/lib/types';
 import { PLATFORM_COLORS, PLATFORM_LABELS } from '@/lib/platforms';
 import { PlatformIcon } from './PlatformIcon';
@@ -18,7 +20,23 @@ export function AccountPicker({
   onChange: (next: Set<string>) => void;
 }) {
   if (accounts.length === 0) {
-    return <EmptyState size="sm">Nenhuma conta autenticada ainda.</EmptyState>;
+    // Este é o primeiro obstáculo real de quem acabou de entrar: abre "Novo post" e não tem o que
+    // selecionar. Dizer só "nenhuma conta" deixa a pessoa parada; o botão leva ao lugar que resolve.
+    return (
+      <EmptyState
+        size="sm"
+        art="conectar"
+        title="Nenhuma rede conectada"
+        action={
+          <Button size="sm" onClick={() => requestConnections()}>
+            <Link2 className="size-3.5" />
+            Conectar uma conta
+          </Button>
+        }
+      >
+        Conecte pelo menos uma conta para escolher onde este post vai sair.
+      </EmptyState>
+    );
   }
 
   const activeIds = accounts.filter((a) => a.status === 'active').map((a) => a.id);
