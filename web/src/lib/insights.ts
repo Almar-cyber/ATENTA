@@ -9,6 +9,17 @@ export interface Insight {
   headline: string;
   detail?: string;
   tone: 'good' | 'bad' | 'neutral';
+  /**
+   * Onde este insight faz sentido.
+   *
+   * 'geral' = continua verdadeiro somando redes diferentes. 'rede' = só dentro de uma.
+   *
+   * A distinção não é organização, é HONESTIDADE. "Seu melhor post" comparando um carrossel do
+   * Instagram com um vídeo do YouTube não significa nada: são públicos, formatos e denominadores
+   * diferentes, e a taxa normalizada esconde isso em vez de resolver. Já "você ganha N seguidores
+   * por semana" é uma soma, e soma atravessa rede sem mentir.
+   */
+  escopo: 'geral' | 'rede';
 }
 
 export function engagement(m: PostMetricRow): number {
@@ -61,6 +72,7 @@ function computeFollowerTrend(followers: FollowerRow[]): Insight | null {
   if (perWeek === 0) return null;
   return {
     id: 'follower-trend',
+      escopo: 'geral',
     headline: perWeek > 0 ? `Você ganha ~${fmt(perWeek)} seguidores por semana` : `Você perde ~${fmt(Math.abs(perWeek))} seguidores por semana`,
     detail: `${gain > 0 ? '+' : ''}${fmt(gain)} desde o início da coleta`,
     tone: perWeek > 0 ? 'good' : 'bad',
@@ -103,6 +115,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     const bottom = sorted[sorted.length - 1];
     out.push({
       id: 'best-post',
+      escopo: 'rede',
       headline: `Seu melhor post foi "${(top.m.caption || 'sem legenda').slice(0, 40)}"`,
       detail: `${pct(top.rate)} de engajamento sobre o alcance`,
       tone: 'good',
@@ -110,6 +123,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     if (bottom.rate < top.rate * 0.6) {
       out.push({
         id: 'worst-post',
+      escopo: 'rede',
         headline: `O que menos engajou foi "${(bottom.m.caption || 'sem legenda').slice(0, 40)}"`,
         detail: `${pct(bottom.rate)} — bem abaixo do seu melhor`,
         tone: 'bad',
@@ -126,6 +140,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     const label = FORMAT_LABEL[byFormat.key] ?? byFormat.key;
     out.push({
       id: 'best-format',
+      escopo: 'rede',
       headline: `${label} engajam ${byFormat.timesVsRest.toFixed(1).replace('.', ',')}× mais que os outros formatos`,
       detail: 'considere priorizar esse formato',
       tone: 'good',
@@ -146,6 +161,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
       const bucket = TIME_BUCKETS.find((b) => b.id === best.key)!;
       out.push({
         id: 'best-time',
+      escopo: 'rede',
         headline: `Posts ${bucket.label} engajam ${best.timesVsRest.toFixed(1).replace('.', ',')}× mais`,
         detail: 'o melhor horário do seu perfil',
         tone: 'good',
@@ -167,6 +183,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
       const bucket = DURATION_BUCKETS.find((b) => b.id === best.key)!;
       out.push({
         id: 'best-duration',
+      escopo: 'rede',
         headline: `Vídeos ${bucket.label} engajam ${times(best.timesVsRest)}× mais`,
         detail: 'a duração que mais rende no seu perfil',
         tone: 'good',
@@ -195,6 +212,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     if (strongest) {
       out.push({
         id: 'caption',
+      escopo: 'rede',
         headline: `Legendas ${strongest.label} engajam ${times(strongest.times)}× mais`,
         detail: 'vale testar isso mais vezes',
         tone: 'good',
@@ -217,6 +235,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     if (byWeekday && byWeekday.timesVsRest >= 1.25) {
       out.push({
         id: 'best-weekday',
+      escopo: 'rede',
         headline: `${WEEKDAYS[byWeekday.key].charAt(0).toUpperCase() + WEEKDAYS[byWeekday.key].slice(1)}-feira é seu melhor dia`,
         detail: `${byWeekday.timesVsRest.toFixed(1).replace('.', ',')}× o engajamento dos outros dias`,
         tone: 'good',

@@ -205,7 +205,7 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
         )}
 
         <Secao titulo="Destaques">
-          <Destaques metrics={metrics} followers={followers} />
+          <Destaques metrics={metrics ?? []} followers={followers} escopo="geral" />
         </Secao>
 
         {best && (
@@ -335,13 +335,31 @@ function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
   );
 }
 
-function Destaques({ metrics, followers = [] }: { metrics: PostMetricRow[]; followers?: FollowerRow[] }) {
-  const insights = computeInsights(metrics, followers);
+/**
+ * `escopo` decide o que aparece.
+ *
+ * Na visão geral só entram os insights que continuam verdadeiros somando redes — o resto compara
+ * taxa entre peças de redes diferentes, o que é comparação falsa.
+ *
+ * EXCEÇÃO: quando só UMA rede tem dado, não existe mistura, e esconder os insights dela seria
+ * esconder informação correta por causa de um risco que não se materializou. Aí a visão geral mostra
+ * tudo — que é o caso de quem está começando, ou de quem publica em uma rede só.
+ */
+function Destaques({
+  metrics,
+  followers = [],
+  escopo = 'rede',
+}: {
+  metrics: PostMetricRow[];
+  followers?: FollowerRow[];
+  escopo?: 'geral' | 'rede';
+}) {
+  const todos = computeInsights(metrics, followers);
+  const redesComDado = new Set(metrics.map((m) => m.platform)).size;
+  const insights = escopo === 'geral' && redesComDado > 1 ? todos.filter((i) => i.escopo === 'geral') : todos;
   if (insights.length === 0) return null;
   return (
-    <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destaques</div>
-      <div className="grid gap-2 sm:grid-cols-2">
+    <div className="grid gap-2 sm:grid-cols-2">
         {insights.map((ins) => (
           <div key={ins.id} className="flex items-start gap-3 rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]">
             <div className={`grid size-8 shrink-0 place-items-center rounded-full ${ins.tone === 'bad' ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}>
@@ -353,7 +371,6 @@ function Destaques({ metrics, followers = [] }: { metrics: PostMetricRow[]; foll
             </div>
           </div>
         ))}
-      </div>
     </div>
   );
 }
@@ -469,7 +486,9 @@ function PlatformDetail({ platform, metrics, followerRows }: { platform: Platfor
       </div>
 
       {/* Insights só desta rede (melhor post/horário/dia + tendência de seguidores dela). */}
-      <Destaques metrics={metrics} followers={followerRows} />
+      <Secao titulo="Destaques">
+        <Destaques metrics={metrics} followers={followerRows} />
+      </Secao>
 
       <div className="grid gap-3 lg:grid-cols-2">
         {metrics.map((m) => (
