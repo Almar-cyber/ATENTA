@@ -41,6 +41,7 @@ scheduled_posts ─┘                                          ↑
 | `media_assets` | arquivo no R2 + `public_url`, mime, dimensões, duração |
 | `tags` | um **pilar de conteúdo** ("bastidores", "viagem"). Tabela própria, com índice único normalizado por dono — é o que faz o Insights agrupar por assunto sem partir a amostra em "Viagem"/"viagem" (migração 0014) |
 | `grid_previews` | uma **ideia**: um post que ainda não tem data. Texto e/ou imagem, uma posição na grade, nenhum horário de publicação — o poller nunca a enxerga (migrações 0003 e 0013) |
+| `post_comments` | log bruto de comentário lido no Instagram (id da rede como PK — dedup de graça). "Quem comenta com você" é sempre um `group by` na hora de ler, nunca um contador gravado (migração 0015). Cadência própria (`post_targets.next_comments_at`, migração 0016), sem horizonte — ao contrário da de métrica, que congela depois de 60 dias |
 
 **Um post, N destinos.** A legenda vive em `scheduled_posts.body`; cada destino pode divergir via
 `post_targets.caption_override`. O horário é um só, compartilhado por todos os destinos.
@@ -155,6 +156,7 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | POST/PUT | `/api/media/multipart/*` | upload em partes — acima de 60MB estoura o limite de corpo (100MB) e de memória (128MB) do Worker |
 | GET | `/api/media/:id/bytes` | os bytes pela nossa origem, pro recorte no navegador não sujar o canvas |
 | GET | `/api/feed/:accountId` | feed real da conta, ao vivo (Instagram e YouTube) |
+| GET | `/api/accounts/:id/commenters` | "quem comenta com você" — agregado de `post_comments` (não busca ao vivo; comentário não expira como URL de mídia) |
 | GET/POST/PATCH/DELETE | `/api/grid-previews` | ideias: texto e/ou imagem, sem data. Recusa as duas vazias |
 | GET/POST/PATCH/DELETE | `/api/tags` | pilares de conteúdo. Nome repetido devolve o existente; apagar o pilar não apaga as peças |
 
