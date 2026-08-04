@@ -365,7 +365,14 @@ const SCRIPT = `
         if (!j || !j.user) return;
         document.querySelectorAll('a[href="/app"]').forEach(function (a) {
           var texto = a.textContent.trim();
-          if (texto === 'Entrar') a.textContent = 'Ir para o painel';
+          if (texto === 'Entrar') {
+            // O "Entrar" da barra fixa (.signin) senta ao lado do botão "Comece grátis" — os dois
+            // virariam "Ir para o painel" repetido, lado a lado. Esconde o texto solto; o botão
+            // sozinho já leva pro painel. Fora da barra fixa (rodapé) não há botão vizinho, então
+            // ali o "Entrar" isolado continua sendo trocado por texto, como antes.
+            if (a.classList.contains('signin')) a.style.display = 'none';
+            else a.textContent = 'Ir para o painel';
+          }
           else if (texto.indexOf('Comece grátis') === 0) {
             a.innerHTML = a.innerHTML.replace('Comece grátis', 'Ir para o painel');
           }
