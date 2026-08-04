@@ -23,6 +23,8 @@ export function getAccounts(): Promise<{ accounts: Account[] }> {
 // Métricas coletadas (Fase A). `null` = a rede não expõe aquela métrica pra esse post.
 export interface PostMetricRow {
   target_id: string;
+  /** Id do post na própria rede — é por ele que a miniatura ao vivo casa com a métrica. */
+  external_post_id: string | null;
   platform: Platform;
   external_url: string | null;
   published_at: string | null;

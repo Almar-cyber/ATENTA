@@ -1165,7 +1165,7 @@ async function getMediaBytes(id: string, env: Env): Promise<Response> {
 // poller coleta. `m.id = (subquery do último por destino)` pega só o snapshot mais novo de cada um.
 async function listMetrics(owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select pt.id as target_id, pt.platform, pt.external_url, pt.published_at,
+    `select pt.id as target_id, pt.platform, pt.external_url, pt.external_post_id, pt.published_at,
             a.id as account_id, a.display_name as account_name,
             -- Formato (post/reel/story/video/short) pros insights por formato — vem do options JSON.
             json_extract(pt.options, '$.format') as format,

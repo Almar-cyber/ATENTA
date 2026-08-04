@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ArrowLeft, Bookmark, Download, Loader2, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
 import type { FollowerRow, PostMetricRow } from '@/lib/api';
-import { getFollowers, getMetrics } from '@/lib/api';
+import { getAccountFeed, getFollowers, getMetrics } from '@/lib/api';
 import { insightsParaVisao } from '@/lib/insights';
 import type { Platform } from '@/lib/types';
 import { PLATFORM_LABELS } from '@/lib/platforms';
@@ -63,6 +63,40 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
   const [followersAll, setFollowers] = useState<FollowerRow[]>([]);
   const [selected, setSelected] = useState<Platform | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Miniatura por post, buscada AO VIVO da rede.
+   *
+   * A legenda sozinha identifica mal: quem reconhece o post é a imagem. Mas o thumb não pode ser
+   * guardado — as URLs de mídia do Instagram EXPIRAM em dias, e um cache no banco renderia links
+   * quebrados (é a mesma razão pela qual a grade do Grid IG busca ao vivo). E a nossa própria cópia
+   * do arquivo não serve: o poller apaga mídia publicada depois de 30 dias, e post importado nunca
+   * teve arquivo nosso.
+   *
+   * Quem não tiver thumb cai no glyph da rede — o feed devolve os mais recentes, então post antigo
+   * fica sem, o que é melhor que não ter nenhum.
+   */
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let vivo = true;
+    const elegiveis = accounts.filter((a) => a.platform === 'instagram' || a.platform === 'youtube');
+    Promise.all(elegiveis.map((a) => getAccountFeed(a.id).catch(() => ({ items: [] }))))
+      .then((respostas) => {
+        if (!vivo) return;
+        const mapa: Record<string, string> = {};
+        for (const r of respostas) {
+          for (const item of r.items ?? []) {
+            if (item.thumbnail_url) mapa[item.id] = item.thumbnail_url;
+          }
+        }
+        setThumbs(mapa);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, [accounts]);
 
   const carregar = useCallback(
     () =>
@@ -160,6 +194,7 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
   } else if (selected) {
     body = (
       <PlatformDetail
+        thumbs={thumbs}
         platform={selected}
         metrics={metrics.filter((m) => m.platform === selected)}
         followerRows={followers.filter((f) => f.platform === selected)}
@@ -551,7 +586,7 @@ function allMetrics(m: PostMetricRow): { icon: ReactNode; value: number | null; 
 
 // Card de post: resumo (as 2 métricas principais) sempre visível; clicar expande e mostra TODAS as
 // métricas coletadas + quando foi o último snapshot. Pensado pro mobile — nada de scroll horizontal.
-function PostCard({ m, isVideoNet }: { m: PostMetricRow; isVideoNet: boolean }) {
+function PostCard({ m, isVideoNet, thumb }: { m: PostMetricRow; isVideoNet: boolean; thumb?: string }) {
   const [open, setOpen] = useState(false);
   const primary = isVideoNet
     ? { icon: <Play className="size-3.5" />, value: m.video_views, label: 'views' }
@@ -561,6 +596,15 @@ function PostCard({ m, isVideoNet }: { m: PostMetricRow; isVideoNet: boolean }) 
   return (
     <div className="rounded-xl border-2 border-brand bg-card shadow-[3px_3px_0_0_var(--brand)]">
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full cursor-pointer items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-muted/40">
+        {/* A miniatura identifica melhor que a legenda: é a imagem que faz reconhecer o post. Quem
+            não tiver (feed só devolve os recentes) cai no ícone da rede, e o card não desalinha. */}
+        <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-lg border-2 border-brand bg-secondary">
+          {thumb ? (
+            <img src={thumb} alt="" className="size-full object-cover" loading="lazy" />
+          ) : (
+            <PlatformIcon platform={m.platform} className="size-5 opacity-50" />
+          )}
+        </div>
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold leading-snug">
             {m.caption || <span className="text-muted-foreground">sem legenda</span>}
@@ -600,7 +644,7 @@ function PostCard({ m, isVideoNet }: { m: PostMetricRow; isVideoNet: boolean }) 
 }
 
 // Nível 2: os posts de uma rede específica, em cards expansíveis (resumo → detalhe).
-function PlatformDetail({ platform, metrics, followerRows }: { platform: Platform; metrics: PostMetricRow[]; followerRows: FollowerRow[] }) {
+function PlatformDetail({ platform, metrics, followerRows, thumbs }: { platform: Platform; metrics: PostMetricRow[]; followerRows: FollowerRow[]; thumbs: Record<string, string> }) {
   const isVideoNet = platform === 'youtube' || platform === 'tiktok';
   const followerCount = followerRows.reduce((s, f) => s + (f.followers ?? 0), 0);
   const hasFollowers = followerRows.some((f) => f.followers != null);
@@ -620,7 +664,7 @@ function PlatformDetail({ platform, metrics, followerRows }: { platform: Platfor
 
       <div className="grid gap-3 lg:grid-cols-2">
         {metrics.map((m) => (
-          <PostCard key={m.target_id} m={m} isVideoNet={isVideoNet} />
+          <PostCard key={m.target_id} m={m} isVideoNet={isVideoNet} thumb={m.external_post_id ? thumbs[m.external_post_id] : undefined} />
         ))}
       </div>
     </div>
