@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Unlink } from 'lucide-react';
+import { ArrowLeft, TriangleAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useScheduler } from '@/store';
 import type { Account, Platform } from '@/lib/types';
@@ -80,7 +80,21 @@ export function ConnectionsView({ onBack }: { onBack: () => void }) {
                   {hasAccounts &&
                     platformAccounts.map((a) => (
                       <div key={a.id} className="group flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2">
-                        <span className="truncate text-sm">{a.display_name}</span>
+                        <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+                          {a.display_name}
+                          {/* O aviso que faltava: uma conta conectada antes dos escopos de métrica
+                              volta vazia na coleta, e "vazio" é indistinguível de "ainda sem
+                              números". Foi assim que o post_metrics ficou zerado sem ninguém ver. */}
+                          {a.metrics_ready === false && (
+                            <span
+                              title={`Sem métricas: falta ${(a.missing_scopes ?? []).join(', ')}. Reconecte esta conta para ativar.`}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                            >
+                              <TriangleAlert className="size-3" />
+                              sem métricas
+                            </span>
+                          )}
+                        </span>
                         <div className="flex shrink-0 items-center gap-1.5">
                           <Badge variant="secondary" className={STATUS_PILL[a.status].cls}>
                             {STATUS_PILL[a.status].label}

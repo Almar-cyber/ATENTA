@@ -1,4 +1,5 @@
 import { adapters } from './adapters/index.js';
+import { metricsReady, missingMetricsScopes } from './lib/scopes.js';
 import { probeInstagramHistory, probeYoutubeHistory } from './metrics/probe.js';
 import { importInstagram, importYoutube } from './metrics/backfill.js';
 import { nowIso, rowToAccount, rowToMediaAsset } from './lib/db.js';
@@ -266,10 +267,10 @@ function startConnect(platform: string, url: URL, owner: string, env: Env): Resp
 
 async function listAccounts(owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select id, platform, display_name, status, extra from accounts where owner_id = ? order by platform asc`
+    `select id, platform, display_name, status, extra, scope from accounts where owner_id = ? order by platform asc`
   )
     .bind(owner)
-    .all<{ id: string; platform: string; display_name: string; status: string; extra: string }>();
+    .all<{ id: string; platform: string; display_name: string; status: string; extra: string; scope: string | null }>();
 
   const accounts = (results ?? []).map((r) => ({
     id: r.id,
@@ -277,6 +278,10 @@ async function listAccounts(owner: string, env: Env): Promise<Response> {
     display_name: r.display_name,
     status: r.status,
     extra: JSON.parse(r.extra || '{}'),
+    // Escopo NÃO sai daqui: é detalhe interno e o painel só precisa do veredito. O que sai é se a
+    // conta consegue trazer métrica, e o que falta pra ela conseguir.
+    metrics_ready: metricsReady(r.platform as Platform, r.scope),
+    missing_scopes: missingMetricsScopes(r.platform as Platform, r.scope),
   }));
 
   return jsonResponse({ accounts });

@@ -11,6 +11,10 @@ export type PostStatus =
   | 'ambiguous';
 
 export interface Account {
+  /** A conta consegue trazer métrica? false = foi conectada sem os escopos de insights. */
+  metrics_ready?: boolean;
+  /** Quais permissões faltam, pra mensagem poder nomeá-las. */
+  missing_scopes?: string[];
   id: string;
   platform: Platform;
   display_name: string;

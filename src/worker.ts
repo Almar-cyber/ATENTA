@@ -679,7 +679,7 @@ async function handleLinkedinCallback(code: string, request: Request, url: URL, 
   if (!tokenRes.ok) {
     return new Response(`linkedin token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
   }
-  const tokenJson = (await tokenRes.json()) as { access_token: string; expires_in: number };
+  const tokenJson = (await tokenRes.json()) as { access_token: string; expires_in: number; scope?: string };
 
   const userinfoRes = await fetchWithRetry('https://api.linkedin.com/v2/userinfo', {
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
@@ -694,7 +694,7 @@ async function handleLinkedinCallback(code: string, request: Request, url: URL, 
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'linkedin', displayName, memberUrn, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner);
+  await upsertAccount(env, 'linkedin', displayName, memberUrn, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner, tokenJson.scope ?? null);
 
   return connectedRedirect(url, 'linkedin');
 }
@@ -749,9 +749,16 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
   }
 
   const ts = nowIso();
+
+  // O Meta é o único que NÃO devolve a lista de escopos junto com o token — só o /debug_token
+  // conta. Vale a chamada extra: sem ela, uma permissão que o Meta descartou em silêncio (por não
+  // estar em nenhum caso de uso do app) fica invisível até alguém investigar por que a métrica
+  // não vem. Foi exatamente o que aconteceu com instagram_manage_insights.
+  const metaScope = await fetchMetaGrantedScope(longLived.access_token, env);
+
   for (const page of pagesJson.data) {
     const { ciphertext, iv } = await encryptJSON({ access_token: page.access_token }, env.TOKEN_ENCRYPTION_KEY);
-    await upsertAccount(env, 'facebook', page.name, page.id, ciphertext, iv, ts, {}, null, checked.owner);
+    await upsertAccount(env, 'facebook', page.name, page.id, ciphertext, iv, ts, {}, null, checked.owner, metaScope);
 
     const igRes = await fetchWithRetry(
       `https://graph.facebook.com/${GRAPH_VERSION}/${page.id}?fields=instagram_business_account{username}&access_token=${encodeURIComponent(page.access_token)}`
@@ -759,7 +766,7 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
     const igJson = igRes.ok ? ((await igRes.json()) as { instagram_business_account?: { id: string; username?: string } }) : {};
     const ig = igJson.instagram_business_account;
     if (ig?.id) {
-      await upsertAccount(env, 'instagram', ig.username || page.name, ig.id, ciphertext, iv, ts, {}, null, checked.owner);
+      await upsertAccount(env, 'instagram', ig.username || page.name, ig.id, ciphertext, iv, ts, {}, null, checked.owner, metaScope);
     }
   }
 
@@ -769,6 +776,26 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
 // Chaveia por (platform, external_account_id) — várias contas por rede convivem, mas reconectar a
 // MESMA conta (mesmo external id) atualiza a linha em vez de duplicar. `access_token_expires_at`
 // entra aqui em vez de um UPDATE separado por plataforma (que não servia mais no mundo multi-conta).
+/**
+ * Escopos que este token do Meta carrega, via /debug_token. Devolve null se não der pra saber —
+ * null significa "não registrado", que a UI trata como benefício da dúvida (ver lib/scopes.ts).
+ */
+async function fetchMetaGrantedScope(token: string, env: Env): Promise<string | null> {
+  try {
+    const appToken = `${env.META_APP_ID}|${env.META_APP_SECRET}`;
+    const res = await fetchWithRetry(
+      `https://graph.facebook.com/${GRAPH_VERSION}/debug_token` +
+        `?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(appToken)}`
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { scopes?: string[] } };
+    const scopes = json.data?.scopes;
+    return scopes?.length ? scopes.join(',') : null;
+  } catch {
+    return null;
+  }
+}
+
 async function upsertAccount(
   env: Env,
   platform: Platform,
@@ -779,7 +806,10 @@ async function upsertAccount(
   ts: string,
   extra: Record<string, unknown> = {},
   expiresAt: string | null = null,
-  owner: string
+  owner: string,
+  // O escopo REALMENTE concedido (não o pedido). Ver src/lib/scopes.ts: é o que permite o painel
+  // avisar "esta conta não traz métrica" em vez de a coleta falhar em silêncio.
+  grantedScope: string | null = null
 ): Promise<void> {
   // O `and owner_id = ?` mantém contas de donos diferentes separadas mesmo quando é a MESMA conta
   // da rede (duas pessoas podem conectar o mesmo Instagram nas suas próprias áreas).
@@ -797,15 +827,17 @@ async function upsertAccount(
   const extraJson = JSON.stringify(extra);
   if (existing) {
     await env.DB.prepare(
-      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, extra = ?, access_token_expires_at = ?, status = 'active', updated_at = ? where id = ?`
+      // coalesce no scope: uma reconexão que não conseguiu descobrir o escopo (grantedScope null)
+      // não deve APAGAR o que já se sabia da conexão anterior.
+      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, extra = ?, access_token_expires_at = ?, scope = coalesce(?, scope), status = 'active', updated_at = ? where id = ?`
     )
-      .bind(displayName, ciphertext, iv, extraJson, expiresAt, ts, existing.id)
+      .bind(displayName, ciphertext, iv, extraJson, expiresAt, grantedScope, ts, existing.id)
       .run();
   } else {
     await env.DB.prepare(
-      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, extra, access_token_expires_at, owner_id) values (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`
+      `insert into accounts (id, platform, display_name, external_account_id, status, token_ciphertext, token_iv, extra, access_token_expires_at, owner_id, scope) values (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`
     )
-      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv, extraJson, expiresAt, owner)
+      .bind(crypto.randomUUID(), platform, displayName, externalAccountId, ciphertext, iv, extraJson, expiresAt, owner, grantedScope)
       .run();
   }
 }
@@ -825,7 +857,7 @@ async function handlePinterestCallback(code: string, request: Request, url: URL,
     body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
   });
   if (!tokenRes.ok) return new Response(`pinterest token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
-  const tokenJson = (await tokenRes.json()) as { access_token: string; refresh_token: string; expires_in: number };
+  const tokenJson = (await tokenRes.json()) as { access_token: string; refresh_token: string; expires_in: number; scope?: string };
 
   const userRes = await fetchWithRetry('https://api.pinterest.com/v5/user_account', {
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
@@ -885,6 +917,7 @@ async function handleTiktokCallback(code: string, request: Request, url: URL, en
     refresh_token: string;
     expires_in: number;
     open_id: string;
+    scope?: string;
   };
 
   const infoRes = await fetchWithRetry('https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name', {
@@ -898,7 +931,7 @@ async function handleTiktokCallback(code: string, request: Request, url: URL, en
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner);
+  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner, tokenJson.scope ?? null);
 
   return connectedRedirect(url, 'tiktok');
 }
@@ -927,7 +960,7 @@ async function handleYoutubeCallback(code: string, request: Request, url: URL, e
   if (!tokenRes.ok) {
     return new Response(`youtube token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`, { status: 502 });
   }
-  const tokenJson = (await tokenRes.json()) as { access_token: string; refresh_token?: string; expires_in: number };
+  const tokenJson = (await tokenRes.json()) as { access_token: string; refresh_token?: string; expires_in: number; scope?: string };
 
   // Sem refresh_token o poller não consegue renovar e a conta morre em 1h. Acontece quando essa
   // conta Google já autorizou o app antes — o jeito é revogar e reconectar.
@@ -953,7 +986,7 @@ async function handleYoutubeCallback(code: string, request: Request, url: URL, e
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'youtube', displayName, channel?.id ?? '', ciphertext, iv, nowIso(), {}, expiresAt, checked.owner);
+  await upsertAccount(env, 'youtube', displayName, channel?.id ?? '', ciphertext, iv, nowIso(), {}, expiresAt, checked.owner, tokenJson.scope ?? null);
 
   return connectedRedirect(url, 'youtube');
 }
