@@ -649,8 +649,11 @@ export async function renderLandingPage(env: Env): Promise<string> {
   <div class="wrap">
     <div>
       ${mark('mark-img')}
-      Agendamento e planejamento de feed para Instagram, Facebook, YouTube, LinkedIn,
-      Pinterest e TikTok.
+      <!-- O nome em TEXTO, não só no wordmark: a verificação do Google reclamou que "o nome do app
+           não corresponde ao da página inicial", e o logo é PNG — verificador automático não lê nome
+           dentro de imagem. -->
+      <b>ATENTA!</b> — agendamento e planejamento de feed para Instagram, Facebook, YouTube,
+      LinkedIn, Pinterest e TikTok.
     </div>
     <div>
       <h4>Produto</h4>

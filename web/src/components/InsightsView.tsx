@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, Bookmark, Download, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
+import { ArrowLeft, Bookmark, Download, Loader2, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
 import type { FollowerRow, PostMetricRow } from '@/lib/api';
 import { getFollowers, getMetrics } from '@/lib/api';
 import { insightsParaVisao } from '@/lib/insights';
@@ -12,6 +12,7 @@ import { fmtDateTime } from '@/lib/format';
 import { PlatformIcon } from './PlatformIcon';
 import { BestHoursChart } from './BestHoursChart';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 
@@ -63,23 +64,22 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
   const [selected, setSelected] = useState<Platform | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
+  const carregar = useCallback(
+    () =>
       Promise.all([getMetrics(), getFollowers()])
         .then(([m, f]) => {
-          if (!alive) return;
           setMetrics(m.metrics);
           setFollowers(f.followers);
         })
-        .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
-    load();
-    const t = setInterval(load, 60_000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
+        .catch((e) => setError(e instanceof Error ? e.message : String(e))),
+    []
+  );
+
+  useEffect(() => {
+    void carregar();
+    const t = setInterval(() => void carregar(), 60_000);
+    return () => clearInterval(t);
+  }, [carregar]);
 
   // Filtro de conta aplicado na origem: tudo abaixo (agregados, totais, insights, gráfico de
   // horários) deriva daqui, então filtrar num lugar só evita que um bloco escape do filtro.
@@ -278,10 +278,15 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
       return;
     }
     setImporting(true);
+    // Um toast que se atualiza, em vez de um por conta: a importação percorre conta a conta e leva
+    // dezenas de segundos (uma chamada de insights POR POST). Sem isso a tela fica muda o tempo
+    // todo e o botão parece travado.
+    const aviso = toast.loading('Importando histórico…');
     let importados = 0;
     let semMetrica = 0;
     try {
-      for (const conta of elegiveis) {
+      for (const [i, conta] of elegiveis.entries()) {
+        toast.loading(`Importando ${conta.display_name} (${i + 1} de ${elegiveis.length})…`, { id: aviso });
         const res = await fetch(`/api/accounts/${conta.id}/import-history`, {
           method: 'POST',
           credentials: 'include',
@@ -300,10 +305,12 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
         importados === 0
           ? 'Nada novo para importar — o histórico já está aqui.'
           : `${importados} post(s) importados.` +
-            (semMetrica > 0 ? ` ${semMetrica} sem métrica (publicados antes do perfil virar Business).` : '')
+            (semMetrica > 0 ? ` ${semMetrica} sem métrica (publicados antes do perfil virar Business).` : ''),
+        { id: aviso }
       );
-      await reload();
-      window.location.reload();
+      // Recarrega só os dados, não a página: um location.reload() aqui apagaria o toast que acabou
+      // de dizer o resultado.
+      await Promise.all([carregar(), reload()]);
     } finally {
       setImporting(false);
     }
@@ -323,24 +330,32 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
         </div>
         {!selected && (
           <div className="ml-auto flex items-center gap-2">
+            {/* Select do design system, e não <select> nativo: o nativo pinta o menu com o widget do
+                sistema operacional, que não tem a borda de 2px nem a sombra deslocada das outras
+                superfícies flutuantes (ver web/design.md). */}
             {accounts.length > 1 && (
-              <select
-                value={conta}
-                onChange={(e) => setConta(e.target.value)}
-                aria-label="Filtrar por conta"
-                className="h-8 max-w-[42vw] rounded-lg border-2 border-brand bg-card px-2 text-sm font-medium sm:max-w-none"
-              >
-                <option value="">Todas as contas</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {PLATFORM_LABELS[a.platform]} — {a.display_name}
-                  </option>
-                ))}
-              </select>
+              <Select value={conta || 'all'} onValueChange={(v) => setConta(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-[9.5rem] sm:w-56" aria-label="Filtrar por conta">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as contas</SelectItem>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {PLATFORM_LABELS[a.platform]} — {a.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
+            {/* Enquanto importa, o rótulo aparece SEMPRE — inclusive no celular, onde ele é oculto
+                em repouso. Só desabilitar o botão fazia parecer travado: nada girava, nada mudava, e
+                a operação leva dezenas de segundos (uma chamada de insights por post). */}
             <Button variant="outline" size="default" disabled={importing} onClick={() => void importHistory()}>
-              <Download className="size-4" />
-              <span className="hidden sm:inline">{importing ? 'Importando…' : 'Importar histórico'}</span>
+              {importing ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+              <span className={importing ? '' : 'hidden sm:inline'}>
+                {importing ? 'Importando…' : 'Importar histórico'}
+              </span>
             </Button>
           </div>
         )}
