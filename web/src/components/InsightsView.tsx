@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, Bookmark, Download, Loader2, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
+import { Bookmark, Download, Loader2, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
 import type { FollowerRow, PostMetricRow } from '@/lib/api';
 import { getAccountFeed, getFollowers, getMetrics } from '@/lib/api';
 import { insightsParaVisao } from '@/lib/insights';
@@ -13,7 +13,8 @@ import { PlatformIcon } from './PlatformIcon';
 import { BestHoursChart } from './BestHoursChart';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import { ViewHeader } from '@/components/ui/view-header';
 import { EmptyState } from '@/components/ui/empty-state';
 
 const nf = new Intl.NumberFormat('pt-BR');
@@ -358,18 +359,13 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex items-center gap-3 space-y-0">
-        <Button variant="ghost" size="icon-sm" onClick={selected ? () => setSelected(null) : onBack} aria-label="Voltar">
-          <ArrowLeft className="size-4" />
-        </Button>
-        <div className="min-w-0">
-          <CardTitle>{selected ? PLATFORM_LABELS[selected] : 'Insights'}</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            {selected ? 'Detalhe dos posts dessa rede.' : 'Como os posts publicados performaram.'}
-          </p>
-        </div>
-        {!selected && (
-          <div className="ml-auto flex items-center gap-2">
+      <ViewHeader
+        title={selected ? PLATFORM_LABELS[selected] : 'Insights'}
+        description={selected ? 'Detalhe dos posts dessa rede.' : 'Como os posts publicados performaram.'}
+        onBack={selected ? () => setSelected(null) : onBack}
+        actions={
+          !selected && (
+          <>
             {/* Select do design system, e não <select> nativo: o nativo pinta o menu com o widget do
                 sistema operacional, que não tem a borda de 2px nem a sombra deslocada das outras
                 superfícies flutuantes (ver web/design.md). */}
@@ -378,7 +374,9 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
                 <SelectTrigger className="w-[9.5rem] sm:w-56" aria-label="Filtrar por conta">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                {/* `popper` e não o padrão `item-aligned`: o padrão imita select nativo e posiciona o
+                    menu POR CIMA do gatilho, cobrindo os controles ao lado. */}
+                <SelectContent position="popper" sideOffset={6}>
                   <SelectItem value="all">Todas as contas</SelectItem>
                   {accounts.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
@@ -397,9 +395,10 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
                 {importing ? 'Importando…' : 'Importar histórico'}
               </span>
             </Button>
-          </div>
-        )}
-      </CardHeader>
+          </>
+          )
+        }
+      />
       {/* pb-6 pra a sombra deslocada dos cards do último bloco não ser cortada pelo scroll. */}
       <CardContent className="min-h-0 flex-1 overflow-auto pb-6">{body}</CardContent>
     </Card>
@@ -613,11 +612,14 @@ function PostCard({ m, isVideoNet, thumb }: { m: PostMetricRow; isVideoNet: bool
             {m.account_name}
             {m.published_at ? ` · ${fmtDateTime(m.published_at)}` : ''}
           </div>
-          {/* Resumo: só as duas principais, pra caber sem apertar. */}
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-            <Metric {...primary} />
-            <Metric icon={<Heart className="size-3.5" />} value={m.likes} label="curtidas" />
-          </div>
+          {/* Resumo: só as duas principais, e SÓ enquanto fechado — com o painel aberto elas
+              apareciam duas vezes, já que a lista completa abaixo as inclui. */}
+          {!open && (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <Metric {...primary} />
+              <Metric icon={<Heart className="size-3.5" />} value={m.likes} label="curtidas" />
+            </div>
+          )}
         </div>
         <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>

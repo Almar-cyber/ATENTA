@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, TriangleAlert, Unlink } from 'lucide-react';
+import { TriangleAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useScheduler } from '@/store';
 import type { Account, Platform } from '@/lib/types';
@@ -7,6 +7,7 @@ import { PLATFORMS, PLATFORM_LABELS } from '@/lib/platforms';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ViewHeader } from '@/components/ui/view-header';
 import { PlatformAvatar } from './PlatformAvatar';
 
 const STATUS_PILL: Record<Account['status'], { label: string; cls: string }> = {
@@ -50,15 +51,7 @@ export function ConnectionsView({ onBack }: { onBack: () => void }) {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex-row items-center gap-3 space-y-0">
-        <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Voltar">
-          <ArrowLeft className="size-4" />
-        </Button>
-        <div>
-          <CardTitle>Conexões</CardTitle>
-          <p className="text-xs text-muted-foreground">Conecte as contas onde você vai publicar.</p>
-        </div>
-      </CardHeader>
+      <ViewHeader title="Conexões" description="Conecte as contas onde você vai publicar." onBack={onBack} />
 
       <CardContent className="min-h-0 flex-1 overflow-auto">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
