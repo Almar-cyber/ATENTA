@@ -131,7 +131,13 @@ export function HomeView({
              como herói, o rótulo abaixo, o detalhe apagado no rodapé. Numa faixa, tudo isso era uma
              linha só de texto do mesmo tamanho.
              O teto de largura existe porque isto é superfície de leitura: sem ele, a grade continua
-             esticando e os cards voltam a virar retângulos. */
+             esticando e os cards voltam a virar retângulos.
+             AS COLUNAS SÃO FIXAS, e a fileira incompleta (três itens numa grade de cinco) fica com
+             espaço à direita de propósito. A alternativa testada — casar o número de colunas com o
+             número de itens, pra fechar a fileira — piora tudo: com três próximos os cards ficam de
+             quase quinhentos pixels e a capa domina a tela inteira, e o card de pendência volta a
+             ser a faixa achatada que a grade veio substituir. O módulo constante é o que faz uma
+             grade parecer uma grade; sobra à direita lê-se como "são três", não como defeito. */
           <div className="mx-auto w-full max-w-[1500px] space-y-6">
             <Secao titulo="Precisa de você">
               {pendencias.length === 0 ? (
@@ -233,7 +239,7 @@ function PendenciaCard({ p, i, onIr }: { p: Pendencia; i: number; onIr: () => vo
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.15, delay: Math.min(i * 0.03, 0.3) }}
       onClick={onIr}
-      className={`${CARD_BASE} flex min-h-[13rem] flex-col items-start gap-2 p-4 text-left ${
+      className={`${CARD_BASE} flex h-full flex-col items-start gap-3 p-4 text-left ${
         p.grave ? 'border-destructive/40 bg-destructive/10' : 'border-brand bg-card'
       }`}
     >
@@ -244,10 +250,10 @@ function PendenciaCard({ p, i, onIr }: { p: Pendencia; i: number; onIr: () => vo
       >
         {p.icone}
       </span>
-      <span className="mt-auto block w-full leading-tight">
-        <span className="block text-3xl font-bold tabular-nums">{p.quantidade}</span>
-        <span className="mt-0.5 block text-sm font-semibold">{p.titulo}</span>
-        <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+      <span className="mt-auto block w-full leading-none">
+        <span className="block text-4xl font-bold tabular-nums">{p.quantidade}</span>
+        <span className="mt-1.5 block text-sm font-semibold leading-tight">{p.titulo}</span>
+        <span className="mt-1.5 flex items-center gap-1 text-xs leading-tight text-muted-foreground">
           {p.detalhe}
           <ChevronRight className="size-3 shrink-0" />
         </span>
@@ -394,18 +400,23 @@ function Secao({ titulo, className, children }: { titulo: string; className?: st
   );
 }
 
-/** Card estático: número sem hover nenhum, porque não navega — é assim que se distingue de um card
- *  clicável num relance (ver web/design.md). Mesma altura mínima dos de pendência, pra as duas
- *  grades ficarem no mesmo módulo. */
+/**
+ * Card estático: número sem hover nenhum, porque não navega — é assim que se distingue de um card
+ * clicável num relance (ver web/design.md). Mesma composição do card de pendência.
+ *
+ * SEM altura mínima: a grade já iguala os cards de uma fileira pela altura do mais alto, então um
+ * piso fixo só servia pra criar um vão de ar no meio dos que têm texto curto — foi exatamente o
+ * que aconteceu com 13rem. Quem dá presença ao card é o corpo do número, não o espaço vazio.
+ */
 function Numero({ icone, rotulo, valor }: { icone: ReactNode; rotulo: string; valor: string }) {
   return (
-    <div className="flex min-h-[13rem] flex-col items-start gap-2 rounded-xl border-2 border-brand bg-card p-4 shadow-[3px_3px_0_0_var(--brand)]">
+    <div className="flex h-full flex-col items-start gap-3 rounded-xl border-2 border-brand bg-card p-4 shadow-[3px_3px_0_0_var(--brand)]">
       <span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-accent-foreground">
         {icone}
       </span>
-      <span className="mt-auto block leading-tight">
-        <span className="block text-3xl font-bold tabular-nums">{valor}</span>
-        <span className="mt-0.5 block text-sm font-semibold">{rotulo}</span>
+      <span className="mt-auto block leading-none">
+        <span className="block text-4xl font-bold tabular-nums">{valor}</span>
+        <span className="mt-1.5 block text-sm font-semibold leading-tight">{rotulo}</span>
       </span>
     </div>
   );
