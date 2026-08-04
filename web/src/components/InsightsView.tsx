@@ -194,11 +194,27 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
               value={totals.profileVisits > 0 ? n(totals.profileVisits) : '—'}
               hint={totals.profileVisits > 0 ? 'vindas dos posts' : 'coletando…'}
             />
+            {/* "Saldo" e não "Novos seguidores": o número é a diferença entre a primeira leitura e
+                a última, então pode ser NEGATIVO — e "novos seguidores: −1" não quer dizer nada.
+                O ícone acompanha o sinal pelo mesmo motivo: uma seta pra cima ao lado de uma perda
+                dá a leitura errada num relance, que é justamente quando esse card é lido. */}
             <Stat
-              icon={<TrendingUp className="size-3.5" />}
-              label="Novos seguidores"
+              icon={
+                totals.newFollowers < 0 ? (
+                  <TrendingDown className="size-3.5" />
+                ) : (
+                  <TrendingUp className="size-3.5" />
+                )
+              }
+              label="Saldo de seguidores"
               value={followers.some((f) => f.followers != null) ? signed(totals.newFollowers) : '—'}
-              hint={followers.some((f) => f.followers != null) ? 'desde o início da coleta' : 'coletando…'}
+              hint={
+                followers.some((f) => f.followers != null)
+                  ? totals.newFollowers < 0
+                    ? 'perda desde o início da coleta'
+                    : 'desde o início da coleta'
+                  : 'coletando…'
+              }
             />
             <Stat icon={<Bookmark className="size-3.5" />} label="Salvamentos" value={n(totals.saves)} />
           </div>
