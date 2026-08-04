@@ -7,6 +7,24 @@ export function fmtDayHeader(iso: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/**
+ * Quando, do jeito que se fala: "hoje 18h", "amanhã 9h", "qui 12/08 14h".
+ *
+ * O painel lista o que sai a seguir, e ali a pergunta é "falta muito?", não "que data é". Uma data
+ * absoluta obriga a conta de cabeça toda vez — e é a conta que decide se você precisa agir agora.
+ */
+export function fmtQuando(iso: string): string {
+  const d = new Date(iso);
+  const hora = d.toLocaleTimeString('pt-BR', { hour: 'numeric', minute: '2-digit' }).replace(':00', 'h');
+  const hoje = new Date();
+  const amanha = new Date(hoje.getTime() + 86_400_000);
+  if (dayKey(d) === dayKey(hoje)) return `hoje ${hora}`;
+  if (dayKey(d) === dayKey(amanha)) return `amanhã ${hora}`;
+  const dia = d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  // pt-BR devolve "qui., 12/08" — o ponto depois do dia da semana só polui numa linha curta.
+  return `${dia.replace('.,', '')} ${hora}`;
+}
+
 export function dayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }

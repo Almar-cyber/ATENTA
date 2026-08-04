@@ -1,4 +1,4 @@
-import type { Account, GridPreview, Platform, Post } from './types';
+import type { Account, GridPreview, Media, Platform, Post, PostStatus } from './types';
 import type { MediaMetadata } from './mediaMetadata';
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -18,6 +18,42 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 
 export function getAccounts(): Promise<{ accounts: Account[] }> {
   return req('/api/accounts');
+}
+
+/** Um destino que vai sair, no bloco "Sai a seguir" do painel. */
+export interface ProximoPost {
+  post_id: string;
+  target_id: string;
+  platform: Platform;
+  status: PostStatus;
+  account_name: string;
+  scheduled_for: string;
+  titulo: string | null;
+  formato: string | null;
+  media: Media | null;
+}
+
+/**
+ * O resumo do painel, calculado no servidor.
+ *
+ * Não dá pra derivar isso de `getPosts()`: aquela chamada é filtrada por status/plataforma e
+ * limitada a 300 linhas, então os números mudariam conforme o filtro que ficou ligado na Agenda e
+ * o total de publicados seria o teto da página. Ver o comentário de `getSummary` em `src/api.ts`.
+ */
+export interface Summary {
+  /** Destinos por status. Status sem nenhum destino simplesmente não aparece na chave. */
+  por_status: Partial<Record<PostStatus, number>>;
+  atencao: {
+    /** Rascunhos cuja data já passou — não vão publicar sozinhos, e ninguém vai procurá-los. */
+    rascunhos_vencidos: number;
+    /** Na fila e já passou da tolerância: a varredura devia ter pego. */
+    atrasados: number;
+  };
+  proximos: ProximoPost[];
+}
+
+export function getSummary(): Promise<Summary> {
+  return req('/api/summary');
 }
 
 // Métricas coletadas (Fase A). `null` = a rede não expõe aquela métrica pra esse post.

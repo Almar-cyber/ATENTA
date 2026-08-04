@@ -53,6 +53,8 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `FormatPicker` | Escolha do formato dentro da rede (Post/Reel/Story no Instagram, Vídeo/Short no YouTube). Vem **antes da mídia** no composer: é o formato que define o que a rede aceita e, no Instagram, o `media_type` do container. Os formatos ficam em `PLATFORM_FORMATS` (`lib/platforms.ts`) — não hard-code plataforma no componente. |
 | `AccountPicker` | Seletor de contas de destino do composer — chips (`ToggleGroup` multi-seleção do shadcn) em vez de lista de checkbox; conta inativa fica desabilitada com `Tooltip` explicando o motivo. |
 | `PostPreview` | Card que imita o formato de cada rede — a proporção vem do **formato** escolhido, não do arquivo. Vídeo tem play (com som e controles); com capa escolhida, a capa é o que aparece parado e o play toca o vídeo por baixo. Reusado no composer e no dialog. |
+| `HomeView` | **Painel** — a tela inicial. Três grades de cards: *Precisa de você* (pendências acionáveis, cada uma leva à Agenda já filtrada), *Sai a seguir* (próximos posts com a capa em destaque) e *Como foi* (números + link pro Insights). Os dados vêm de `GET /api/summary`, **não** de `getPosts()`: aquela rota é filtrada e paginada, e o painel não pode mudar de número porque um filtro ficou ligado noutra tela. |
+| `ViewHeader` | Cabeçalho das telas de segundo nível (título, descrição, voltar, ações). Existe porque cada tela montava o seu e eles divergiram. Isola a armadilha do `CardHeader` ser **grid**: passar `flex-row` muda a direção sem mudar o `display`, e cada filho vira uma linha. |
 | `ListView` | Lista agrupada por dia, thumbnail real, badge de status, ações inline. |
 | `WeekView` | Vista "Semana": grade horas × 7 dias, cada post na sua hora agendada; clique em slot vazio pré-preenche data/hora. |
 | `CalendarView` | Vista "Mês": grade mensal; chip por post (cor = plataforma, tracejado = rascunho, ⚠ = falhou). Clique em dia vazio pré-preenche a data. |
@@ -88,6 +90,12 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   mobile). No mobile os CTAs do header dividem a linha (`flex-1`), os avatares de conta somem
   (`hidden sm:flex`) e o botão de Filtros vira **só ícone** (`hidden sm:inline` no rótulo). Os
   filtros moram num popover (`FilterMenu`), não soltos na barra.
+- **Card quadrado, não faixa**: numa tela larga, um card de largura total vira uma faixa com o texto
+  num canto e o resto vazio — o olho atravessa a tela pra ligar duas pontas que cabiam num palmo.
+  Grade de cards altos resolve os dois lados: ocupa a largura em colunas e abre espaço pra
+  **hierarquia dentro do card** (número em corpo grande, rótulo, detalhe apagado), coisa que numa
+  faixa era tudo texto do mesmo tamanho na mesma linha. Ver `HomeView`. Grades de leitura levam teto
+  de largura (`max-w-[1500px]`); sem ele a grade continua esticando e os cards viram faixas de novo.
 - **Card clicável vs estático**: no sistema brutalista, o sinal de "clicável" é **levantar no hover e
   afundar no clique** (como os botões). Card de navegação/drill usa
   `transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--brand)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none cursor-pointer`;

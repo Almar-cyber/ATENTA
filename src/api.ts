@@ -92,6 +92,10 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   const mediaBytesMatch = /^\/api\/media\/([^/]+)\/bytes$/.exec(pathname);
   if (mediaBytesMatch && method === 'GET') return getMediaBytes(mediaBytesMatch[1], env);
 
+  // Resumo do painel: contagem por status, o que travou, e o que sai a seguir. Vem do servidor
+  // porque /api/posts é filtrado e paginado — ver o comentário em getSummary.
+  if (pathname === '/api/summary' && method === 'GET') return getSummary(owner, env);
+
   // Métricas coletadas (Fase A, design-analytics.md): o snapshot mais recente por post publicado.
   if (pathname === '/api/metrics' && method === 'GET') return listMetrics(owner, env);
   // Seguidores por conta (mais recente + primeiro snapshot) — pro "novos seguidores".
@@ -1157,6 +1161,132 @@ async function getMediaBytes(id: string, env: Env): Promise<Response> {
       // Imutável: o storage_key carrega o uuid, então o conteúdo daquele endereço nunca muda.
       'Cache-Control': 'public, max-age=31536000, immutable',
     },
+  });
+}
+
+/**
+ * Um post na fila só deveria ficar `queued` até a varredura seguinte. Abaixo desta folga, "atrasado"
+ * é o cron em andamento — e alarme falso num painel é pior que silêncio, porque ensina a ignorá-lo.
+ * O cron roda a cada 10min (wrangler.toml), então 30 significa três varreduras perdidas.
+ */
+const ATRASO_TOLERADO_MS = 30 * 60_000;
+
+/** Quantos destinos aparecem em "Sai a seguir". Cabe na dobra sem virar uma segunda lista. */
+const PROXIMOS_LIMITE = 5;
+
+interface ResumoContagemRow {
+  status: PostTarget['status'];
+  total: number;
+  vencidos: number;
+  atrasados: number;
+}
+
+interface ProximoRow {
+  post_id: string;
+  target_id: string;
+  platform: Platform;
+  status: PostTarget['status'];
+  account_name: string;
+  scheduled_for: string;
+  title: string | null;
+  body: string | null;
+  caption_override: string | null;
+  options: string | null;
+}
+
+/**
+ * O resumo do painel: quantos destinos em cada status, o que está travado, e o que sai a seguir.
+ *
+ * POR QUE NÃO DÁ PRA CALCULAR ISSO NO CLIENTE a partir de `/api/posts`, que ele já carrega:
+ *
+ * 1. aquela rota é FILTRADA por status/plataforma (é o que alimenta os filtros da Agenda). Um painel
+ *    cujos números mudam porque você esqueceu um filtro ligado noutra tela é um bug, não um recorte;
+ * 2. ela é limitada a MAX_POSTS_LIMIT. Com histórico importado, "31 publicados" seria o teto da
+ *    página, não a verdade — e um número truncado que se parece com um número certo é a pior
+ *    espécie de erro, porque ninguém desconfia dele.
+ *
+ * Conta DESTINOS, não posts: `post_targets` é a unidade real de publicação (design.md §2), e é a
+ * mesma unidade que o alerta de falhas e os Insights já contam. Misturar as duas faria o painel
+ * discordar do resto do app.
+ *
+ * O bloco de desempenho ("como foi") NÃO vem daqui de propósito — o cliente soma `/api/metrics` e
+ * `/api/metrics/followers`, exatamente como a tela de Insights faz. Somar de novo aqui criaria uma
+ * segunda fonte pro mesmo número, e duas telas que discordam sobre o próprio alcance custam mais
+ * confiança do que o payload economizado.
+ */
+async function getSummary(owner: string, env: Env): Promise<Response> {
+  const agora = new Date();
+  const agoraIso = agora.toISOString();
+  const limiteAtraso = new Date(agora.getTime() - ATRASO_TOLERADO_MS).toISOString();
+
+  const [contagens, proximos] = await Promise.all([
+    env.DB.prepare(
+      `select pt.status as status,
+              count(*) as total,
+              -- Rascunho com data passada: ficou pra trás de vez. Rascunho NUNCA publica, por mais
+              -- que a data chegue (design.md §3), então ninguém vai buscá-lo — é o item mais
+              -- invisível do app hoje, e a razão principal deste painel existir.
+              sum(case when pt.status = 'draft' and sp.scheduled_for < ? then 1 else 0 end) as vencidos,
+              -- Na fila e já passou da folga: a varredura devia ter pegado e não pegou.
+              sum(case when pt.status = 'queued' and sp.scheduled_for < ? then 1 else 0 end) as atrasados
+         from post_targets pt
+         join scheduled_posts sp on sp.id = pt.scheduled_post_id
+        where sp.owner_id = ?
+        group by pt.status`
+    )
+      .bind(agoraIso, limiteAtraso, owner)
+      .all<ResumoContagemRow>(),
+
+    // Só o que REALMENTE vai sair. Rascunho fica de fora porque não publica: listá-lo aqui seria
+    // uma promessa falsa sobre o que vai acontecer — o lugar dele é o bloco de pendências.
+    env.DB.prepare(
+      `select sp.id as post_id, sp.title, sp.body, sp.scheduled_for,
+              pt.id as target_id, pt.platform, pt.status, pt.caption_override, pt.options,
+              a.display_name as account_name
+         from post_targets pt
+         join scheduled_posts sp on sp.id = pt.scheduled_post_id
+         join accounts a on a.id = pt.account_id
+        where sp.owner_id = ?
+          and pt.status in ('queued', 'publishing', 'processing')
+          and sp.scheduled_for >= ?
+        order by sp.scheduled_for asc
+        limit ?`
+    )
+      .bind(owner, agoraIso, PROXIMOS_LIMITE)
+      .all<ProximoRow>(),
+  ]);
+
+  const porStatus: Record<string, number> = {};
+  let vencidos = 0;
+  let atrasados = 0;
+  for (const linha of contagens.results ?? []) {
+    porStatus[linha.status] = linha.total;
+    vencidos += linha.vencidos ?? 0;
+    atrasados += linha.atrasados ?? 0;
+  }
+
+  const linhasProximos = proximos.results ?? [];
+  const midiaPorDestino = await getMediaByTargetIds(
+    env,
+    linhasProximos.map((r) => r.target_id)
+  );
+
+  return jsonResponse({
+    por_status: porStatus,
+    atencao: { rascunhos_vencidos: vencidos, atrasados },
+    proximos: linhasProximos.map((r) => ({
+      post_id: r.post_id,
+      target_id: r.target_id,
+      platform: r.platform,
+      status: r.status,
+      account_name: r.account_name,
+      scheduled_for: r.scheduled_for,
+      // No YouTube o conteúdo é o título e o corpo vem vazio — mesma queda que o listMetrics faz.
+      titulo: r.caption_override?.trim() || r.body?.trim() || r.title || null,
+      formato: (JSON.parse(r.options || '{}') as { format?: string }).format ?? null,
+      // Só a primeira mídia: é a capa do carrossel, que é o que a miniatura precisa mostrar.
+      media: midiaPorDestino.get(r.target_id)?.[0] ?? null,
+    })),
   });
 }
 

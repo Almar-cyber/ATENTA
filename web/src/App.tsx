@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, CheckCircle2, Link2, LogOut, Plus } from 'lucide-react';
+import { BarChart3, CalendarDays, CheckCircle2, LayoutDashboard, Link2, LogOut, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
@@ -26,6 +26,8 @@ import { WeekView } from '@/components/WeekView';
 import { CalendarView } from '@/components/CalendarView';
 import { GridPlanner } from '@/components/GridPlanner';
 import { InsightsView } from '@/components/InsightsView';
+import { HomeView } from '@/components/HomeView';
+import type { PainelDestino } from '@/components/HomeView';
 import { ConnectionsView } from '@/components/ConnectionsView';
 import { FilterMenu } from '@/components/FilterMenu';
 import { PostDialog } from '@/components/PostDialog';
@@ -33,16 +35,37 @@ import { AuthView } from '@/components/AuthView';
 import { useSession, signOut, type SessionUser } from '@/lib/auth';
 import type { DialogSelection } from '@/components/PostDialog';
 
+/**
+ * Os três destinos do app, na barra de cima.
+ *
+ * Antes o cabeçalho tinha só um botão de Insights solto e a Agenda era a tela implícita — o que
+ * funcionava enquanto havia duas telas. Com o Painel eles viram três lugares de igual estatura, e
+ * uma navegação nomeada diz onde você está, coisa que um botão solto não faz.
+ *
+ * São `Button size="lg"`, e não a pílula de abas: web/design.md proíbe misturar a `TabsList` (h-8)
+ * com os botões (h-11) na mesma fileira, e o botão resolve a altura sozinho.
+ */
+const NAV: { id: Screen; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'home', label: 'Painel', icon: LayoutDashboard },
+  { id: 'scheduler', label: 'Agenda', icon: CalendarDays },
+  { id: 'insights', label: 'Insights', icon: BarChart3 },
+];
+
+/** As telas do app. `connections` fica fora da navegação — chega pelo menu da conta. */
+type Screen = 'home' | 'scheduler' | 'connections' | 'insights';
+
 function Header({
+  screen,
+  onNavigate,
   onNewPost,
   onOpenConnections,
-  onOpenInsights,
   user,
   onSignedOut,
 }: {
+  screen: Screen;
+  onNavigate: (s: Screen) => void;
   onNewPost: () => void;
   onOpenConnections: () => void;
-  onOpenInsights: () => void;
   user: SessionUser;
   onSignedOut: () => void;
 }) {
@@ -50,8 +73,39 @@ function Header({
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 px-3 pb-2 pt-4 sm:gap-4 sm:px-6 sm:pt-6">
       {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores. */}
-      <img src="/atenta-wordmark.png" alt="ATENTA!" className="h-10 w-auto" />
-      <div className="flex w-full items-center justify-end gap-3 sm:ml-auto sm:w-auto">
+      <button type="button" onClick={() => onNavigate('home')} aria-label="Ir para o Painel" className="cursor-pointer">
+        {/* Menor no celular: a 375px o wordmark em h-10 sozinho já não deixava o "Novo post" caber
+            na mesma fileira, e o cabeçalho quebrava numa terceira linha. */}
+        <img src="/atenta-wordmark.png" alt="ATENTA!" className="h-8 w-auto sm:h-10" />
+      </button>
+      {/* No desktop a navegação senta ao lado do wordmark. No celular ela desce pra própria fileira
+          e ocupa a largura toda, dividida em três — o formato de barra de abas, que é onde a mão
+          alcança. Nada disso cabia numa fileira só: logo (144px) + navegação (260px) estouram os
+          351px úteis de uma tela de 375.
+          Lá o ÍCONE some e o RÓTULO fica — o contrário do que o resto do cabeçalho faz, e de
+          propósito: um quadriculado, um calendário e um gráfico lado a lado não dizem para onde
+          levam; a palavra diz. */}
+      <nav className="order-last flex w-full items-center gap-1 sm:order-none sm:w-auto">
+        {NAV.map(({ id, label, icon: Icon }) => {
+          // Conexões não acende nenhum dos três de propósito: ela é ajuste de conta, chega pelo
+          // menu do avatar, e acender a Agenda ali diria que você está num lugar onde não está.
+          const ativo = screen === id;
+          return (
+            <Button
+              key={id}
+              size="lg"
+              variant={ativo ? 'default' : 'ghost'}
+              aria-current={ativo ? 'page' : undefined}
+              onClick={() => onNavigate(id)}
+              className="flex-1 px-2.5 sm:flex-none sm:px-5"
+            >
+              <Icon className="hidden size-4 sm:block" />
+              {label}
+            </Button>
+          );
+        })}
+      </nav>
+      <div className="flex items-center justify-end gap-3 sm:ml-auto">
         {/* Avatares só no desktop: no mobile eles empurravam o "Novo post" pra quebrar, e a função
             (abrir Conexões) já está no botão ao lado. */}
         <button
@@ -77,16 +131,11 @@ function Header({
             ))
           )}
         </button>
-        {/* Insights é o único destino secundário no cabeçalho, e a razão é FREQUÊNCIA: é consulta
-            recorrente. Conexões desceu pro menu da conta — você conecta uma vez e volta lá raramente,
-            e ocupar espaço permanente na barra por uma visita ocasional empurra o CTA primário. Os
-            caminhos que levam a ela continuam: o avatar das contas ao lado e os estados vazios, que
-            é por onde a pessoa chega da primeira vez. Configurações entram no mesmo menu depois. */}
-        <Button size="lg" variant="outline" onClick={onOpenInsights} aria-label="Insights" className="px-3 sm:px-6">
-          <BarChart3 className="size-4" />
-          <span className="hidden sm:inline">Insights</span>
-        </Button>
-        <Button size="lg" onClick={onNewPost} className="flex-1 sm:flex-none">
+        {/* Conexões continua fora da barra e dentro do menu da conta, por FREQUÊNCIA: você conecta
+            uma vez e volta lá raramente, e ocupar espaço permanente por uma visita ocasional
+            empurraria o CTA primário. Os caminhos até ela continuam: os avatares ao lado, os
+            estados vazios e a pendência de reautenticação no Painel. */}
+        <Button size="lg" onClick={onNewPost} className="px-4 sm:px-6">
           <Plus className="size-4" />
           Novo post
         </Button>
@@ -173,7 +222,10 @@ function accountFilter(posts: Post[], accountId: string): Post[] {
 function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () => void }) {
   const { posts, accounts, filters, setFilters, reload } = useScheduler();
   const [view, setView] = useState<View>('list');
-  const [screen, setScreen] = useState<'scheduler' | 'connections' | 'insights'>('scheduler');
+  // O Painel é a tela inicial: o app não tinha porta de entrada, você caía direto numa lista sem
+  // nenhuma leitura do todo — e o rascunho, que é a peça mais fácil de esquecer, não aparecia em
+  // lugar nenhum até você rolar até a data que o compositor inventou pra ele.
+  const [screen, setScreen] = useState<Screen>('home');
   const [selection, setSelection] = useState<DialogSelection | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [justConnected, setJustConnected] = useState(false);
@@ -218,28 +270,71 @@ function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =
 
   const visible = useMemo(() => accountFilter(posts, filters.account), [posts, filters.account]);
 
+  // Uma pendência do Painel leva à Agenda JÁ FILTRADA — é o que transforma a linha em ação em vez
+  // de recado. Sem aplicar o filtro, "3 rascunhos ficaram pra trás" devolveria a pessoa pra mesma
+  // lista onde eles estavam escondidos, que é exatamente o problema que o Painel existe pra evitar.
+  const irPara = useCallback(
+    (destino: PainelDestino) => {
+      if (destino.tipo === 'agenda') {
+        setFilters({ status: destino.status });
+        setView('list');
+        setScreen('scheduler');
+      } else if (destino.tipo === 'conexoes') {
+        setScreen('connections');
+      } else {
+        setScreen('insights');
+      }
+    },
+    [setFilters]
+  );
+
+  // O Painel só tem os ids; o objeto inteiro do post mora no store. Quando um filtro ligado deixa
+  // o post fora do que o store carregou, cair na Agenda limpa é melhor que um clique que não faz
+  // nada — a pessoa continua a um passo do post em vez de achar que o card quebrou.
+  const abrirPost = useCallback(
+    (postId: string, targetId: string) => {
+      const post = posts.find((p) => p.id === postId);
+      const target = post?.targets.find((t) => t.id === targetId);
+      if (post && target) {
+        setSelection({ post, target });
+        return;
+      }
+      setFilters({ status: '', platform: '', account: '' });
+      setView('list');
+      setScreen('scheduler');
+    },
+    [posts, setFilters]
+  );
+
   // h-dvh (dynamic viewport height), não h-screen/100vh: no iOS o 100vh ignora a barra de endereço
   // e fica mais alto que a área visível, sobrando um branco rolável embaixo.
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       <Header
+        screen={screen}
+        onNavigate={setScreen}
         onNewPost={openComposer}
         onOpenConnections={() => setScreen('connections')}
-        onOpenInsights={() => setScreen('insights')}
         user={user}
         onSignedOut={onSignedOut}
       />
-      <AlertBanner
-        onSeeFailures={() => {
-          setFilters({ status: 'failed' });
-          setView('list');
-        }}
-      />
+      {/* A barra some no Painel: o bloco "Precisa de você" diz a mesma coisa com mais ação, e
+          manter as duas seria a informação duplicada duas vezes na mesma tela. */}
+      {screen !== 'home' && (
+        <AlertBanner
+          onSeeFailures={() => {
+            setFilters({ status: 'failed' });
+            setView('list');
+          }}
+        />
+      )}
       <main className="min-h-0 flex-1 px-3 pb-3 pt-2 sm:px-6 sm:pb-6">
-        {screen === 'connections' ? (
+        {screen === 'home' ? (
+          <HomeView onIr={irPara} onAbrirPost={abrirPost} />
+        ) : screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
         ) : screen === 'insights' ? (
-          <InsightsView onBack={() => setScreen('scheduler')} onOpenConnections={() => setScreen('connections')} />
+          <InsightsView onBack={() => setScreen('home')} onOpenConnections={() => setScreen('connections')} />
         ) : (
         <section className="flex h-full flex-col rounded-2xl bg-card p-3 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)] sm:p-5">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">

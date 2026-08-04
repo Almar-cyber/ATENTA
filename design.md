@@ -136,6 +136,7 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | Método | Rota | Papel |
 | --- | --- | --- |
 | GET | `/api/accounts` | contas conectadas (nunca devolve token) |
+| GET | `/api/summary` | o Painel: destinos por status, o que travou, e os 5 próximos a sair. Existe no servidor porque `/api/posts` é filtrada e paginada — um painel não pode mudar de número por causa de um filtro ligado noutra tela, nem contar "publicados" até o teto da página |
 | GET | `/api/connect/:rede` | 302 pro consentimento, com nonce CSRF em cookie |
 | GET | `/api/posts` | agenda, com filtro de status/plataforma |
 | POST | `/api/posts` | cria; roda o `validate()` de cada adapter na entrada |
