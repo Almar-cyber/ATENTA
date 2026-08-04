@@ -45,6 +45,8 @@ const ESCADA_DE_METRICAS = [
 ];
 
 export interface ResultadoSonda {
+  posts_com_metrica: number;
+  corte_em: string | null;
   conta: string;
   permissoes_concedidas: string[];
   falta_permissao_de_insights: boolean;
@@ -112,7 +114,29 @@ export async function probeInstagramHistory(account: Account, env: Env): Promise
     paginas++;
   }
 
-  // A listagem vem do mais novo pro mais antigo.
+  // A listagem vem do mais novo pro mais antigo — ou seja, se o post i tem métrica, todos os mais
+  // novos que ele também têm. Isso torna o corte monotônico e permite achá-lo por busca binária,
+  // em ~log2(n) chamadas em vez de uma por post.
+  //
+  // POR QUE existe um corte: insights do Instagram só valem para mídia publicada DEPOIS que o
+  // perfil virou Business/Creator. Antes disso o dado nunca foi gerado — não é a API recusando,
+  // é ausência de origem. Testei a hipótese alternativa (nomes de métrica obsoletos, via a escada
+  // acima) e ela caiu: mesmo `metric=reach` sozinho falha nos antigos.
+  let baixo = 0;
+  let alto = posts.length - 1;
+  let ultimoComMetrica = -1;
+  while (baixo <= alto) {
+    const meio = Math.floor((baixo + alto) / 2);
+    if (await temMetrica(posts[meio].id, token)) {
+      ultimoComMetrica = meio;
+      baixo = meio + 1;
+    } else {
+      alto = meio - 1;
+    }
+  }
+  const postsComMetrica = ultimoComMetrica + 1;
+  const corteEm = ultimoComMetrica >= 0 ? (posts[ultimoComMetrica].timestamp ?? null) : null;
+
   const indices = amostrar(posts.length);
   const amostras: Amostra[] = [];
 
@@ -155,6 +179,8 @@ export async function probeInstagramHistory(account: Account, env: Env): Promise
 
   return {
     conta: account.display_name,
+    posts_com_metrica: postsComMetrica,
+    corte_em: corteEm,
     permissoes_concedidas: permissoes,
     falta_permissao_de_insights: faltaInsights,
     total_de_posts_encontrados: posts.length,
@@ -171,10 +197,25 @@ export async function probeInstagramHistory(account: Account, env: Env): Promise
           'para conceder o escopo, e rode a sonda de novo. Nada dá pra concluir sobre histórico até lá.'
         : comMetrica.length === 0
         ? 'permissão existe, mas nenhuma amostra devolveu métrica — aí sim é limite da rede'
-        : comMetrica.length === amostras.length
-          ? `todas as amostras devolveram métrica, inclusive a de ${maisAntigaComMetrica} — dá pra trazer o histórico inteiro`
-          : `métrica disponível até ${maisAntigaComMetrica}; antes disso a API recusa — o backfill cobre dessa data pra cá`,
+        : postsComMetrica === 0
+        ? 'nenhum post tem métrica — o perfil provavelmente virou Business depois do último post'
+        : `${postsComMetrica} dos ${posts.length} posts têm métrica, do mais novo até ${corteEm}. ` +
+          'Os anteriores são de antes do perfil virar Business/Creator — o dado nunca existiu.',
   };
+}
+
+/** Este post tem insights? Só o `reach`, que é o denominador comum de todos os tipos de mídia. */
+async function temMetrica(mediaId: string, token: string): Promise<boolean> {
+  try {
+    const res = await fetchWithRetry(
+      `${GRAPH}/${mediaId}/insights?metric=reach&access_token=${encodeURIComponent(token)}`
+    );
+    if (!res.ok) return false;
+    const json = (await res.json()) as { data?: unknown[]; error?: unknown };
+    return !json.error && (json.data?.length ?? 0) > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Índices espalhados no tempo: mais novo, 25%, 50%, 75% e mais antigo. */
@@ -182,4 +223,103 @@ function amostrar(total: number): number[] {
   if (total === 0) return [];
   const brutos = [0, Math.floor(total * 0.25), Math.floor(total * 0.5), Math.floor(total * 0.75), total - 1];
   return [...new Set(brutos)].filter((i) => i >= 0 && i < total);
+}
+
+
+// ---------------------------------------------------------------------------
+// YouTube
+//
+// Aqui NÃO existe o portão que trava o Instagram: `statistics` acompanha todo vídeo desde sempre,
+// sem depender de conversão de perfil. A expectativa é 100% dos vídeos — e é justamente por isso
+// que vale medir antes de decidir a migração: se o Instagram rende 14 e o YouTube rende tudo, o
+// trabalho se paga pelo segundo, não pelo primeiro.
+// ---------------------------------------------------------------------------
+
+const YT = 'https://www.googleapis.com/youtube/v3';
+
+export async function probeYoutubeHistory(account: Account, env: Env): Promise<ResultadoSonda> {
+  const tokens = await getAccountTokens<{ access_token: string }>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
+  if (!tokens?.access_token) throw new Error('conta do YouTube sem token');
+  const auth = { Authorization: `Bearer ${tokens.access_token}` };
+
+  // O canal guarda o id da playlist "uploads", que é por onde se lista tudo que já foi publicado.
+  const canalRes = await fetchWithRetry(`${YT}/channels?part=contentDetails&mine=true`, { headers: auth });
+  if (!canalRes.ok) throw new Error(`canal: ${canalRes.status} ${await canalRes.text()}`);
+  const canal = (await canalRes.json()) as {
+    items?: Array<{ contentDetails?: { relatedPlaylists?: { uploads?: string } } }>;
+  };
+  const uploads = canal.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) throw new Error('canal sem playlist de uploads');
+
+  const videos: Array<{ id: string; publicado?: string }> = [];
+  let pageToken: string | undefined;
+  let paginas = 0;
+  do {
+    const url =
+      `${YT}/playlistItems?part=contentDetails&maxResults=50&playlistId=${uploads}` +
+      (pageToken ? `&pageToken=${pageToken}` : '');
+    const res = await fetchWithRetry(url, { headers: auth });
+    if (!res.ok) throw new Error(`uploads: ${res.status} ${await res.text()}`);
+    const json = (await res.json()) as {
+      items?: Array<{ contentDetails?: { videoId?: string; videoPublishedAt?: string } }>;
+      nextPageToken?: string;
+    };
+    for (const item of json.items ?? []) {
+      if (item.contentDetails?.videoId) {
+        videos.push({ id: item.contentDetails.videoId, publicado: item.contentDetails.videoPublishedAt });
+      }
+    }
+    pageToken = json.nextPageToken;
+    paginas++;
+  } while (pageToken && paginas < MAX_PAGES);
+
+  // Uma chamada cobre 50 vídeos, então amostrar não economizaria nada relevante — e conferir TODOS
+  // dá a contagem exata em vez de estimativa.
+  let comEstatistica = 0;
+  const amostras: Amostra[] = [];
+  for (let i = 0; i < videos.length; i += 50) {
+    const lote = videos.slice(i, i + 50);
+    const res = await fetchWithRetry(`${YT}/videos?part=statistics&id=${lote.map((v) => v.id).join(',')}`, {
+      headers: auth,
+    });
+    if (!res.ok) continue;
+    const json = (await res.json()) as {
+      items?: Array<{ id: string; statistics?: Record<string, string> }>;
+    };
+    for (const item of json.items ?? []) {
+      if (!item.statistics) continue;
+      comEstatistica++;
+      if (amostras.length < 3) {
+        amostras.push({
+          id: item.id,
+          publicado_em: videos.find((v) => v.id === item.id)?.publicado ?? null,
+          tipo: 'VIDEO',
+          conjunto_que_funcionou: 'statistics',
+          metricas: Object.fromEntries(
+            Object.entries(item.statistics).map(([k, v]) => [k, Number(v) || 0])
+          ),
+        });
+      }
+    }
+  }
+
+  return {
+    conta: account.display_name,
+    posts_com_metrica: comEstatistica,
+    corte_em: comEstatistica === videos.length ? null : 'parcial',
+    permissoes_concedidas: ['(o YouTube não expõe lista de escopos)'],
+    falta_permissao_de_insights: false,
+    total_de_posts_encontrados: videos.length,
+    paginas_lidas: paginas,
+    chegou_ao_fim: !pageToken,
+    mais_antigo: videos.at(-1)?.publicado ?? null,
+    mais_novo: videos[0]?.publicado ?? null,
+    amostras,
+    veredito:
+      videos.length === 0
+        ? 'nenhum vídeo no canal'
+        : comEstatistica === videos.length
+          ? `TODOS os ${videos.length} vídeos têm estatística — o histórico inteiro do YouTube é recuperável`
+          : `${comEstatistica} dos ${videos.length} vídeos têm estatística`,
+  };
 }

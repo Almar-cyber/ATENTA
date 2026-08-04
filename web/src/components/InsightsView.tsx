@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, Bookmark, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
+import { ArrowLeft, Bookmark, Download, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
 import type { FollowerRow, PostMetricRow } from '@/lib/api';
 import { getFollowers, getMetrics } from '@/lib/api';
 import { computeInsights } from '@/lib/insights';
 import type { Platform } from '@/lib/types';
 import { PLATFORM_LABELS } from '@/lib/platforms';
+import { useScheduler } from '@/store';
+import { toast } from 'sonner';
 import { fmtDateTime } from '@/lib/format';
 import { PlatformIcon } from './PlatformIcon';
 import { Button } from '@/components/ui/button';
@@ -45,6 +47,8 @@ function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; va
 }
 
 export function InsightsView({ onBack }: { onBack: () => void }) {
+  const { accounts, reload } = useScheduler();
+  const [importing, setImporting] = useState(false);
   const [metrics, setMetrics] = useState<PostMetricRow[] | null>(null);
   const [followers, setFollowers] = useState<FollowerRow[]>([]);
   const [selected, setSelected] = useState<Platform | null>(null);
@@ -185,6 +189,46 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
     );
   }
 
+  // Traz o que já estava publicado na rede antes do ATENTA!. Roda conta a conta, e é idempotente —
+  // clicar duas vezes não duplica nada, só atualiza as métricas.
+  async function importHistory() {
+    const elegiveis = accounts.filter((a) => a.platform === 'instagram' || a.platform === 'youtube');
+    if (elegiveis.length === 0) {
+      toast.error('A importação cobre Instagram e YouTube — nenhuma conta dessas está conectada.');
+      return;
+    }
+    setImporting(true);
+    let importados = 0;
+    let semMetrica = 0;
+    try {
+      for (const conta of elegiveis) {
+        const res = await fetch(`/api/accounts/${conta.id}/import-history`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        const json = (await res.json().catch(() => null)) as
+          | { error?: string; importados?: number; sem_metrica?: number }
+          | null;
+        if (!res.ok) {
+          toast.error(`${conta.display_name}: ${json?.error ?? 'falhou'}`);
+          continue;
+        }
+        importados += json?.importados ?? 0;
+        semMetrica += json?.sem_metrica ?? 0;
+      }
+      toast.success(
+        importados === 0
+          ? 'Nada novo para importar — o histórico já está aqui.'
+          : `${importados} post(s) importados.` +
+            (semMetrica > 0 ? ` ${semMetrica} sem métrica (publicados antes do perfil virar Business).` : '')
+      );
+      await reload();
+      window.location.reload();
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <Card className="h-full">
       <CardHeader className="flex-row items-center gap-3 space-y-0">
@@ -197,6 +241,18 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
             {selected ? 'Detalhe dos posts dessa rede.' : 'Como os posts publicados performaram.'}
           </p>
         </div>
+        {!selected && (
+          <Button
+            variant="outline"
+            size="default"
+            className="ml-auto"
+            disabled={importing}
+            onClick={() => void importHistory()}
+          >
+            <Download className="size-4" />
+            <span className="hidden sm:inline">{importing ? 'Importando…' : 'Importar histórico'}</span>
+          </Button>
+        )}
       </CardHeader>
       {/* pb-6 pra a sombra deslocada dos cards do último bloco não ser cortada pelo scroll. */}
       <CardContent className="min-h-0 flex-1 overflow-auto pb-6">{body}</CardContent>

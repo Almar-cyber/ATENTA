@@ -1,5 +1,6 @@
 import { adapters } from './adapters/index.js';
-import { probeInstagramHistory } from './metrics/probe.js';
+import { probeInstagramHistory, probeYoutubeHistory } from './metrics/probe.js';
+import { importInstagram, importYoutube } from './metrics/backfill.js';
 import { nowIso, rowToAccount, rowToMediaAsset } from './lib/db.js';
 import { getAccountTokens } from './lib/tokens.js';
 import { fetchWithRetry } from './lib/http.js';
@@ -59,6 +60,9 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   const method = request.method;
 
   if (pathname === '/api/accounts' && method === 'GET') return listAccounts(owner, env);
+
+  const importMatch = /^\/api\/accounts\/([^/]+)\/import-history$/.exec(pathname);
+  if (importMatch && method === 'POST') return importHistory(importMatch[1], owner, env);
 
   const disconnectMatch = /^\/api\/accounts\/([^/]+)$/.exec(pathname);
   if (disconnectMatch && method === 'DELETE') return disconnectAccount(disconnectMatch[1], owner, env);
@@ -187,6 +191,30 @@ async function disconnectAccount(accountId: string, owner: string, env: Env): Pr
   return jsonResponse({ ok: true, removida: false, historico_preservado: historico?.n ?? 0 });
 }
 
+/**
+ * Importa o histórico já publicado desta conta. Idempotente: rodar de novo não duplica, só atualiza
+ * as métricas (o casamento é por account_id + external_post_id).
+ */
+async function importHistory(accountId: string, owner: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`select * from accounts where id = ? and owner_id = ?`)
+    .bind(accountId, owner)
+    .first();
+  if (!row) return jsonResponse({ error: 'conta não encontrada' }, 404);
+  const account = rowToAccount(row as never);
+  if (account.platform !== 'instagram' && account.platform !== 'youtube') {
+    return jsonResponse({ error: `importação de histórico ainda não cobre ${account.platform}` }, 400);
+  }
+  try {
+    const resultado =
+      account.platform === 'youtube'
+        ? await importYoutube(account, owner, env)
+        : await importInstagram(account, owner, env);
+    return jsonResponse(resultado);
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 502);
+  }
+}
+
 async function runProbe(accountId: string, owner: string, env: Env): Promise<Response> {
   // Escopado pelo dono como todo o resto: a sonda lê o token de uma conta conectada, e ninguém
   // pode apontá-la para a conta de outra pessoa.
@@ -195,11 +223,15 @@ async function runProbe(accountId: string, owner: string, env: Env): Promise<Res
     .first();
   if (!row) return jsonResponse({ error: 'conta não encontrada' }, 404);
   const account = rowToAccount(row as never);
-  if (account.platform !== 'instagram') {
-    return jsonResponse({ error: 'a sonda hoje só cobre o Instagram' }, 400);
+  if (account.platform !== 'instagram' && account.platform !== 'youtube') {
+    return jsonResponse({ error: 'a sonda hoje cobre Instagram e YouTube' }, 400);
   }
   try {
-    return jsonResponse(await probeInstagramHistory(account, env));
+    return jsonResponse(
+      account.platform === 'youtube'
+        ? await probeYoutubeHistory(account, env)
+        : await probeInstagramHistory(account, env)
+    );
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 502);
   }

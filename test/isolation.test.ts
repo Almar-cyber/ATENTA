@@ -132,6 +132,14 @@ describe('isolação entre donos', () => {
     expect(row?.status).toBe('active');
   });
 
+  it('POST import-history na conta de outro dono é 404 e não importa nada', async () => {
+    const antes = await env.DB.prepare(`select count(*) as n from post_targets`).first<{ n: number }>();
+    const res = await call(asUser(alice, `/api/accounts/${bob.accountId}/import-history`, { method: 'POST' }));
+    expect(res.status).toBe(404);
+    const depois = await env.DB.prepare(`select count(*) as n from post_targets`).first<{ n: number }>();
+    expect(depois?.n).toBe(antes?.n);
+  });
+
   it('GET /api/posts não devolve posts de outro dono', async () => {
     const res = await call(asUser(alice, '/api/posts'));
     const body = (await res.json()) as { posts: Array<{ body: string }> };
