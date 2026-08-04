@@ -291,6 +291,23 @@ export function getAccountFeed(accountId: string): Promise<{ items: FeedItem[]; 
   return req(`/api/feed/${accountId}`);
 }
 
+/**
+ * Quem comentou nos posts desta conta, agregado do que o poller já coletou — ao contrário do feed
+ * acima, isto NÃO busca ao vivo: comentário não expira como URL de mídia, então guardar e agregar
+ * é seguro (e mais rápido).
+ */
+export interface Commenter {
+  external_user_id: string;
+  username: string | null;
+  comentarios: number;
+  desde: string;
+  ultimo: string;
+}
+
+export function getCommenters(accountId: string): Promise<{ commenters: Commenter[] }> {
+  return req(`/api/accounts/${accountId}/commenters`);
+}
+
 // Ideias: um post que ainda não tem data. Ocupa um lugar no planejamento sem virar post agendado.
 export function getGridPreviews(platform: Platform): Promise<{ previews: GridPreview[] }> {
   return req(`/api/grid-previews?platform=${platform}`);

@@ -28,3 +28,14 @@ export function nextMetricsAt(publishedAt: Date, now: Date): string | null {
   if (interval === null) return null;
   return new Date(now.getTime() + interval).toISOString();
 }
+
+/**
+ * Cadência de COMENTÁRIO — deliberadamente SEM ladder e SEM horizonte, ao contrário da de métrica
+ * acima. Reach e views congelam depois de COLLECT_HORIZON_MS porque não mudam mais; comentário
+ * pode chegar em post de meses atrás, e "quem comenta com você" é sobre continuar enxergando esse
+ * engajamento tardio. Uma vez por dia é suficiente — comentário não é tão sensível ao tempo quanto
+ * a primeira hora de um post novo.
+ */
+export function nextCommentsAt(now: Date): string {
+  return new Date(now.getTime() + DAY).toISOString();
+}

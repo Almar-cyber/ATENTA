@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Bookmark, Download, Loader2, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
-import type { FollowerRow, PostMetricRow } from '@/lib/api';
-import { getAccountFeed, getFollowers, getMetrics } from '@/lib/api';
+import type { Commenter, FollowerRow, PostMetricRow } from '@/lib/api';
+import { getAccountFeed, getCommenters, getFollowers, getMetrics } from '@/lib/api';
 import { desempenhoPorAssunto, insightsParaVisao } from '@/lib/insights';
 import { tagColor } from '@/lib/tags';
 import type { Platform } from '@/lib/types';
@@ -707,6 +707,13 @@ function PlatformDetail({ platform, metrics, followerRows, thumbs }: { platform:
   const isVideoNet = platform === 'youtube' || platform === 'tiktok';
   const followerCount = followerRows.reduce((s, f) => s + (f.followers ?? 0), 0);
   const hasFollowers = followerRows.some((f) => f.followers != null);
+
+  // "Quem comenta com você" é POR CONTA (o endpoint recebe um account_id só) — quando esta visão
+  // mistura mais de uma conta da mesma rede (filtro "Todas as contas" com dois Instagram, digamos),
+  // não tem uma única lista pra buscar. Resolvida a conta única, o resto é decidido dentro de
+  // `Comentaristas`.
+  const contasNestaRede = useMemo(() => [...new Set(metrics.map((m) => m.account_id))], [metrics]);
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
@@ -721,11 +728,82 @@ function PlatformDetail({ platform, metrics, followerRows, thumbs }: { platform:
         </Secao>
       )}
 
+      {/* Só Instagram tem o escopo (instagram_manage_comments) — nas outras redes o bloco nem
+          existe, em vez de aparecer vazio explicando que falta permissão que nunca vai chegar. */}
+      {platform === 'instagram' && (
+        <Comentaristas accountId={contasNestaRede.length === 1 ? contasNestaRede[0] : null} multiplasContas={contasNestaRede.length > 1} />
+      )}
+
       <div className="grid gap-3 lg:grid-cols-2">
         {metrics.map((m) => (
           <PostCard key={m.target_id} m={m} isVideoNet={isVideoNet} thumb={m.external_post_id ? thumbs[m.external_post_id] : undefined} />
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Quem comenta com você" — o Instagram não expõe quem deixou de seguir, mas expõe quem comenta,
+ * e comentário de verdade é sinal de gente que se importa. Fica dentro do detalhe da CONTA (não
+ * uma tela própria) porque é exatamente aqui que "Posts"/"Seguidores"/"Destaques" já respondem
+ * outras perguntas sobre essa mesma conta.
+ */
+function Comentaristas({ accountId, multiplasContas }: { accountId: string | null; multiplasContas: boolean }) {
+  const [lista, setLista] = useState<Commenter[] | null>(null);
+
+  useEffect(() => {
+    if (!accountId) {
+      setLista(null);
+      return;
+    }
+    let vivo = true;
+    setLista(null);
+    getCommenters(accountId)
+      .then((r) => vivo && setLista(r.commenters))
+      .catch(() => vivo && setLista([]));
+    return () => {
+      vivo = false;
+    };
+  }, [accountId]);
+
+  // Duas contas de Instagram misturadas nesta visão: não tem UMA lista pra buscar. Diz o que fazer
+  // em vez de simplesmente não aparecer — é a mesma regra de todo aviso nesta tela.
+  if (multiplasContas) {
+    return (
+      <Secao titulo="Quem comenta com você">
+        <p className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground">
+          Filtre por uma conta específica (seletor no topo) para ver quem comenta com você.
+        </p>
+      </Secao>
+    );
+  }
+  // Nada pra mostrar ainda: sem comentário coletado (raro logo após reconectar — a coleta é pela
+  // cadência do poller, não instantânea) ou lista vazia de verdade. Nesses dois casos a seção
+  // simplesmente não aparece — sem título vazio no meio da tela.
+  if (!lista || lista.length === 0) return null;
+
+  return (
+    <Secao titulo="Quem comenta com você">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {lista.map((c) => (
+          <div
+            key={c.external_user_id}
+            className="flex items-center gap-3 rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]"
+          >
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-accent-foreground">
+              <MessageCircle className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1 leading-snug">
+              <div className="truncate font-semibold">{c.username ? `@${c.username}` : 'Conta sem nome público'}</div>
+              <div className="text-xs text-muted-foreground">
+                {c.comentarios} {c.comentarios === 1 ? 'comentário' : 'comentários'} · desde{' '}
+                {new Date(c.desde).toLocaleDateString('pt-BR')}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Secao>
   );
 }

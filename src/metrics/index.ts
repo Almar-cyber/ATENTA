@@ -47,11 +47,23 @@ export interface AccountMetricsSnapshot {
   raw: unknown;
 }
 
+/** Um comentário lido na rede. Sem o texto: a pergunta é QUEM comenta, não o que disse. */
+export interface ComentarioColetado {
+  /** Id do comentário NA REDE — é a chave que faz o `insert or ignore` deduplicar sozinho quando
+   *  a cadência revisita o mesmo post e lê o mesmo comentário de novo. */
+  external_id: string;
+  external_user_id: string;
+  username: string | null;
+  created_at: string;
+}
+
 export interface MetricsFetcher {
   /** Métricas de um post publicado. `null` = não deu pra coletar agora (sem token, sem id, etc.). */
   fetchPostMetrics(target: PostTarget, account: Account, env: Env): Promise<PostMetricsSnapshot | null>;
   /** Métricas do nível da conta (seguidores, etc.). Opcional. */
   fetchAccountMetrics?(account: Account, env: Env): Promise<AccountMetricsSnapshot | null>;
+  /** Quem comentou no post. Opcional — só Instagram implementa, é a única rede com o escopo. */
+  fetchComments?(target: PostTarget, account: Account, env: Env): Promise<ComentarioColetado[] | null>;
 }
 
 export const metricsFetchers: Partial<Record<Platform, MetricsFetcher>> = {

@@ -8,8 +8,8 @@ import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
 import { notify } from './lib/notify.js';
 import { metricsFetchers } from './metrics/index.js';
-import { nextMetricsAt } from './metrics/cadence.js';
-import type { PostMetricsSnapshot } from './metrics/index.js';
+import { nextMetricsAt, nextCommentsAt } from './metrics/cadence.js';
+import type { PostMetricsSnapshot, ComentarioColetado } from './metrics/index.js';
 import { OAUTH_STATE_COOKIE, clearStateCookie, decodeState, getCookie } from './lib/oauth-state.js';
 import { sessionUser } from './lib/identity.js';
 import type { Env } from './lib/env.js';
@@ -132,6 +132,13 @@ async function runPoller(env: Env): Promise<void> {
   } catch (err) {
     console.error('[metrics] coleta falhou:', err);
   }
+  // Cadência própria — ver o comentário em stepCollectComments pro porquê de não estar junto da
+  // coleta de métrica acima.
+  try {
+    await stepCollectComments(env);
+  } catch (err) {
+    console.error('[comments] coleta falhou:', err);
+  }
   // Também secundária: limpar mídia velha nunca pode impedir uma publicação.
   try {
     await stepPurgeOldMedia(env);
@@ -226,6 +233,70 @@ async function stepCollectMetrics(env: Env): Promise<void> {
 
     const next = nextMetricsAt(new Date(target.published_at), new Date(now));
     await setNextMetricsAt(env, target.id, next ?? METRICS_NEVER);
+  }
+}
+
+// Coleta de COMENTÁRIO tem cadência PRÓPRIA, separada da de métrica acima — de propósito. Reach e
+// views congelam depois de 60 dias (COLLECT_HORIZON_MS) porque não mudam mais; comentário pode
+// chegar em post de meses atrás, e "quem comenta com você" é justamente sobre continuar
+// enxergando esse engajamento tardio. Prender as duas na mesma cadência faria todo post antigo
+// (o backlog inteiro de quem ativou o escopo hoje, com anos de posts já publicados) nunca ser
+// revisitado — foi exatamente o defeito descoberto ao testar contra a conta real.
+const COMMENTS_COLLECT_BATCH = 30;
+
+async function stepCollectComments(env: Env): Promise<void> {
+  const now = nowIso();
+  const { results } = await env.DB.prepare(
+    `select pt.* from post_targets pt
+     join accounts a on a.id = pt.account_id
+     where pt.status = 'published' and a.status = 'active'
+       and pt.next_comments_at is not null and pt.next_comments_at <= ?
+     order by pt.next_comments_at asc
+     limit ?`
+  )
+    .bind(now, COMMENTS_COLLECT_BATCH)
+    .all<any>();
+
+  for (const row of results ?? []) {
+    const target = rowToPostTarget(row);
+    const fetcher = metricsFetchers[target.platform];
+
+    // Rede sem fetchComments (LinkedIn, Pinterest, ...) nunca vai ter o que coletar aqui — marca
+    // como NUNCA de uma vez, senão a linha volta pra esta consulta em todo tick só pra a gente
+    // redescobrir a mesma coisa (mesmo truque que stepCollectMetrics já usa com METRICS_NEVER).
+    if (!fetcher?.fetchComments) {
+      await env.DB.prepare(`update post_targets set next_comments_at = ? where id = ?`).bind(METRICS_NEVER, target.id).run();
+      continue;
+    }
+
+    const account = await getAccount(env, target.account_id);
+    if (account) {
+      try {
+        const comentarios = await fetcher.fetchComments(target, account, env);
+        if (comentarios) await insertPostComments(env, target, comentarios);
+      } catch (err) {
+        console.error(`[comments] ${target.platform}/${target.id} falhou:`, err);
+      }
+    }
+    await env.DB.prepare(`update post_targets set next_comments_at = ? where id = ?`)
+      .bind(nextCommentsAt(new Date(now)), target.id)
+      .run();
+  }
+}
+
+/**
+ * Grava os comentários lidos nesta passagem. `insert or ignore`, pela CHAVE PRIMÁRIA (o id do
+ * comentário na rede) — é o que faz a mesma leitura repetida pela cadência não contar de novo.
+ * Ver o comentário na migração 0015 pro raciocínio completo.
+ */
+async function insertPostComments(env: Env, target: PostTarget, comentarios: ComentarioColetado[]): Promise<void> {
+  for (const c of comentarios) {
+    await env.DB.prepare(
+      `insert or ignore into post_comments (id, post_target_id, account_id, external_user_id, username, created_at)
+       values (?, ?, ?, ?, ?, ?)`
+    )
+      .bind(c.external_id, target.id, target.account_id, c.external_user_id, c.username, c.created_at)
+      .run();
   }
 }
 

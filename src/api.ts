@@ -86,6 +86,11 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   const feedMatch = /^\/api\/feed\/([^/]+)$/.exec(pathname);
   if (feedMatch && method === 'GET') return getAccountFeed(feedMatch[1], owner, env);
 
+  // "Quem comenta com você" — agregado do que o poller já coletou (post_comments), não busca ao
+  // vivo: comentário não expira como URL de mídia, então guardar e agregar é seguro.
+  const commentersMatch = /^\/api\/accounts\/([^/]+)\/commenters$/.exec(pathname);
+  if (commentersMatch && method === 'GET') return getCommenters(commentersMatch[1], owner, env);
+
   // Bytes de uma mídia já no R2, servidos pela NOSSA origem. O domínio público do R2 é outro host
   // e sem CORS: uma imagem carregada de lá suja o canvas e o recorte no navegador quebra. Por aqui
   // é same-origin, então dá pra recortar mídia de post duplicado/editado igual a arquivo novo.
@@ -1014,6 +1019,32 @@ async function getAccountFeed(accountId: string, owner: string, env: Env): Promi
     // Feed é um extra: se a plataforma recusar, o grid segue mostrando os agendados.
     return jsonResponse({ items: [], error: err instanceof Error ? err.message : String(err) }, 200);
   }
+}
+
+/**
+ * "Quem comenta com você" — o Instagram não expõe quem deixou de seguir, mas expõe quem comenta,
+ * e comentário de verdade é sinal de gente engajada. Agrega sempre por CONSULTA (`group by`), nunca
+ * um contador gravado — ver o comentário na migração 0015 pro raciocínio completo do porquê.
+ */
+async function getCommenters(accountId: string, owner: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(`select id from accounts where id = ? and owner_id = ?`)
+    .bind(accountId, owner)
+    .first<{ id: string }>();
+  if (!row) return jsonResponse({ error: 'conta não encontrada' }, 404);
+
+  const { results } = await env.DB.prepare(
+    `select external_user_id, username, count(*) as comentarios,
+            min(created_at) as desde, max(created_at) as ultimo
+       from post_comments
+      where account_id = ?
+      group by external_user_id
+      order by comentarios desc
+      limit 20`
+  )
+    .bind(accountId)
+    .all<Record<string, unknown>>();
+
+  return jsonResponse({ commenters: results ?? [] });
 }
 
 async function fetchInstagramFeed(account: Account, env: Env): Promise<FeedItem[]> {

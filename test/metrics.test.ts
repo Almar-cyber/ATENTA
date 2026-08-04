@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { collectIntervalMs, nextMetricsAt, COLLECT_HORIZON_MS } from '../src/metrics/cadence.js';
+import { collectIntervalMs, nextCommentsAt, nextMetricsAt, COLLECT_HORIZON_MS } from '../src/metrics/cadence.js';
 import { resetDb, insertAccount, insertPost } from './helpers.js';
 
 const HOUR = 3_600_000;
@@ -44,6 +44,15 @@ describe('cadência de coleta', () => {
     const publishedOld = new Date('2026-01-01T00:00:00.000Z'); // > horizonte
     expect(nextMetricsAt(publishedOld, now)).toBeNull();
   });
+
+  // Comentário tem cadência PRÓPRIA (post_targets.next_comments_at), deliberadamente sem ladder e
+  // sem horizonte — ao contrário de nextMetricsAt acima. A razão está no comentário da migração
+  // 0016: reach/views congelam e param de ser revisitados; comentário pode chegar em post de meses
+  // atrás, e presos na mesma cadência o backlog de post antigo nunca seria revisitado.
+  it('nextCommentsAt não tem horizonte — sempre +1 dia, mesmo pra post antigo', () => {
+    const now = new Date('2026-06-01T12:00:00.000Z');
+    expect(nextCommentsAt(now)).toBe('2026-06-02T12:00:00.000Z');
+  });
 });
 
 describe('schema de métricas (migração 0005)', () => {
@@ -81,5 +90,12 @@ describe('schema de métricas (migração 0005)', () => {
     const targetId = await insertPost({ accountId, platform: 'youtube', status: 'published' });
     const row = await env.DB.prepare(`select next_metrics_at from post_targets where id = ?`).bind(targetId).first<{ next_metrics_at: string | null }>();
     expect(row?.next_metrics_at).toBeNull();
+  });
+
+  it('next_comments_at existe em post_targets (post NOVO começa null — passa a ser agendado quando publica, igual next_metrics_at)', async () => {
+    const accountId = await insertAccount({ platform: 'instagram' });
+    const targetId = await insertPost({ accountId, platform: 'instagram', status: 'published' });
+    const row = await env.DB.prepare(`select next_comments_at from post_targets where id = ?`).bind(targetId).first<{ next_comments_at: string | null }>();
+    expect(row?.next_comments_at).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import type { Env } from '../lib/env.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { safeParseJson } from '../lib/errors.js';
-import type { MetricsFetcher, PostMetricsSnapshot, AccountMetricsSnapshot } from './index.js';
+import type { MetricsFetcher, PostMetricsSnapshot, AccountMetricsSnapshot, ComentarioColetado } from './index.js';
 
 const GRAPH_VERSION = 'v21.0';
 
@@ -141,6 +141,47 @@ export const instagramMetrics: MetricsFetcher = {
       demographics: demo,
       raw: parsed,
     };
+  },
+
+  /**
+   * Quem comentou no post — a base de "quem comenta com você" (ver design.md). Exige
+   * `instagram_manage_comments`; sem ele a chamada volta sem erro mas sem `from`, e aqui a linha
+   * é simplesmente descartada (sem autor, não tem quem contar).
+   *
+   * Mesmo formato de chamada que a sonda em `metrics/probe.ts` já usava pra descobrir se o escopo
+   * tinha pegado — aqui ela para de ser diagnóstico e passa a alimentar a tabela de verdade.
+   *
+   * Só os 25 mais recentes por passagem (mesmo teto da sonda): post com mais comentários que isso
+   * entre duas coletas perde alguns. Aceitável na escala de uma conta pessoal — a cadência revisita
+   * o post de hora em hora logo depois de publicado, que é quando comentário mais chega.
+   */
+  async fetchComments(target: PostTarget, account: Account, env: Env): Promise<ComentarioColetado[] | null> {
+    if (!target.external_post_id) return null;
+    const tokens = await getAccountTokens<MetaTokens>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
+    if (!tokens?.access_token) return null;
+
+    const url =
+      `https://graph.facebook.com/${GRAPH_VERSION}/${target.external_post_id}/comments` +
+      `?fields=id,timestamp,from{id,username}&limit=25&access_token=${encodeURIComponent(tokens.access_token)}`;
+    const res = await fetchWithRetry(url, { method: 'GET' });
+    if (!res.ok) return null;
+    const parsed = safeParseJson(await res.text()) as
+      | { data?: Array<{ id: string; timestamp?: string; from?: { id?: string; username?: string } }> }
+      | undefined;
+    if (!parsed?.data) return null;
+
+    const out: ComentarioColetado[] = [];
+    for (const c of parsed.data) {
+      // Sem `from.id`, não tem quem contar — falta de escopo ou comentário de conta apagada.
+      if (!c.from?.id) continue;
+      out.push({
+        external_id: c.id,
+        external_user_id: c.from.id,
+        username: c.from.username ?? null,
+        created_at: c.timestamp ?? new Date().toISOString(),
+      });
+    }
+    return out;
   },
 };
 
