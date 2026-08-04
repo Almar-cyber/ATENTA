@@ -1,27 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'motion/react';
-import {
-  AlertTriangle,
-  ArrowRight,
-  CalendarClock,
-  ChevronRight,
-  Clock,
-  Eye,
-  FileText,
-  Heart,
-  Link2,
-  Plus,
-  Send,
-  TrendingDown,
-  TrendingUp,
-} from 'lucide-react';
-import type { FollowerRow, PostMetricRow, ProximoPost, Summary } from '@/lib/api';
-import { getFollowers, getMetrics, getSummary } from '@/lib/api';
+import { ArrowRight, ChevronRight, Eye, Heart, Plus, Send, TrendingDown, TrendingUp } from 'lucide-react';
+import type { FollowerRow, PostMetricRow, ProximoPost } from '@/lib/api';
+import { getFollowers, getMetrics } from '@/lib/api';
 import { PLATFORM_FORMATS } from '@/lib/platforms';
 import { fmtQuando } from '@/lib/format';
 import { requestPrefillDate } from '@/lib/composer-bus';
 import { useScheduler } from '@/store';
+import { construirPendencias } from '@/lib/pendencias';
+import type { PainelDestino, Pendencia } from '@/lib/pendencias';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ViewHeader } from '@/components/ui/view-header';
@@ -32,7 +20,6 @@ import { Thumb } from './Thumb';
 const nf = new Intl.NumberFormat('pt-BR');
 const n = (v: number) => nf.format(v);
 const signed = (v: number) => (v > 0 ? `+${nf.format(v)}` : nf.format(v));
-const plural = (q: number, um: string, muitos: string) => (q === 1 ? um : muitos);
 
 /**
  * O painel responde "o que precisa de mim agora?", e não "quantos posts eu tenho".
@@ -61,11 +48,6 @@ const POLL_MS = 30_000;
 const CARD_BASE =
   'w-full cursor-pointer rounded-xl border-2 shadow-[3px_3px_0_0_var(--brand)] transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[5px_5px_0_0_var(--brand)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none';
 
-export type PainelDestino =
-  | { tipo: 'agenda'; status: string }
-  | { tipo: 'conexoes' }
-  | { tipo: 'insights' };
-
 export function HomeView({
   onIr,
   onAbrirPost,
@@ -75,8 +57,11 @@ export function HomeView({
   /** Abre o detalhe de um destino do bloco "Sai a seguir". */
   onAbrirPost: (postId: string, targetId: string) => void;
 }) {
-  const { accounts } = useScheduler();
-  const [resumo, setResumo] = useState<Summary | null>(null);
+  // `summary` vem do store (compartilhado com o sino de notificações do cabeçalho — ver
+  // NotificationsBell): buscar de novo aqui criaria dois polls independentes que podem discordar
+  // por uma fração de segundo. `metrics`/`followers` continuam locais, com poll próprio de 30s,
+  // porque só esta tela e o Insights precisam deles.
+  const { accounts, summary: resumo } = useScheduler();
   const [metrics, setMetrics] = useState<PostMetricRow[]>([]);
   const [followers, setFollowers] = useState<FollowerRow[]>([]);
   const [erro, setErro] = useState<string | null>(null);
@@ -87,8 +72,7 @@ export function HomeView({
       // somasse por conta própria no servidor, as duas telas poderiam mostrar alcances diferentes
       // — e duas telas que discordam sobre o próprio número custam mais confiança do que a
       // requisição extra economiza.
-      const [s, m, f] = await Promise.all([getSummary(), getMetrics(), getFollowers()]);
-      setResumo(s);
+      const [m, f] = await Promise.all([getMetrics(), getFollowers()]);
       setMetrics(m.metrics);
       setFollowers(f.followers);
       setErro(null);
@@ -213,18 +197,6 @@ export function HomeView({
   );
 }
 
-interface Pendencia {
-  id: string;
-  /** O herói do card. Separado do texto justamente pra poder ser tipografado grande. */
-  quantidade: number;
-  titulo: string;
-  detalhe: string;
-  icone: ReactNode;
-  /** Vermelho em vez de roxo: reservado pro que já deu errado, não pro que só está parado. */
-  grave?: boolean;
-  destino: PainelDestino;
-}
-
 /**
  * Card de pendência: ícone no topo, número em corpo grande, rótulo, e o detalhe apagado no rodapé.
  *
@@ -260,85 +232,6 @@ function PendenciaCard({ p, i, onIr }: { p: Pendencia; i: number; onIr: () => vo
       </span>
     </motion.button>
   );
-}
-
-/**
- * As pendências, da mais urgente pra menos.
- *
- * A ordem é deliberada: primeiro o que já quebrou (falha, conta caída), depois o que vai quebrar se
- * ninguém olhar (fila atrasada), e por último o que só está esperando uma decisão (rascunho).
- */
-function construirPendencias(resumo: Summary | null, accounts: { status: string }[]): Pendencia[] {
-  if (!resumo) return [];
-  const out: Pendencia[] = [];
-  const s = resumo.por_status;
-
-  // Os textos são curtos de propósito: no card quadrado o rótulo tem duas linhas, não uma faixa
-  // inteira, e a contagem já é dita pelo número grande — repeti-la na frase seria dizer duas vezes.
-  const falhas = (s.failed ?? 0) + (s.ambiguous ?? 0);
-  if (falhas > 0) {
-    out.push({
-      id: 'falhas',
-      quantidade: falhas,
-      titulo: plural(falhas, 'publicação falhou', 'publicações falharam'),
-      detalhe: 'reativar ou excluir',
-      icone: <AlertTriangle className="size-4" />,
-      grave: true,
-      destino: { tipo: 'agenda', status: 'failed' },
-    });
-  }
-
-  const reauth = accounts.filter((a) => a.status === 'needs_reauth').length;
-  if (reauth > 0) {
-    out.push({
-      id: 'reauth',
-      quantidade: reauth,
-      titulo: plural(reauth, 'conta caiu', 'contas caíram'),
-      detalhe: 'reconectar',
-      icone: <Link2 className="size-4" />,
-      grave: true,
-      destino: { tipo: 'conexoes' },
-    });
-  }
-
-  if (resumo.atencao.atrasados > 0) {
-    out.push({
-      id: 'atrasados',
-      quantidade: resumo.atencao.atrasados,
-      titulo: plural(resumo.atencao.atrasados, 'devia ter saído', 'deviam ter saído'),
-      detalhe: 'na fila, data vencida',
-      icone: <Clock className="size-4" />,
-      grave: true,
-      destino: { tipo: 'agenda', status: 'queued' },
-    });
-  }
-
-  // Rascunho vencido e rascunho em dia são a MESMA linha em dois tons: se algum ficou pra trás, é
-  // isso que precisa ser dito; senão, basta lembrar que os rascunhos existem. Mostrar as duas
-  // versões ao mesmo tempo seria contar o mesmo rascunho duas vezes.
-  const rascunhos = s.draft ?? 0;
-  const vencidos = resumo.atencao.rascunhos_vencidos;
-  if (vencidos > 0) {
-    out.push({
-      id: 'rascunhos-vencidos',
-      quantidade: vencidos,
-      titulo: plural(vencidos, 'rascunho pra trás', 'rascunhos pra trás'),
-      detalhe: 'a data já passou',
-      icone: <CalendarClock className="size-4" />,
-      destino: { tipo: 'agenda', status: 'draft' },
-    });
-  } else if (rascunhos > 0) {
-    out.push({
-      id: 'rascunhos',
-      quantidade: rascunhos,
-      titulo: plural(rascunhos, 'rascunho esperando', 'rascunhos esperando'),
-      detalhe: 'definir data e enviar',
-      icone: <FileText className="size-4" />,
-      destino: { tipo: 'agenda', status: 'draft' },
-    });
-  }
-
-  return out;
 }
 
 /**

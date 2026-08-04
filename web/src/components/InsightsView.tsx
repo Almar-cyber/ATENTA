@@ -51,7 +51,7 @@ function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; va
   );
 }
 
-export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void; onOpenConnections: () => void }) {
+export function InsightsView({ onOpenConnections }: { onOpenConnections: () => void }) {
   const { accounts, reload } = useScheduler();
   const [importing, setImporting] = useState(false);
   /**
@@ -366,7 +366,10 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
       <ViewHeader
         title={selected ? PLATFORM_LABELS[selected] : 'Insights'}
         description={selected ? 'Detalhe dos posts dessa rede.' : 'Como os posts publicados performaram.'}
-        onBack={selected ? () => setSelected(null) : onBack}
+        // Só existe "voltar" no detalhe de uma rede (volta pra visão geral do Insights). Na visão
+        // geral não há pra onde voltar: Insights é destino de primeiro nível no cabeçalho agora
+        // (Painel · Agenda · Insights), igual aos outros dois — e nenhum deles tem seta de voltar.
+        onBack={selected ? () => setSelected(null) : undefined}
         actions={
           !selected && (
           <>

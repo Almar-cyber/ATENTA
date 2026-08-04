@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Account, Post } from './lib/types';
-import type { Tag } from './lib/api';
-import { getAccounts, getPosts, getTags } from './lib/api';
+import type { Summary, Tag } from './lib/api';
+import { getAccounts, getPosts, getSummary, getTags } from './lib/api';
 
 export type View = 'list' | 'week' | 'calendar' | 'grid';
 
@@ -18,6 +18,10 @@ interface SchedulerState {
   /** Pilares de conteúdo. No store porque três telas precisam da MESMA lista — compositor, ideias
    *  e Insights —, e cada uma buscando a sua deixaria uma delas sem ver o pilar recém-criado. */
   tags: Tag[];
+  /** As mesmas contagens que o Painel mostra em "Precisa de você". No store pela mesma razão que
+   *  as tags estão: o sino de notificações do cabeçalho precisa da MESMA leitura, em toda tela — se
+   *  ele buscasse por conta própria, ele e o Painel poderiam discordar por uma fração de segundo. */
+  summary: Summary | null;
   accountsById: Record<string, Account>;
   loading: boolean;
   filters: Filters;
@@ -31,6 +35,7 @@ export function SchedulerProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [filters, setFiltersState] = useState<Filters>({ status: '', platform: '', account: '' });
 
@@ -41,14 +46,16 @@ export function SchedulerProvider({ children }: { children: ReactNode }) {
 
   const reload = useCallback(async () => {
     const f = filtersRef.current;
-    const [acc, pst, tgs] = await Promise.all([
+    const [acc, pst, tgs, sum] = await Promise.all([
       getAccounts(),
       getPosts({ status: f.status || undefined, platform: f.platform || undefined }),
       getTags(),
+      getSummary(),
     ]);
     setAccounts(acc.accounts);
     setPosts(pst.posts);
     setTags(tgs.tags);
+    setSummary(sum);
     setLoading(false);
   }, []);
 
@@ -74,7 +81,7 @@ export function SchedulerProvider({ children }: { children: ReactNode }) {
   for (const a of accounts) accountsById[a.id] = a;
 
   return (
-    <Ctx.Provider value={{ accounts, posts, tags, accountsById, loading, filters, setFilters, reload }}>
+    <Ctx.Provider value={{ accounts, posts, tags, summary, accountsById, loading, filters, setFilters, reload }}>
       {children}
     </Ctx.Provider>
   );

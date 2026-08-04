@@ -20,14 +20,14 @@ import {
 import { PostComposer } from '@/components/PostComposer';
 import { onConnectRequest } from '@/lib/composer-bus';
 import { PlatformAvatar } from '@/components/PlatformAvatar';
-import { AlertBanner } from '@/components/AlertBanner';
+import { NotificationsBell } from '@/components/NotificationsBell';
 import { ListView } from '@/components/ListView';
 import { WeekView } from '@/components/WeekView';
 import { CalendarView } from '@/components/CalendarView';
 import { GridPlanner } from '@/components/GridPlanner';
 import { InsightsView } from '@/components/InsightsView';
 import { HomeView } from '@/components/HomeView';
-import type { PainelDestino } from '@/components/HomeView';
+import type { PainelDestino } from '@/lib/pendencias';
 import { ConnectionsView } from '@/components/ConnectionsView';
 import { FilterMenu } from '@/components/FilterMenu';
 import { PostDialog } from '@/components/PostDialog';
@@ -59,6 +59,7 @@ function Header({
   onNavigate,
   onNewPost,
   onOpenConnections,
+  onIr,
   user,
   onSignedOut,
 }: {
@@ -66,6 +67,7 @@ function Header({
   onNavigate: (s: Screen) => void;
   onNewPost: () => void;
   onOpenConnections: () => void;
+  onIr: (destino: PainelDestino) => void;
   user: SessionUser;
   onSignedOut: () => void;
 }) {
@@ -78,14 +80,23 @@ function Header({
             na mesma fileira, e o cabeçalho quebrava numa terceira linha. */}
         <img src="/atenta-wordmark.png" alt="ATENTA!" className="h-8 w-auto sm:h-10" />
       </button>
-      {/* No desktop a navegação senta ao lado do wordmark. No celular ela desce pra própria fileira
-          e ocupa a largura toda, dividida em três — o formato de barra de abas, que é onde a mão
-          alcança. Nada disso cabia numa fileira só: logo (144px) + navegação (260px) estouram os
-          351px úteis de uma tela de 375.
-          Lá o ÍCONE some e o RÓTULO fica — o contrário do que o resto do cabeçalho faz, e de
-          propósito: um quadriculado, um calendário e um gráfico lado a lado não dizem para onde
-          levam; a palavra diz. */}
-      <nav className="order-last flex w-full items-center gap-1 sm:order-none sm:w-auto">
+      {/* No desktop largo a navegação senta ao lado do wordmark. Em qualquer largura menor — do
+          celular até uma janela estreita de desktop — ela desce pra própria fileira, e fica
+          SEMPRE por último (`order-last` sem reverter antes do `lg`), nunca entre o logo e as
+          ações.
+          Isso não é só estética: a navegação decide o que aparece abaixo dela na tela — é a régua
+          de "onde você está". Ela precisa ficar colada no conteúdo, não separada dele por uma
+          fileira de botões no meio. `sm:order-none` (o que havia antes) revertia cedo demais: entre
+          640 e ~1023px o logo+navegação cabiam juntos numa linha, mas as ações (avatares, sino,
+          Novo post, conta) não cabiam mais do lado — e sobravam pra uma SEGUNDA fileira, com a
+          navegação em cima e as ações no meio do caminho até o conteúdo. `lg:order-none` empurra
+          esse reverter pra uma largura em que tudo cabe de verdade numa linha só (testado: ~930px
+          de conteúdo é o teto; o breakpoint `lg` do Tailwind, 1024px, sobra folga).
+          No celular ela ocupa a largura toda, dividida em três — o formato de barra de abas, que é
+          onde a mão alcança — e o ÍCONE some e o RÓTULO fica (o contrário do resto do cabeçalho),
+          porque um quadriculado, um calendário e um gráfico lado a lado não dizem para onde levam;
+          a palavra diz. */}
+      <nav className="order-last flex w-full items-center gap-1 lg:order-none sm:w-auto">
         {NAV.map(({ id, label, icon: Icon }) => {
           // Conexões não acende nenhum dos três de propósito: ela é ajuste de conta, chega pelo
           // menu do avatar, e acender a Agenda ali diria que você está num lugar onde não está.
@@ -135,9 +146,14 @@ function Header({
             uma vez e volta lá raramente, e ocupar espaço permanente por uma visita ocasional
             empurraria o CTA primário. Os caminhos até ela continuam: os avatares ao lado, os
             estados vazios e a pendência de reautenticação no Painel. */}
-        <Button size="lg" onClick={onNewPost} className="px-4 sm:px-6">
+        <NotificationsBell onIr={onIr} />
+        {/* Só o "+" no celular: com o texto, este botão (146px) sozinho já não deixava logo + sino
+            + conta caberem ao lado do wordmark, e a fileira de cima quebrava em duas. Ícone-só
+            (44px, do tamanho do sino/conta ao lado) devolve tudo pra uma fileira só — o rótulo some
+            porque "+" já é o símbolo universal de criar, sem precisar de explicação ao lado. */}
+        <Button size="lg" onClick={onNewPost} aria-label="Novo post" className="px-3 sm:px-6">
           <Plus className="size-4" />
-          Novo post
+          <span className="hidden sm:inline">Novo post</span>
         </Button>
         {/* Num app multi-conta, saber EM QUAL conta você está deixou de ser detalhe: o mesmo
             navegador pode ter entrado com outro e-mail. Por isso o e-mail aparece no menu, e não
@@ -315,26 +331,17 @@ function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =
         onNavigate={setScreen}
         onNewPost={openComposer}
         onOpenConnections={() => setScreen('connections')}
+        onIr={irPara}
         user={user}
         onSignedOut={onSignedOut}
       />
-      {/* A barra some no Painel: o bloco "Precisa de você" diz a mesma coisa com mais ação, e
-          manter as duas seria a informação duplicada duas vezes na mesma tela. */}
-      {screen !== 'home' && (
-        <AlertBanner
-          onSeeFailures={() => {
-            setFilters({ status: 'failed' });
-            setView('list');
-          }}
-        />
-      )}
       <main className="min-h-0 flex-1 px-3 pb-3 pt-2 sm:px-6 sm:pb-6">
         {screen === 'home' ? (
           <HomeView onIr={irPara} onAbrirPost={abrirPost} />
         ) : screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
         ) : screen === 'insights' ? (
-          <InsightsView onBack={() => setScreen('home')} onOpenConnections={() => setScreen('connections')} />
+          <InsightsView onOpenConnections={() => setScreen('connections')} />
         ) : (
         <section className="flex h-full flex-col rounded-2xl bg-card p-3 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)] sm:p-5">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
