@@ -80,6 +80,12 @@ ${bodyHtml}
 </html>`;
 }
 
+// NÃO REMOVA a seção "YouTube" da política de privacidade. Ela não é zelo jurídico opcional: o
+// Google EXIGE que app que usa os YouTube API Services declare isso e aponte para os Termos do
+// YouTube e para a Política de Privacidade do Google. Sem ela, a verificação do app é reprovada, e
+// sem verificação o projeto fica preso no teto vitalício de 100 usuários com a tela de "app não
+// verificado" na cara de quem conecta.
+//
 // ATENÇÃO ao mexer aqui: estas páginas e a landing (src/landingPage.ts) são lidas pelo MESMO
 // revisor, na mesma sessão. A versão anterior descrevia o ATENTA! como "ferramenta pessoal,
 // operada exclusivamente por ALMAR, sem outros usuários" enquanto a landing vendia plano grátis e
@@ -129,6 +135,16 @@ post em si.</li>
 <li><b>Com a Cloudflare</b>, como infraestrutura de hospedagem e banco de dados.</li>
 </ul>
 <p>Não vendemos, alugamos nem cedemos seus dados a ninguém, em nenhuma hipótese.</p>
+
+<h2>YouTube</h2>
+<p>Para publicar e ler as métricas dos seus vídeos, o ATENTA! usa os <b>YouTube API Services</b>. Ao
+conectar sua conta do YouTube, você concorda com os
+<a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">Termos de Serviço do YouTube</a>,
+e o tratamento dos seus dados pelo Google segue a
+<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Política de Privacidade do Google</a>.</p>
+<p>Você pode revogar o acesso do ATENTA! aos seus dados do YouTube a qualquer momento na
+<a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">página de permissões da sua Conta Google</a>
+(Segurança → Apps de terceiros com acesso à conta).</p>
 
 <h2>Por quanto tempo guardamos</h2>
 <ul>
