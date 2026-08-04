@@ -22,6 +22,7 @@ import { videoPosterUrl } from '@/lib/useMediaUrl';
 import { planGridOrder, moveItem } from '@/lib/gridOrder';
 import type { Movable } from '@/lib/gridOrder';
 import { useScheduler } from '@/store';
+import { IdeaSidebar } from './IdeaSidebar';
 import { Button } from '@/components/ui/button';
 import type { DialogSelection } from './PostDialog';
 
@@ -34,7 +35,26 @@ const MAX_PUBLISHED_ENTRIES = 18;
 // As três espécies de peça da grade. Só `post` (não publicado) e `preview` se movem; publicado —
 // nosso registro ou o que veio do feed real — é âncora.
 type Tile =
-  | { kind: 'post'; key: string; domainId: string; at: string; movable: boolean; post: Post; target: Target }
+  | {
+      kind: 'post';
+      key: string;
+      domainId: string;
+      at: string;
+      movable: boolean;
+      post: Post;
+      target: Target;
+      /**
+       * Capa vinda do feed do Instagram, pra quando a NOSSA cópia do arquivo já não existe.
+       *
+       * O poller apaga mídia publicada depois de 30 dias (MEDIA_RETENTION_DAYS), então todo post
+       * com mais de um mês tem `public_url` apontando pra um objeto que não está mais no R2 — e a
+       * grade, cuja única função é mostrar como o feed fica, virava um tabuleiro de quadrados
+       * cinzas. O feed sempre teve essa imagem; ela só estava sendo jogada fora na deduplicação
+       * logo abaixo, que fica com o nosso registro (clicável, sabe a data) e descarta o item do
+       * feed inteiro em vez de aproveitar a capa dele.
+       */
+      feedThumb?: string | null;
+    }
   | { kind: 'feed'; key: string; domainId: string; at: string; movable: false; item: FeedItem }
   | { kind: 'preview'; key: string; domainId: string; at: string; movable: true; preview: GridPreview };
 
@@ -45,12 +65,17 @@ function postTimestamp(post: Post, target: Target): string {
 }
 
 // Monta a grade inteira numa lista só, ordenada pelo mesmo eixo de tempo: agendados (futuro) no
-// topo, publicados e prévias no meio do caminho conforme a posição de cada um — que é como o
+// topo, publicados e ideias no meio do caminho conforme a posição de cada um — que é como o
 // perfil vai realmente ficar, mais novo no canto superior esquerdo.
 function buildTiles(posts: Post[], feed: FeedItem[], previews: GridPreview[]): Tile[] {
   const upcoming: Tile[] = [];
   const published: Tile[] = [];
   const publishedExternalIds = new Set<string>();
+
+  // Capa por id externo. Montado ANTES do laço porque é o laço que decide descartar o item do feed
+  // — e é justamente a imagem dele que falta no nosso registro depois do purge de 30 dias.
+  const capaDoFeed = new Map<string, string>();
+  for (const item of feed) if (item.thumbnail_url) capaDoFeed.set(item.id, item.thumbnail_url);
 
   for (const post of posts) {
     for (const target of post.targets) {
@@ -66,6 +91,7 @@ function buildTiles(posts: Post[], feed: FeedItem[], previews: GridPreview[]): T
         movable: !isPublished,
         post,
         target,
+        feedThumb: target.external_post_id ? capaDoFeed.get(target.external_post_id) ?? null : null,
       };
       (isPublished ? published : upcoming).push(tile);
     }
@@ -85,14 +111,19 @@ function buildTiles(posts: Post[], feed: FeedItem[], previews: GridPreview[]): T
       item,
     }));
 
-  const previewTiles: Tile[] = previews.map((preview) => ({
-    kind: 'preview' as const,
-    key: `preview:${preview.id}`,
-    domainId: preview.id,
-    at: preview.sort_at,
-    movable: true as const,
-    preview,
-  }));
+  // Só ideia COM ARTE entra na grade. A grade existe pra mostrar como o feed vai ficar, e uma ideia
+  // ainda em palavras não tem nada a dizer sobre isso — viraria um quadrado cinza atrapalhando
+  // justamente a leitura que a tela serve pra dar. Ela vive na lista ao lado até ganhar imagem.
+  const previewTiles: Tile[] = previews
+    .filter((preview) => !!preview.media_asset_id)
+    .map((preview) => ({
+      kind: 'preview' as const,
+      key: `preview:${preview.id}`,
+      domainId: preview.id,
+      at: preview.sort_at,
+      movable: true as const,
+      preview,
+    }));
 
   const all = upcoming.concat(published.slice(0, MAX_PUBLISHED_ENTRIES), feedTiles, previewTiles);
   all.sort((a, b) => (a.at < b.at ? 1 : -1));
@@ -144,7 +175,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
   );
 
   // Grava um arranjo novo: os posts só permutam entre si os horários que já tinham (é o servidor
-  // que faz isso, em /api/posts/reschedule); as prévias, que não têm horário de publicação, só
+  // que faz isso, em /api/posts/reschedule); as ideias, que não têm horário de publicação, só
   // recebem um `sort_at` interpolado entre os vizinhos.
   async function applyArrangement(next: Movable[], snapshot: Movable[] | null, okMsg: string) {
     const plan = planGridOrder(next);
@@ -153,7 +184,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
     try {
       // A grade é mais-novo-primeiro e o servidor dá o horário mais cedo ao primeiro id — daí o reverse.
       if (plan.postOrder.length > 1) await reschedule(plan.postOrder.slice().reverse());
-      await Promise.all(changedPreviews.map(([id, at]) => updateGridPreview(id, at)));
+      await Promise.all(changedPreviews.map(([id, at]) => updateGridPreview(id, { sort_at: at })));
       setUndo(snapshot);
       await Promise.all([reload(), refreshPreviews()]);
       toast.success(okMsg);
@@ -171,7 +202,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
     // Silêncio aqui parecia "o arrastar não funciona" — o motivo real é sempre uma peça publicada
     // na jogada (o horário dela já passou, não dá pra redistribuir). Diz isso em vez de no-op.
     if (from === -1 || to === -1) {
-      toast.error('O que já foi publicado é âncora e não muda de lugar — arraste entre agendados e prévias.');
+      toast.error('O que já foi publicado é âncora e não muda de lugar — arraste entre agendados e ideias.');
       return;
     }
     applyArrangement(moveItem(movable, from, to), movable, 'Ordem atualizada.');
@@ -203,7 +234,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         });
       }
       await refreshPreviews();
-      toast.success(accepted.length > 1 ? `${accepted.length} prévias na grade.` : 'Prévia na grade.');
+      toast.success(accepted.length > 1 ? `${accepted.length} ideias na grade.` : 'Ideia na grade.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -221,14 +252,22 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
     }
   }
 
+  // Uma ideia só de texto não tem mídia pra levar pro compositor — o que ela leva é a NOTA, que
+  // vira o rascunho da legenda. Sem isso, agendar uma ideia escrita abriria o compositor vazio e a
+  // pessoa teria que copiar o próprio texto de volta na mão.
   function onSchedulePreview(preview: GridPreview) {
     requestPrefillMedia({
-      assetId: preview.media_asset_id,
-      name: 'prévia',
-      mime_type: preview.mime_type,
-      public_url: preview.public_url,
-      width: preview.width ?? undefined,
-      height: preview.height ?? undefined,
+      body: preview.note ?? undefined,
+      media: preview.media_asset_id
+        ? {
+            assetId: preview.media_asset_id,
+            name: 'ideia',
+            mime_type: preview.mime_type ?? 'image/jpeg',
+            public_url: preview.public_url,
+            width: preview.width ?? undefined,
+            height: preview.height ?? undefined,
+          }
+        : undefined,
     });
   }
 
@@ -243,11 +282,15 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
       : { onDragOver: (e: React.DragEvent) => e.preventDefault(), onDrop: () => onDrop(tile.key) };
 
   return (
-    <div className="h-full overflow-y-auto pb-2">
+    // Grade à esquerda com a largura que ela já tinha; a lista de ideias ocupa o resto — que antes
+    // era só branco. Abaixo do `lg` elas empilham, com a lista embaixo: espremer as duas num
+    // celular deixaria a grade estreita demais pra cumprir a função dela.
+    <div className="flex h-full flex-col gap-6 overflow-y-auto pb-2 lg:flex-row lg:overflow-hidden">
+      <div className="shrink-0 lg:h-full lg:overflow-y-auto lg:pb-2 lg:pr-1">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" disabled={adding} onClick={() => fileRef.current?.click()}>
           {adding ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />}
-          Adicionar prévia
+          Adicionar arte
         </Button>
         <Button size="sm" variant="ghost" disabled={!undo} onClick={() => undo && applyArrangement(undo, null, 'Ordem anterior restaurada.')}>
           Desfazer
@@ -263,7 +306,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
       </div>
 
       <p className="mb-3 max-w-md text-xs text-muted-foreground">
-        Arraste para reordenar: os posts agendados só trocam entre si os horários que já têm; as prévias entram no meio
+        Arraste para reordenar: os posts agendados só trocam entre si os horários que já têm; as ideias entram no meio
         sem ocupar horário nenhum. A grade do perfil corta tudo em 3:4 — no feed, o post mantém a proporção original.
       </p>
 
@@ -290,7 +333,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
                   </div>
                 )}
                 <span className="absolute left-1 top-1 rounded-md bg-primary px-1.5 py-0.5 text-xs font-medium text-primary-foreground">
-                  prévia
+                  ideia
                 </span>
                 <div className="absolute inset-x-0 bottom-0 flex justify-center gap-1 bg-gradient-to-t from-black/70 to-transparent px-1 pb-1 pt-4 opacity-0 transition-opacity group-hover:opacity-100">
                   <button
@@ -303,7 +346,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
                   </button>
                   <button
                     type="button"
-                    title="Remover prévia"
+                    title="Remover ideia"
                     onClick={() => onRemovePreview(preview)}
                     className="rounded-md bg-white/90 p-1 text-foreground hover:bg-white"
                   >
@@ -354,12 +397,17 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
                 published ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
               }`}
             >
+              {/* Ordem de queda: nossa cópia → capa do feed → glyph. O meio existe porque a nossa
+                  cópia some depois de 30 dias (purge), e sem ele todo post com mais de um mês era
+                  um quadrado cinza — numa tela cuja única função é mostrar como o feed fica. */}
               {m?.public_url ? (
                 isVideoMime(m.mime_type) ? (
                   <video src={videoPosterUrl(m.public_url)} muted preload="metadata" className="size-full object-cover" />
                 ) : (
                   <img src={m.public_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
                 )
+              ) : tile.feedThumb ? (
+                <img src={tile.feedThumb} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
               ) : (
                 <div className="grid size-full place-items-center text-muted-foreground">
                   {target.media.length ? <ImageIcon className="size-5" /> : <PenLine className="size-5" />}
@@ -392,9 +440,18 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
 
       {feedError && (
         <p className="mt-3 max-w-md text-xs text-muted-foreground">
-          Não consegui carregar o feed do Instagram ({feedError}). A grade mostra só os agendados e as prévias.
+          Não consegui carregar o feed do Instagram ({feedError}). A grade mostra só os agendados e as ideias.
         </p>
       )}
+      </div>
+
+      <IdeaSidebar
+        ideias={previews}
+        onRefresh={refreshPreviews}
+        onAgendar={onSchedulePreview}
+        onRemover={onRemovePreview}
+        className="min-w-0 flex-1 lg:h-full lg:overflow-y-auto lg:pb-2 lg:pr-1"
+      />
     </div>
   );
 }

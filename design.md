@@ -35,14 +35,20 @@ scheduled_posts ─┘                                          ↑
 | Tabela | Papel |
 | --- | --- |
 | `accounts` | uma conta conectada. `unique(platform, external_account_id)` — várias contas por rede (migração 0002) |
-| `scheduled_posts` | a **ideia**: título, legenda canônica, `scheduled_for` |
+| `scheduled_posts` | a **peça**: título, legenda canônica, `scheduled_for`. (Chamava-se "a ideia" aqui — o nome foi liberado quando `grid_previews` passou a ser a ideia de verdade, a que ainda não tem data) |
 | `post_targets` | a **saída** numa conta. Tem o status, o formato, o erro, o id externo. É a unidade real de publicação |
 | `post_target_media` | ordem dos arquivos daquele destino (`position` = ordem no carrossel) |
 | `media_assets` | arquivo no R2 + `public_url`, mime, dimensões, duração |
-| `grid_previews` | imagem posta na grade **sem virar post**, só pra ver a capa do feed (migração 0003) |
+| `grid_previews` | uma **ideia**: um post que ainda não tem data. Texto e/ou imagem, uma posição na grade, nenhum horário de publicação — o poller nunca a enxerga (migrações 0003 e 0013) |
 
 **Um post, N destinos.** A legenda vive em `scheduled_posts.body`; cada destino pode divergir via
 `post_targets.caption_override`. O horário é um só, compartilhado por todos os destinos.
+
+**Ideia → post.** `grid_previews` é o estágio anterior: o que você quer postar, ainda sem data. Não
+virou um "rascunho sem data" porque `scheduled_for` é `not null` e o SQLite não remove um NOT NULL
+sem reconstruir a tabela — com `post_targets` viva apontando pra ela, que é a armadilha de FK
+descrita no README pra migração 0002. A ideia já era essa peça desde a 0003; só faltava carregar
+texto. O "Agendar" abre o compositor com o que ela tem, e ali ela ganha data e conta.
 
 `options` (JSON em `post_targets`) carrega o que é específico de rede: `format`, `privacyStatus`,
 `board_id`, `cover_media_id`, `cover_timestamp_ms`.
@@ -148,7 +154,7 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | POST/PUT | `/api/media/multipart/*` | upload em partes — acima de 60MB estoura o limite de corpo (100MB) e de memória (128MB) do Worker |
 | GET | `/api/media/:id/bytes` | os bytes pela nossa origem, pro recorte no navegador não sujar o canvas |
 | GET | `/api/feed/:accountId` | feed real da conta, ao vivo (Instagram e YouTube) |
-| GET/POST/PATCH/DELETE | `/api/grid-previews` | prévias do planejador de grade |
+| GET/POST/PATCH/DELETE | `/api/grid-previews` | ideias: texto e/ou imagem, sem data. Recusa as duas vazias |
 
 ## 7. Princípios
 

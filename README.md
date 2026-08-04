@@ -28,7 +28,8 @@ wrangler login
 wrangler d1 create social-scheduler          # database_id já no wrangler.toml
 wrangler d1 execute social-scheduler --remote --file=migrations/0001_init.sql
 wrangler d1 execute social-scheduler --remote --file=migrations/0002_accounts_multi.sql  # multi-conta por rede (ver nota abaixo)
-wrangler d1 execute social-scheduler --remote --file=migrations/0003_grid_previews.sql   # prévias do Grid IG
+wrangler d1 execute social-scheduler --remote --file=migrations/0003_grid_previews.sql   # ideias do Grid IG
+wrangler d1 execute social-scheduler --remote --file=migrations/0013_ideas.sql          # ideia ganha texto; imagem vira opcional
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
 npm run deploy                               # builda o front (web/ → dist/) e faz wrangler deploy
@@ -170,18 +171,32 @@ Arrastar reordena, e cada espécie se move de um jeito:
   redistribuído na nova ordem (o tile que passou a ser o mais antigo fica com o horário mais cedo).
   Dá pra decidir a estética sem inventar data nem deixar buraco. `POST /api/posts/reschedule` faz
   essa permutação no servidor.
-- **Prévia**: não tem horário de publicação, só um `sort_at` que é interpolado entre os agendados
+- **Ideia**: não tem horário de publicação, só um `sort_at` que é interpolado entre os agendados
   vizinhos — ela cabe entre dois posts sem empurrar nenhum.
 
 O botão **Desfazer** restaura o arranjo anterior (um passo). O que já foi publicado nunca entra na
 permutação; arrastar pra cima de um explica isso em vez de não fazer nada.
 
-**Prévias** (`grid_previews`, migração `0003`): "Adicionar prévia" (ou o tile `+` no fim da grade)
-sobe a imagem pro R2 como qualquer mídia e a coloca no topo. Passando o mouse, dá pra **remover** ou
-**agendar** — que abre o compositor já com aquela mídia na fila, faltando só conta e data (a prévia
-continua na grade até você removê-la). Posts cancelados/falhos não aparecem, e o que a API do
-Instagram devolve como já publicado é deduplicado contra o nosso próprio registro (`external_post_id`)
-pra não aparecer duas vezes.
+### Ideias (a lista ao lado da grade)
+
+**Ideia é um post que ainda não tem data** (`grid_previews`, migrações `0003` e `0013`). Nasceu como
+"prévia" — imagem solta na grade só pra ver a capa — e virou o lugar de planejar: quem cuida de um
+perfil anota o que quer postar antes de decidir quando, e o rascunho não servia pra isso (o
+compositor inventa "amanhã, 09:00" e a peça some no meio da agenda).
+
+Na lista ao lado da grade, escrever e dar **Enter** cria uma ideia. Depois:
+
+- **anexar arte** — a partir daí ela também aparece na grade. *Ideia só de texto não entra na
+  grade*: a grade existe pra mostrar como o feed vai ficar, e um quadrado cinza atrapalha
+  justamente essa leitura.
+- **Agendar** — abre o compositor com o que ela tem (texto e/ou mídia), faltando conta e data. A
+  ideia continua na lista até você removê-la.
+- **Remover**.
+
+Posts cancelados/falhos não aparecem na grade, e o que a API do Instagram devolve como já publicado
+é deduplicado contra o nosso próprio registro (`external_post_id`) pra não aparecer duas vezes —
+mas a **capa** do feed é aproveitada quando a nossa cópia do arquivo já foi apagada pelo purge de 30
+dias, senão todo post com mais de um mês virava um quadrado cinza.
 
 Lembrando que a grade do perfil **corta tudo em 3:4** — é só o recorte da capa; no feed o post
 mantém a proporção original com que foi publicado.

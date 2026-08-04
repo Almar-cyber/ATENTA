@@ -1362,21 +1362,27 @@ async function getMetricsSeries(targetId: string, owner: string, env: Env): Prom
   return jsonResponse({ series: results ?? [] });
 }
 
+// A "prévia" da grade virou IDEIA (migração 0013): além da imagem, ela carrega uma NOTA, e a
+// imagem passou a ser opcional — ideia costuma começar em palavras e ganhar arte depois. O nome da
+// tabela ficou `grid_previews` de propósito: renomear tabela é churn sem ganho nenhum.
 interface GridPreviewRow {
   id: string;
   platform: Platform;
-  media_asset_id: string;
+  media_asset_id: string | null;
+  note: string | null;
   sort_at: string;
   public_url: string | null;
-  mime_type: string;
+  mime_type: string | null;
   width: number | null;
   height: number | null;
 }
 
-const GRID_PREVIEW_SELECT = `select p.id, p.platform, p.media_asset_id, p.sort_at,
+// `left join`: sem ele, a ideia só de texto (sem media_asset_id) simplesmente não voltaria na
+// listagem — sumiria da grade e da lista sem erro nenhum.
+const GRID_PREVIEW_SELECT = `select p.id, p.platform, p.media_asset_id, p.note, p.sort_at,
        m.public_url, m.mime_type, m.width, m.height
   from grid_previews p
-  join media_assets m on m.id = p.media_asset_id`;
+  left join media_assets m on m.id = p.media_asset_id`;
 
 async function listGridPreviews(url: URL, owner: string, env: Env): Promise<Response> {
   const platform = url.searchParams.get('platform');
@@ -1391,24 +1397,34 @@ async function listGridPreviews(url: URL, owner: string, env: Env): Promise<Resp
 }
 
 async function createGridPreview(request: Request, owner: string, env: Env): Promise<Response> {
-  let payload: { platform?: string; media_asset_id?: string; sort_at?: string };
+  let payload: { platform?: string; media_asset_id?: string; note?: string; sort_at?: string };
   try {
     payload = await request.json();
   } catch {
     return jsonResponse({ error: 'JSON inválido' }, 400);
   }
   const { platform, media_asset_id: mediaAssetId } = payload;
+  const note = payload.note?.trim() || null;
   if (!platform || !PLATFORMS.includes(platform as Platform)) {
     return jsonResponse({ error: 'platform obrigatória' }, 400);
   }
-  if (!mediaAssetId) return jsonResponse({ error: 'media_asset_id obrigatório' }, 400);
+  // Um dos dois basta, mas não nenhum: ideia sem imagem e sem texto é uma linha que ninguém
+  // consegue identificar depois nem pra apagar. Espelha o `check` da migração 0013 — aqui pra
+  // devolver uma frase em vez do erro cru do SQLite.
+  if (!mediaAssetId && !note) {
+    return jsonResponse({ error: 'escreva a ideia ou anexe uma imagem' }, 400);
+  }
 
-  const asset = await env.DB.prepare(`select id from media_assets where id = ?`).bind(mediaAssetId).first<{ id: string }>();
-  if (!asset) return jsonResponse({ error: 'mídia não encontrada' }, 404);
+  if (mediaAssetId) {
+    const asset = await env.DB.prepare(`select id from media_assets where id = ?`).bind(mediaAssetId).first<{ id: string }>();
+    if (!asset) return jsonResponse({ error: 'mídia não encontrada' }, 404);
+  }
 
   const id = crypto.randomUUID();
-  await env.DB.prepare(`insert into grid_previews (id, platform, media_asset_id, sort_at, owner_id) values (?, ?, ?, ?, ?)`)
-    .bind(id, platform, mediaAssetId, payload.sort_at || nowIso(), owner)
+  await env.DB.prepare(
+    `insert into grid_previews (id, platform, media_asset_id, note, sort_at, owner_id) values (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(id, platform, mediaAssetId ?? null, note, payload.sort_at || nowIso(), owner)
     .run();
 
   const row = await env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.id = ? and p.owner_id = ?`)
@@ -1417,20 +1433,64 @@ async function createGridPreview(request: Request, owner: string, env: Env): Pro
   return jsonResponse(row, 201);
 }
 
+/**
+ * Atualiza a ideia: a posição na grade (`sort_at`), o texto (`note`) ou a arte (`media_asset_id`).
+ *
+ * Campo ausente = não mexe. `note: ''` apaga o texto, o que é diferente de não mandar `note` — daí
+ * a checagem por `in` em vez de por valor verdadeiro.
+ */
 async function updateGridPreview(id: string, request: Request, owner: string, env: Env): Promise<Response> {
-  let payload: { sort_at?: string };
+  let payload: { sort_at?: string; note?: string | null; media_asset_id?: string | null };
   try {
     payload = await request.json();
   } catch {
     return jsonResponse({ error: 'JSON inválido' }, 400);
   }
-  if (!payload.sort_at) return jsonResponse({ error: 'sort_at obrigatório' }, 400);
 
-  const { results } = await env.DB.prepare(`update grid_previews set sort_at = ? where id = ? and owner_id = ? returning id`)
-    .bind(payload.sort_at, id, owner)
-    .all<{ id: string }>();
-  if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'prévia não encontrada' }, 404);
-  return jsonResponse({ ok: true });
+  const atual = await env.DB.prepare(`select note, media_asset_id from grid_previews where id = ? and owner_id = ?`)
+    .bind(id, owner)
+    .first<{ note: string | null; media_asset_id: string | null }>();
+  if (!atual) return jsonResponse({ error: 'ideia não encontrada' }, 404);
+
+  const mexeNota = 'note' in payload;
+  const mexeMidia = 'media_asset_id' in payload;
+  const note = mexeNota ? payload.note?.trim() || null : atual.note;
+  const mediaAssetId = mexeMidia ? payload.media_asset_id || null : atual.media_asset_id;
+
+  // Mesma guarda da criação, aplicada ao resultado da edição: dá pra tirar o texto OU a imagem,
+  // nunca os dois — senão a ideia vira uma linha invisível.
+  if (!note && !mediaAssetId) {
+    return jsonResponse({ error: 'a ideia precisa de um texto ou de uma imagem' }, 400);
+  }
+  if (mexeMidia && mediaAssetId && mediaAssetId !== atual.media_asset_id) {
+    const asset = await env.DB.prepare(`select id from media_assets where id = ?`).bind(mediaAssetId).first<{ id: string }>();
+    if (!asset) return jsonResponse({ error: 'mídia não encontrada' }, 404);
+  }
+
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (payload.sort_at) {
+    sets.push('sort_at = ?');
+    params.push(payload.sort_at);
+  }
+  if (mexeNota) {
+    sets.push('note = ?');
+    params.push(note);
+  }
+  if (mexeMidia) {
+    sets.push('media_asset_id = ?');
+    params.push(mediaAssetId);
+  }
+  if (sets.length === 0) return jsonResponse({ error: 'nada para atualizar' }, 400);
+
+  await env.DB.prepare(`update grid_previews set ${sets.join(', ')} where id = ? and owner_id = ?`)
+    .bind(...params, id, owner)
+    .run();
+
+  const row = await env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.id = ? and p.owner_id = ?`)
+    .bind(id, owner)
+    .first<GridPreviewRow>();
+  return jsonResponse(row);
 }
 
 // Só apaga a linha da grade — o media_asset (e o objeto no R2) fica, porque a mesma mídia pode já

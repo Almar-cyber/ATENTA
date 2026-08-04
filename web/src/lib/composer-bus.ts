@@ -51,15 +51,23 @@ export function requestEdit(payload: EditPayload): void {
   for (const fn of editListeners) fn(payload);
 }
 
-// Canal do planejador de grade: "esta prévia vira post". Só carrega a mídia (já no R2) — data,
-// contas e legenda são escolhidas no compositor, porque uma prévia não tem nada disso.
+// Canal do planejador de grade: "esta ideia vira post". Leva o que a ideia tem — a arte (já no R2)
+// e/ou o texto; data e contas continuam sendo escolhidas no compositor, porque ideia não tem
+// nenhum dos dois.
+//
+// Os dois campos são opcionais porque a ideia pode ser só imagem ou só texto (migração 0013), mas
+// nunca nenhum dos dois — quem garante isso é o `check` da tabela.
 export interface PrefillMediaPayload {
-  assetId: string;
-  name: string;
-  mime_type: string;
-  public_url: string | null;
-  width?: number;
-  height?: number;
+  /** A nota da ideia, que vira o rascunho da legenda. */
+  body?: string;
+  media?: {
+    assetId: string;
+    name: string;
+    mime_type: string;
+    public_url: string | null;
+    width?: number;
+    height?: number;
+  };
 }
 
 type MediaListener = (p: PrefillMediaPayload) => void;

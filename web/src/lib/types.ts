@@ -58,15 +58,26 @@ export interface Post {
   targets: Target[];
 }
 
-// Uma imagem colocada na grade sem virar post: serve só pra ver como o feed vai ficar. Ocupa uma
-// posição no mesmo eixo de tempo dos posts (`sort_at`), mas não é publicada por ninguém.
+/**
+ * Uma **ideia**: um post que ainda não tem data.
+ *
+ * Ocupa uma posição na grade no mesmo eixo de tempo dos posts (`sort_at`), mas não tem horário de
+ * publicação e o poller nunca a enxerga. Quando ganha data, vira post — é o caminho do "Agendar".
+ *
+ * Nasceu como "prévia" (imagem solta, só pra ver a capa do feed) e por isso a tabela ainda se chama
+ * `grid_previews`. A migração 0013 acrescentou a `note` e tornou a imagem opcional: ideia começa em
+ * palavras e ganha arte depois, e exigir a arte primeiro invertia a ordem em que as coisas
+ * acontecem. Uma das duas sempre existe — nunca as duas vazias.
+ */
 export interface GridPreview {
   id: string;
   platform: Platform;
-  media_asset_id: string;
+  media_asset_id: string | null;
+  /** O que é a ideia, em palavras. `null` quando é só uma imagem. */
+  note: string | null;
   sort_at: string;
   public_url: string | null;
-  mime_type: string;
+  mime_type: string | null;
   width: number | null;
   height: number | null;
 }

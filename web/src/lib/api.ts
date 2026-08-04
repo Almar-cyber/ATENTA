@@ -244,12 +244,18 @@ export function getAccountFeed(accountId: string): Promise<{ items: FeedItem[]; 
   return req(`/api/feed/${accountId}`);
 }
 
-// Prévias da grade: imagens que ocupam um lugar no planejamento sem virar post agendado.
+// Ideias: um post que ainda não tem data. Ocupa um lugar no planejamento sem virar post agendado.
 export function getGridPreviews(platform: Platform): Promise<{ previews: GridPreview[] }> {
   return req(`/api/grid-previews?platform=${platform}`);
 }
 
-export function createGridPreview(payload: { platform: Platform; media_asset_id: string; sort_at: string }): Promise<GridPreview> {
+// Uma das duas — imagem ou texto — precisa vir; o servidor recusa as duas vazias.
+export function createGridPreview(payload: {
+  platform: Platform;
+  media_asset_id?: string;
+  note?: string;
+  sort_at: string;
+}): Promise<GridPreview> {
   return req('/api/grid-previews', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -257,11 +263,15 @@ export function createGridPreview(payload: { platform: Platform; media_asset_id:
   });
 }
 
-export function updateGridPreview(id: string, sortAt: string): Promise<{ ok: true }> {
+/** Campo ausente = não mexe (é como a reordenação da grade manda só o `sort_at`). */
+export function updateGridPreview(
+  id: string,
+  patch: { sort_at?: string; note?: string | null; media_asset_id?: string | null }
+): Promise<GridPreview> {
   return req(`/api/grid-previews/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sort_at: sortAt }),
+    body: JSON.stringify(patch),
   });
 }
 

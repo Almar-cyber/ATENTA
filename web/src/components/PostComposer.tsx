@@ -181,21 +181,29 @@ export function PostComposer({
     });
   }, []);
 
-  // "Agendar" numa prévia da grade: só a mídia entra na fila (a prévia não tem data nem conta).
+  // "Agendar" numa ideia da grade: entra o que ela tem — a arte e/ou o texto. Data e conta a ideia
+  // não tem, por definição, e é justamente o que resta escolher aqui.
   useEffect(() => {
-    return onPrefillMedia((m) => {
-      setQueue([
-        {
-          key: newKey(),
-          assetId: m.assetId,
-          name: m.name,
-          mime_type: m.mime_type,
-          public_url: m.public_url,
-          width: m.width,
-          height: m.height,
-        },
-      ]);
-      toast.success('Mídia da prévia carregada — escolha conta e data.');
+    return onPrefillMedia((ideia) => {
+      setQueue(
+        ideia.media
+          ? [
+              {
+                key: newKey(),
+                assetId: ideia.media.assetId,
+                name: ideia.media.name,
+                mime_type: ideia.media.mime_type,
+                public_url: ideia.media.public_url,
+                width: ideia.media.width,
+                height: ideia.media.height,
+              },
+            ]
+          : []
+      );
+      if (ideia.body) setBody(ideia.body);
+      toast.success(
+        ideia.media ? 'Ideia carregada — escolha conta e data.' : 'Texto da ideia carregado — falta a arte, a conta e a data.'
+      );
       onRequestOpen?.();
     });
   }, []);
