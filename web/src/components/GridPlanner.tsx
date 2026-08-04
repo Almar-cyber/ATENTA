@@ -258,6 +258,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
   function onSchedulePreview(preview: GridPreview) {
     requestPrefillMedia({
       body: preview.note ?? undefined,
+      tagId: preview.tag_id,
       media: preview.media_asset_id
         ? {
             assetId: preview.media_asset_id,

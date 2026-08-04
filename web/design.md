@@ -38,6 +38,8 @@ sempre as classes utilitárias semânticas — nunca hex solto:
   `atenta-wordmark-onpurple.png` (traço branco) pra superfície colorida; `atenta-icon.svg` no favicon.
   **PNG, não SVG, no wordmark** — o SVG deformava o "A" e o "N" em alguns renderizadores.
 
+**Segunda exceção — cores dos pilares de conteúdo.** `TAG_COLORS` (`src/lib/tags.ts`) tem seis tons que não significam nada no sistema; só precisam ser distinguíveis entre si. O banco guarda a CHAVE ('roxo'), nunca o hex, então mudar a paleta é editar um arquivo.
+
 **Exceção deliberada — cores de marca das plataformas.** `PLATFORM_COLORS` (em
 `src/lib/platforms.ts`) tem os hex oficiais (YouTube #FF0000, LinkedIn #0A66C2, Instagram #E1306C,
 Facebook #1877F2, Pinterest #E60023, TikTok #111827). Use só nos indicadores de plataforma (o
@@ -63,6 +65,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `PostHoverCard` | Cartão que aparece ao passar o mouse num chip do calendário (Mês e Semana): thumbnail da peça na proporção do formato, legenda/título, conta, horário e status. Substitui o `title=` do navegador — o chip só cabe o nome da conta, e é a imagem que faz reconhecer o post. |
 | `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). |
 | `ConnectionsView` | Tela "Conexões" (botão no header): grid de cards por rede com as contas conectadas + status e botão "Conectar" que navega pra `/api/connect/:rede` (OAuth). Várias contas por rede aparecem como linhas separadas. |
+| `TagPicker` / `TagChip` | Escolher (ou **criar na hora**) o pilar de conteúdo. Criar no mesmo lugar de escolher é o que faz isto ser usado: uma tela separada de "gerenciar pilares" custaria sair do fluxo, e pilar que ninguém marca não vira insight. A cor vem de `proximaCor` (a primeira não usada), nunca sorteada — sortear repetiria tons no terceiro pilar. |
 | `PlatformIcon` | Logo oficial de cada rede (SVG inline), colorido por `PLATFORM_COLORS`. Use onde a rede precisa ficar clara (lista, semana, chips, header, preview, dialog). |
 | `AlertBanner` | Card recuado de falhas/reautenticação no topo. |
 | `Thumb` | Thumbnail pequeno com fallback pra glyph quando a URL não resolve. |

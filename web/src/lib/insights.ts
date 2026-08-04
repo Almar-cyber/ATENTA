@@ -53,6 +53,15 @@ const DURATION_BUCKETS = [
 ];
 const times = (r: number) => r.toFixed(1).replace('.', ',');
 
+/**
+ * Amostra mínima pra um grupo "contar" numa comparação.
+ *
+ * Existe porque três vídeos sem engajamento não deveriam calar quatorze posts que têm — foi assim
+ * que a tela ficou com um título de seção e nada embaixo. Vale tanto pra decidir se uma REDE tem
+ * amostra quanto pra decidir se um ASSUNTO entra na comparação.
+ */
+const MIN_POSTS_PARA_CONTAR = 3;
+
 const pct = (r: number) => `${(r * 100).toFixed(1).replace('.', ',')}%`;
 const nfmt = new Intl.NumberFormat('pt-BR');
 const fmt = (v: number) => nfmt.format(v);
@@ -220,6 +229,34 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     }
   }
 
+  /**
+   * Melhor ASSUNTO (pilar de conteúdo).
+   *
+   * É a pergunta que este arquivo nunca soube responder: ele sabia dizer qual formato e qual horário
+   * rendem, nunca sobre O QUÊ. A anotação anterior dizia que isso exigiria IA pra classificar o tema
+   * — não exige: quem marca o pilar é a própria pessoa, e aí vira o mesmo `bestGroup` dos outros.
+   *
+   * Escopo 'rede' pelo mesmo motivo do "melhor post": a taxa de um vídeo do YouTube e a de um post
+   * de feed não disputam a mesma coisa, e somá-las por assunto esconderia isso em vez de resolver.
+   * Com uma rede só de amostra, `insightsParaVisao` já libera.
+   */
+  const comTag = withRate.filter((x) => x.m.tag_id && x.m.tag_name);
+  if (comTag.length >= 4) {
+    const porAssunto = bestGroup(
+      comTag.map((x) => ({ key: x.m.tag_name as string, rate: x.rate })),
+      2
+    );
+    if (porAssunto && porAssunto.timesVsRest >= 1.25) {
+      out.push({
+        id: 'best-tag',
+        escopo: 'rede',
+        headline: `Seus posts de ${porAssunto.key} engajam ${times(porAssunto.timesVsRest)}× mais`,
+        detail: `comparando ${porAssunto.groups} assuntos com amostra suficiente`,
+        tone: 'good',
+      });
+    }
+  }
+
   // Tendência de seguidores: crescimento por semana desde o primeiro snapshot da conta.
   const followerTrend = computeFollowerTrend(followers);
   if (followerTrend) out.push(followerTrend);
@@ -261,7 +298,61 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
  * engajamento não deveriam calar quatorze posts que têm — foi assim que a tela ficou com um título
  * de seção e nada embaixo.
  */
-const MIN_POSTS_PARA_CONTAR = 3;
+
+
+export interface ResumoDeAssunto {
+  id: string;
+  nome: string;
+  cor: string;
+  posts: number;
+  /** Taxa média de engajamento. `null` quando nenhum post do assunto trouxe alcance nem views. */
+  taxa: number | null;
+  engajamento: number;
+}
+
+/**
+ * Desempenho por assunto, do melhor pro pior.
+ *
+ * Fica de fora quem tem menos de `MIN_POSTS_PARA_CONTAR` posts: com um post só, a "média" é aquele
+ * post, e pôr isso lado a lado com um assunto de dez peças convida à conclusão errada — o topo da
+ * lista seria sempre o assunto mais novo, não o melhor.
+ *
+ * `null` no lugar da lista quando sobra menos de dois assuntos: uma comparação com um item só não é
+ * comparação, e a seção inteira não deve aparecer.
+ */
+export function desempenhoPorAssunto(metrics: PostMetricRow[]): ResumoDeAssunto[] | null {
+  const mapa = new Map<string, { nome: string; cor: string; taxas: number[]; engajamento: number; posts: number }>();
+  for (const m of metrics) {
+    if (!m.tag_id || !m.tag_name) continue;
+    const atual = mapa.get(m.tag_id) ?? {
+      nome: m.tag_name,
+      cor: m.tag_color ?? 'roxo',
+      taxas: [],
+      engajamento: 0,
+      posts: 0,
+    };
+    atual.posts += 1;
+    atual.engajamento += engagement(m);
+    const taxa = engagementRate(m);
+    if (taxa != null) atual.taxas.push(taxa);
+    mapa.set(m.tag_id, atual);
+  }
+
+  const linhas = [...mapa.entries()]
+    .filter(([, v]) => v.posts >= MIN_POSTS_PARA_CONTAR)
+    .map(([id, v]) => ({
+      id,
+      nome: v.nome,
+      cor: v.cor,
+      posts: v.posts,
+      engajamento: v.engajamento,
+      taxa: v.taxas.length ? v.taxas.reduce((a, b) => a + b, 0) / v.taxas.length : null,
+    }));
+
+  if (linhas.length < 2) return null;
+  linhas.sort((a, b) => (b.taxa ?? -1) - (a.taxa ?? -1));
+  return linhas;
+}
 
 export function insightsParaVisao(
   metrics: PostMetricRow[],

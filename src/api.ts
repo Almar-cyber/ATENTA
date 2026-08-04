@@ -109,7 +109,15 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   const probeMatch = /^\/api\/metrics\/probe\/([^/]+)$/.exec(pathname);
   if (probeMatch && method === 'GET') return runProbe(probeMatch[1], owner, env);
 
-  // Prévias do planejador de grade (imagens sem post — só pra ver como o feed vai ficar).
+  // Pilares de conteúdo. Tabela própria, e não texto solto, porque o destino delas é um group by
+  // no Insights — ver o comentário na migração 0014.
+  if (pathname === '/api/tags' && method === 'GET') return listTags(owner, env);
+  if (pathname === '/api/tags' && method === 'POST') return createTag(request, owner, env);
+  const tagMatch = /^\/api\/tags\/([^/]+)$/.exec(pathname);
+  if (tagMatch && method === 'PATCH') return updateTag(tagMatch[1], request, owner, env);
+  if (tagMatch && method === 'DELETE') return deleteTag(tagMatch[1], owner, env);
+
+  // Ideias do planejador de grade (um post que ainda não tem data).
   if (pathname === '/api/grid-previews' && method === 'GET') return listGridPreviews(url, owner, env);
   if (pathname === '/api/grid-previews' && method === 'POST') return createGridPreview(request, owner, env);
   const previewMatch = /^\/api\/grid-previews\/([^/]+)$/.exec(pathname);
@@ -297,6 +305,9 @@ interface PostTargetRow {
   body: string | null;
   scheduled_for: string;
   created_at: string;
+  tag_id: string | null;
+  tag_name: string | null;
+  tag_color: string | null;
   target_id: string;
   platform: string;
   status: string;
@@ -334,12 +345,14 @@ async function listPosts(url: URL, owner: string, env: Env): Promise<Response> {
 
   const { results } = await env.DB.prepare(
     `select sp.id as post_id, sp.title, sp.body, sp.scheduled_for, sp.created_at,
+            sp.tag_id, t.name as tag_name, t.color as tag_color,
             pt.id as target_id, pt.platform, pt.status, pt.caption_override, pt.options,
             pt.external_url, pt.external_post_id, pt.attempt_count, pt.last_error, pt.published_at, pt.updated_at,
             a.id as account_id, a.display_name as account_name
      from post_targets pt
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      join accounts a on a.id = pt.account_id
+     left join tags t on t.id = sp.tag_id
      ${where}
      order by sp.scheduled_for desc
      limit ?`
@@ -361,6 +374,7 @@ async function listPosts(url: URL, owner: string, env: Env): Promise<Response> {
       body: string | null;
       scheduled_for: string;
       created_at: string;
+      tag: { id: string; name: string; color: string } | null;
       targets: unknown[];
     }
   >();
@@ -373,6 +387,9 @@ async function listPosts(url: URL, owner: string, env: Env): Promise<Response> {
         body: row.body,
         scheduled_for: row.scheduled_for,
         created_at: row.created_at,
+        // Objeto único (ou null), e não três campos soltos: o cliente ou tem o pilar inteiro ou
+        // não tem nenhum, e um `tag_name` sem `tag_id` não significaria nada.
+        tag: row.tag_id ? { id: row.tag_id, name: row.tag_name ?? '', color: row.tag_color ?? 'roxo' } : null,
         targets: [],
       });
     }
@@ -450,6 +467,9 @@ interface CreatePostBody {
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   save_as?: string;
+  /** Pilar de conteúdo. Vive na PEÇA, não no destino: o assunto é do conteúdo, não da rede onde ele
+   *  sai — o mesmo post no Instagram e no LinkedIn é sobre a mesma coisa. */
+  tag_id?: string | null;
   // Keyed by account_id; overrides the shared `body` for just that one target's caption.
   target_caption_overrides?: Record<string, string>;
 }
@@ -461,6 +481,8 @@ interface UpdatePostBody {
   title?: string;
   body?: string;
   scheduled_for?: string;
+  /** `null` tira o pilar; ausente não mexe. */
+  tag_id?: string | null;
   target_account_ids?: string[];
   media_asset_id?: string;
   media_asset_ids?: string[];
@@ -726,8 +748,17 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
   if (!result.ok) return result.response;
 
   const scheduledPostId = crypto.randomUUID();
-  await env.DB.prepare(`insert into scheduled_posts (id, title, body, scheduled_for, owner_id) values (?, ?, ?, ?, ?)`)
-    .bind(scheduledPostId, payload.title ?? null, payload.body, payload.scheduled_for, owner)
+  await env.DB.prepare(
+    `insert into scheduled_posts (id, title, body, scheduled_for, tag_id, owner_id) values (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      scheduledPostId,
+      payload.title ?? null,
+      payload.body,
+      payload.scheduled_for,
+      await resolveTagId(payload.tag_id, owner, env),
+      owner
+    )
     .run();
 
   await insertTargets(env, scheduledPostId, result.targets, result.media, payload.target_caption_overrides);
@@ -832,6 +863,10 @@ async function updatePost(id: string, request: Request, owner: string, env: Env)
   if (payload.scheduled_for !== undefined) {
     setClauses.push('scheduled_for = ?');
     setParams.push(payload.scheduled_for);
+  }
+  if (payload.tag_id !== undefined) {
+    setClauses.push('tag_id = ?');
+    setParams.push(await resolveTagId(payload.tag_id, owner, env));
   }
   if (setClauses.length > 0) {
     setClauses.push('updated_at = ?');
@@ -1305,11 +1340,15 @@ async function listMetrics(owner: string, env: Env): Promise<Response> {
               where ptm.post_target_id = pt.id) as duration_seconds,
             -- No YouTube o conteúdo é o título (body vazio); cai nele quando não há legenda.
             coalesce(nullif(pt.caption_override, ''), nullif(sp.body, ''), sp.title) as caption,
+            -- O pilar de conteúdo: é o que permite o Insights responder "sobre O QUÊ eu rendo mais",
+            -- pergunta que ele nunca soube responder — só sabia sobre formato e horário.
+            sp.tag_id, tg.name as tag_name, tg.color as tag_color,
             m.fetched_at, m.impressions, m.reach, m.likes, m.comments, m.shares, m.saves,
             m.video_views, m.avg_watch_seconds, m.follows, m.profile_visits, m.interactions
        from post_targets pt
        join accounts a on a.id = pt.account_id
        join scheduled_posts sp on sp.id = pt.scheduled_post_id
+       left join tags tg on tg.id = sp.tag_id
        join post_metrics m on m.id = (
          select id from post_metrics where post_target_id = pt.id order by fetched_at desc limit 1
        )
@@ -1370,6 +1409,9 @@ interface GridPreviewRow {
   platform: Platform;
   media_asset_id: string | null;
   note: string | null;
+  tag_id: string | null;
+  tag_name: string | null;
+  tag_color: string | null;
   sort_at: string;
   public_url: string | null;
   mime_type: string | null;
@@ -1380,9 +1422,11 @@ interface GridPreviewRow {
 // `left join`: sem ele, a ideia só de texto (sem media_asset_id) simplesmente não voltaria na
 // listagem — sumiria da grade e da lista sem erro nenhum.
 const GRID_PREVIEW_SELECT = `select p.id, p.platform, p.media_asset_id, p.note, p.sort_at,
+       p.tag_id, t.name as tag_name, t.color as tag_color,
        m.public_url, m.mime_type, m.width, m.height
   from grid_previews p
-  left join media_assets m on m.id = p.media_asset_id`;
+  left join media_assets m on m.id = p.media_asset_id
+  left join tags t on t.id = p.tag_id`;
 
 async function listGridPreviews(url: URL, owner: string, env: Env): Promise<Response> {
   const platform = url.searchParams.get('platform');
@@ -1397,7 +1441,7 @@ async function listGridPreviews(url: URL, owner: string, env: Env): Promise<Resp
 }
 
 async function createGridPreview(request: Request, owner: string, env: Env): Promise<Response> {
-  let payload: { platform?: string; media_asset_id?: string; note?: string; sort_at?: string };
+  let payload: { platform?: string; media_asset_id?: string; note?: string; sort_at?: string; tag_id?: string };
   try {
     payload = await request.json();
   } catch {
@@ -1422,9 +1466,9 @@ async function createGridPreview(request: Request, owner: string, env: Env): Pro
 
   const id = crypto.randomUUID();
   await env.DB.prepare(
-    `insert into grid_previews (id, platform, media_asset_id, note, sort_at, owner_id) values (?, ?, ?, ?, ?, ?)`
+    `insert into grid_previews (id, platform, media_asset_id, note, tag_id, sort_at, owner_id) values (?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, platform, mediaAssetId ?? null, note, payload.sort_at || nowIso(), owner)
+    .bind(id, platform, mediaAssetId ?? null, note, await resolveTagId(payload.tag_id, owner, env), payload.sort_at || nowIso(), owner)
     .run();
 
   const row = await env.DB.prepare(`${GRID_PREVIEW_SELECT} where p.id = ? and p.owner_id = ?`)
@@ -1440,7 +1484,7 @@ async function createGridPreview(request: Request, owner: string, env: Env): Pro
  * a checagem por `in` em vez de por valor verdadeiro.
  */
 async function updateGridPreview(id: string, request: Request, owner: string, env: Env): Promise<Response> {
-  let payload: { sort_at?: string; note?: string | null; media_asset_id?: string | null };
+  let payload: { sort_at?: string; note?: string | null; media_asset_id?: string | null; tag_id?: string | null };
   try {
     payload = await request.json();
   } catch {
@@ -1481,6 +1525,12 @@ async function updateGridPreview(id: string, request: Request, owner: string, en
     sets.push('media_asset_id = ?');
     params.push(mediaAssetId);
   }
+  // `tag_id: null` tira o pilar; ausente não mexe. Um id que não é do dono cai em null pela
+  // resolveTagId — não vaza, e também não grava referência fantasma.
+  if ('tag_id' in payload) {
+    sets.push('tag_id = ?');
+    params.push(await resolveTagId(payload.tag_id, owner, env));
+  }
   if (sets.length === 0) return jsonResponse({ error: 'nada para atualizar' }, 400);
 
   await env.DB.prepare(`update grid_previews set ${sets.join(', ')} where id = ? and owner_id = ?`)
@@ -1499,8 +1549,134 @@ async function deleteGridPreview(id: string, owner: string, env: Env): Promise<R
   const { results } = await env.DB.prepare(`delete from grid_previews where id = ? and owner_id = ? returning id`)
     .bind(id, owner)
     .all<{ id: string }>();
-  if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'prévia não encontrada' }, 404);
+  if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'ideia não encontrada' }, 404);
   return jsonResponse({ ok: true });
+}
+
+/**
+ * TAGS — os pilares de conteúdo.
+ *
+ * O que justifica uma tabela em vez de um campo de texto está na migração 0014: o destino final
+ * delas é um GROUP BY no Insights, e group by sobre texto digitado quebra "Viagem"/"viagem" em
+ * pilares diferentes, dividindo a amostra sem que ninguém perceba.
+ */
+
+/** Chaves da paleta. Espelha TAG_COLORS em web/src/lib/tags.ts — cor não vai como hex pro banco. */
+const TAG_COLORS: readonly string[] = ['roxo', 'verde', 'azul', 'laranja', 'rosa', 'ciano'];
+
+const MAX_TAG_NAME = 24;
+
+async function listTags(owner: string, env: Env): Promise<Response> {
+  // O `uso` é o que permite a tela dizer "este pilar tem 3 peças" antes de você apagá-lo — e
+  // ordenar por ele põe na frente o que você realmente usa.
+  const { results } = await env.DB.prepare(
+    `select t.id, t.name, t.color,
+            (select count(*) from scheduled_posts sp where sp.tag_id = t.id) +
+            (select count(*) from grid_previews gp where gp.tag_id = t.id) as uso
+       from tags t
+      where t.owner_id = ?
+      order by uso desc, lower(t.name) asc`
+  )
+    .bind(owner)
+    .all<Record<string, unknown>>();
+  return jsonResponse({ tags: results ?? [] });
+}
+
+async function createTag(request: Request, owner: string, env: Env): Promise<Response> {
+  let payload: { name?: string; color?: string };
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+  const name = payload.name?.trim();
+  if (!name) return jsonResponse({ error: 'dê um nome ao pilar' }, 400);
+  if (name.length > MAX_TAG_NAME) return jsonResponse({ error: `no máximo ${MAX_TAG_NAME} caracteres` }, 400);
+  const color = payload.color && TAG_COLORS.includes(payload.color) ? payload.color : TAG_COLORS[0];
+
+  const id = crypto.randomUUID();
+  try {
+    await env.DB.prepare(`insert into tags (id, owner_id, name, color) values (?, ?, ?, ?)`)
+      .bind(id, owner, name, color)
+      .run();
+  } catch (err) {
+    // O índice único é normalizado (lower+trim), então isto pega "Viagem" contra " viagem ". Devolve
+    // a que já existe em vez de um erro: quem digitou o mesmo nome queria o mesmo pilar.
+    if (String(err).includes('UNIQUE')) {
+      const existente = await env.DB.prepare(
+        `select id, name, color from tags where owner_id = ? and lower(trim(name)) = lower(trim(?))`
+      )
+        .bind(owner, name)
+        .first<Record<string, unknown>>();
+      if (existente) return jsonResponse(existente, 200);
+    }
+    throw err;
+  }
+  return jsonResponse({ id, name, color, uso: 0 }, 201);
+}
+
+async function updateTag(id: string, request: Request, owner: string, env: Env): Promise<Response> {
+  let payload: { name?: string; color?: string };
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (payload.name !== undefined) {
+    const name = payload.name.trim();
+    if (!name) return jsonResponse({ error: 'dê um nome ao pilar' }, 400);
+    if (name.length > MAX_TAG_NAME) return jsonResponse({ error: `no máximo ${MAX_TAG_NAME} caracteres` }, 400);
+    sets.push('name = ?');
+    params.push(name);
+  }
+  if (payload.color !== undefined) {
+    if (!TAG_COLORS.includes(payload.color)) return jsonResponse({ error: 'cor inválida' }, 400);
+    sets.push('color = ?');
+    params.push(payload.color);
+  }
+  if (sets.length === 0) return jsonResponse({ error: 'nada para atualizar' }, 400);
+
+  try {
+    const { results } = await env.DB.prepare(
+      `update tags set ${sets.join(', ')} where id = ? and owner_id = ? returning id, name, color`
+    )
+      .bind(...params, id, owner)
+      .all<Record<string, unknown>>();
+    if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'pilar não encontrado' }, 404);
+    return jsonResponse(results![0]);
+  } catch (err) {
+    if (String(err).includes('UNIQUE')) return jsonResponse({ error: 'já existe um pilar com esse nome' }, 409);
+    throw err;
+  }
+}
+
+/**
+ * Apagar o pilar NÃO apaga as peças dele — o `on delete set null` das duas tabelas as devolve a
+ * "sem pilar". Perder um post porque a pessoa arrumou a lista de pilares seria uma troca absurda.
+ */
+async function deleteTag(id: string, owner: string, env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(`delete from tags where id = ? and owner_id = ? returning id`)
+    .bind(id, owner)
+    .all<{ id: string }>();
+  if ((results?.length ?? 0) === 0) return jsonResponse({ error: 'pilar não encontrado' }, 404);
+  return jsonResponse({ ok: true });
+}
+
+/**
+ * Valida que a tag existe e é deste dono, devolvendo o id ou `null`.
+ *
+ * Sem esta checagem, mandar o id da tag de outra pessoa gravaria a referência: o post não vazaria,
+ * mas apareceria agrupado sob um pilar que o dono não criou nem consegue ver — um fantasma no
+ * próprio Insights.
+ */
+async function resolveTagId(tagId: unknown, owner: string, env: Env): Promise<string | null> {
+  if (typeof tagId !== 'string' || !tagId) return null;
+  const row = await env.DB.prepare(`select id from tags where id = ? and owner_id = ?`)
+    .bind(tagId, owner)
+    .first<{ id: string }>();
+  return row?.id ?? null;
 }
 
 function parseOptionalFloat(value: FormDataEntryValue | null): number | null {

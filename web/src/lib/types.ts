@@ -55,7 +55,19 @@ export interface Post {
   body: string | null;
   scheduled_for: string;
   created_at: string;
+  /**
+   * O pilar de conteúdo. Vive na PEÇA e não no destino: o assunto é do conteúdo, não da rede — o
+   * mesmo post no Instagram e no LinkedIn é sobre a mesma coisa.
+   */
+  tag: TagRef | null;
   targets: Target[];
+}
+
+/** O pilar como ele viaja junto de uma peça: já resolvido, pra a UI não precisar cruzar listas. */
+export interface TagRef {
+  id: string;
+  name: string;
+  color: string;
 }
 
 /**
@@ -75,6 +87,10 @@ export interface GridPreview {
   media_asset_id: string | null;
   /** O que é a ideia, em palavras. `null` quando é só uma imagem. */
   note: string | null;
+  /** O pilar de conteúdo, que a ideia leva consigo quando vira post. */
+  tag_id: string | null;
+  tag_name: string | null;
+  tag_color: string | null;
   sort_at: string;
   public_url: string | null;
   mime_type: string | null;

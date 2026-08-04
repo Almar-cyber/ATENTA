@@ -42,6 +42,7 @@ import { ComposerHints } from './ComposerHints';
 import type { Hint } from './ComposerHints';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PlatformIcon } from './PlatformIcon';
+import { TagPicker } from './TagPicker';
 
 // Data reservada pro rascunho salvo sem horário definido: amanhã, 09:00.
 function defaultDraftSlot(): string {
@@ -84,7 +85,7 @@ export function PostComposer({
   onRequestOpen?: () => void;
   onDone?: () => void;
 }) {
-  const { accounts, accountsById, reload } = useScheduler();
+  const { accounts, accountsById, tags, reload } = useScheduler();
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -102,6 +103,9 @@ export function PostComposer({
   // mostre esse seletor sem nada pré-selecionado (ver src/adapters/tiktok.ts).
   const [tiktokPrivacy, setTiktokPrivacy] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  /** Pilar de conteúdo da PEÇA — um só, compartilhado por todos os destinos: o assunto é do
+   *  conteúdo, não da rede onde ele sai. */
+  const [tagId, setTagId] = useState<string | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('all');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -126,6 +130,7 @@ export function PostComposer({
       setYtPrivacy((target.options?.privacyStatus as string) ?? '');
       setPinBoard((target.options?.board_id as string) ?? '');
       setTiktokPrivacy((target.options?.privacy_level as string) ?? '');
+      setTagId(post.tag?.id ?? null);
       setFormats((f) => ({ ...f, instagram: igFormatOf(target.options) }));
       setFormatTouched(true);
       setQueue(
@@ -157,6 +162,7 @@ export function PostComposer({
       setYtPrivacy((post.targets.find((t) => t.platform === 'youtube')?.options?.privacyStatus as string) ?? '');
       setPinBoard((post.targets.find((t) => t.platform === 'pinterest')?.options?.board_id as string) ?? '');
       setTiktokPrivacy((post.targets.find((t) => t.platform === 'tiktok')?.options?.privacy_level as string) ?? '');
+      setTagId(post.tag?.id ?? null);
       setFormats((f) => ({ ...f, instagram: igFormatOf(post.targets.find((t) => t.platform === 'instagram')?.options) }));
       setFormatTouched(true);
       setQueue(
@@ -201,6 +207,7 @@ export function PostComposer({
           : []
       );
       if (ideia.body) setBody(ideia.body);
+      setTagId(ideia.tagId ?? null);
       toast.success(
         ideia.media ? 'Ideia carregada — escolha conta e data.' : 'Texto da ideia carregado — falta a arte, a conta e a data.'
       );
@@ -307,6 +314,7 @@ export function PostComposer({
     setCoverFile(null);
     setCoverSeconds('');
     setCropQueue([]);
+    setTagId(null);
   }
 
   const selectedAccounts = useMemo(
@@ -537,6 +545,7 @@ export function PostComposer({
         cover_media_id: coverMediaId,
         cover_timestamp_ms: Number.isFinite(coverMs) ? coverMs : undefined,
         save_as: asDraft ? 'draft' : undefined,
+        tag_id: tagId,
         target_caption_overrides: Object.keys(captionOverrides).length ? captionOverrides : undefined,
       };
       const startedAt = new Date(localToIso(effectiveWhen)).getTime();
@@ -807,6 +816,15 @@ export function PostComposer({
           <ComposerHints hints={hints} field="caption" />
         </div>
         )}
+
+        {/* Junto da legenda, e não num campo próprio com rótulo: o pilar é uma etiqueta de uma
+            palavra, e dar a ela a mesma presença de "Legenda" ou "Quando" a faria parecer
+            obrigatória — ela não é. Fica ao alcance de quem quiser, fora do caminho de quem não. */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>Assunto:</span>
+          <TagPicker tags={tags} value={tagId} onChange={setTagId} onCreated={() => void reload()} size="sm" />
+          <span className="hidden sm:inline">— agrupa o desempenho por tema nos Insights.</span>
+        </div>
 
         {selectedAccounts.some((a) => a.platform === 'youtube') && (
           <div className="space-y-1.5">

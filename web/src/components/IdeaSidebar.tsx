@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import type { GridPreview } from '@/lib/types';
 import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
 import { createGridPreview, updateGridPreview, uploadMedia } from '@/lib/api';
+import { useScheduler } from '@/store';
+import { TagPicker } from './TagPicker';
 import { readMediaMetadata } from '@/lib/mediaMetadata';
 import { videoPosterUrl } from '@/lib/useMediaUrl';
 import { Button } from '@/components/ui/button';
@@ -40,12 +42,31 @@ export function IdeaSidebar({
   onRemover: (ideia: GridPreview) => void;
   className?: string;
 }) {
+  const { tags, reload } = useScheduler();
   const [texto, setTexto] = useState('');
   const [salvando, setSalvando] = useState(false);
+  /**
+   * Pilar do FILTRO da lista, não de uma ideia. Existe porque o valor de marcar pilar só aparece
+   * quando dá pra perguntar "o que eu já tenho de bastidores?" — sem o filtro, a marcação é
+   * trabalho sem retorno visível até o Insights ter meses de dado.
+   */
+  const [filtro, setFiltro] = useState<string | null>(null);
   const [anexando, setAnexando] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   /** Qual ideia está esperando arte — o input de arquivo é um só, compartilhado. */
   const alvoDaArte = useRef<string | null>(null);
+
+  const visiveis = filtro ? ideias.filter((i) => i.tag_id === filtro) : ideias;
+
+  /** Muda o pilar de uma ideia. `reload()` junto porque o `uso` de cada pilar acabou de mudar. */
+  async function definirPilar(id: string, tagId: string | null) {
+    try {
+      await updateGridPreview(id, { tag_id: tagId });
+      await Promise.all([onRefresh(), reload()]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function criar() {
     const nota = texto.trim();
@@ -57,6 +78,10 @@ export function IdeaSidebar({
       await createGridPreview({
         platform: 'instagram',
         note: nota,
+        // Com um pilar filtrado, a ideia nova nasce nele: você está pensando NAQUELE assunto agora,
+        // e obrigar a marcar de novo logo depois de filtrar seria pedir a mesma informação duas
+        // vezes. Sem filtro, nasce sem pilar.
+        tag_id: filtro,
         sort_at: new Date(topo + HOUR_MS).toISOString(),
       });
       setTexto('');
@@ -96,7 +121,18 @@ export function IdeaSidebar({
     <div className={className}>
       <div className="mb-2 flex items-baseline gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ideias</h3>
-        {ideias.length > 0 && <span className="text-xs tabular-nums text-muted-foreground">{ideias.length}</span>}
+        {ideias.length > 0 && (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {filtro ? `${visiveis.length} de ${ideias.length}` : ideias.length}
+          </span>
+        )}
+        {/* Filtro só aparece quando há pilar pra filtrar — um seletor vazio no topo de uma lista
+            vazia é ruído no exato momento em que a tela precisa estar convidativa. */}
+        {tags.length > 0 && (
+          <span className="ml-auto">
+            <TagPicker tags={tags} value={filtro} onChange={setFiltro} size="sm" />
+          </span>
+        )}
       </div>
 
       {/* Campo rápido: escrever e dar Enter é o gesto inteiro. Qualquer coisa a mais (escolher
@@ -128,7 +164,11 @@ export function IdeaSidebar({
         onChange={(e) => void anexarArte(e.target.files)}
       />
 
-      {ideias.length === 0 ? (
+      {visiveis.length === 0 && ideias.length > 0 ? (
+        <EmptyState size="sm" title="Nenhuma ideia neste pilar">
+          Troque o pilar no filtro acima, ou tire o filtro para ver todas.
+        </EmptyState>
+      ) : ideias.length === 0 ? (
         <EmptyState art="comecando" size="sm" title="Nenhuma ideia ainda">
           Anote aqui o que você quer postar, sem precisar decidir a data. Quando a arte existir, a
           ideia aparece na grade — e o <b>Agendar</b> a transforma em post.
@@ -136,7 +176,7 @@ export function IdeaSidebar({
       ) : (
         <ul className="space-y-2">
           <AnimatePresence initial={false}>
-            {ideias.map((ideia) => (
+            {visiveis.map((ideia) => (
               <motion.li
                 key={ideia.id}
                 layout
@@ -152,19 +192,28 @@ export function IdeaSidebar({
                   ) : (
                     <span className="text-muted-foreground">sem descrição</span>
                   )}
-                  {!ideia.media_asset_id && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        alvoDaArte.current = ideia.id;
-                        fileRef.current?.click();
-                      }}
-                      className="mt-0.5 flex items-center gap-1 text-xs text-accent-foreground hover:underline"
-                    >
-                      <ImagePlus className="size-3" />
-                      anexar arte
-                    </button>
-                  )}
+                  <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <TagPicker
+                      tags={tags}
+                      value={ideia.tag_id}
+                      onChange={(tagId) => void definirPilar(ideia.id, tagId)}
+                      onCreated={() => void reload()}
+                      size="sm"
+                    />
+                    {!ideia.media_asset_id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          alvoDaArte.current = ideia.id;
+                          fileRef.current?.click();
+                        }}
+                        className="flex items-center gap-1 text-xs text-accent-foreground hover:underline"
+                      >
+                        <ImagePlus className="size-3" />
+                        anexar arte
+                      </button>
+                    )}
+                  </span>
                 </span>
                 {/* Ações sempre visíveis, não no hover: no celular não existe hover, e esconder a
                     única saída de uma peça atrás de um gesto que não acontece é um beco sem saída. */}

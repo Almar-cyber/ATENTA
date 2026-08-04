@@ -60,6 +60,9 @@ export function requestEdit(payload: EditPayload): void {
 export interface PrefillMediaPayload {
   /** A nota da ideia, que vira o rascunho da legenda. */
   body?: string;
+  /** O pilar de conteúdo. Vai junto porque é o que fecha o ciclo até o Insights: uma ideia marcada
+   *  que perde o pilar ao virar post não conta pra nenhuma estatística de assunto. */
+  tagId?: string | null;
   media?: {
     assetId: string;
     name: string;

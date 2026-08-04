@@ -20,6 +20,47 @@ export function getAccounts(): Promise<{ accounts: Account[] }> {
   return req('/api/accounts');
 }
 
+/**
+ * Um pilar de conteúdo ("bastidores", "produto", "viagem").
+ *
+ * Tabela própria e não texto livre: o destino delas é um agrupamento no Insights, e agrupar por
+ * texto digitado quebraria "Viagem" e "viagem" em dois pilares com metade da amostra cada.
+ */
+export interface Tag {
+  id: string;
+  name: string;
+  /** Chave da paleta (ver `lib/tags.ts`), nunca um hex. */
+  color: string;
+  /** Quantas peças usam este pilar — pra tela avisar antes de apagar. Só vem na listagem. */
+  uso?: number;
+}
+
+export function getTags(): Promise<{ tags: Tag[] }> {
+  return req('/api/tags');
+}
+
+/** Nome repetido (ignorando caixa e espaços) devolve o pilar que já existe, não um erro. */
+export function createTag(payload: { name: string; color?: string }): Promise<Tag> {
+  return req('/api/tags', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateTag(id: string, patch: { name?: string; color?: string }): Promise<Tag> {
+  return req(`/api/tags/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Apaga o pilar; as peças dele voltam a "sem pilar" e não são perdidas. */
+export function deleteTag(id: string): Promise<{ ok: true }> {
+  return req(`/api/tags/${id}`, { method: 'DELETE' });
+}
+
 /** Um destino que vai sair, no bloco "Sai a seguir" do painel. */
 export interface ProximoPost {
   post_id: string;
@@ -68,6 +109,10 @@ export interface PostMetricRow {
   account_name: string;
   caption: string | null;
   format: string | null;
+  /** Pilar de conteúdo — é o que permite agrupar desempenho por assunto. */
+  tag_id: string | null;
+  tag_name: string | null;
+  tag_color: string | null;
   duration_seconds: number | null;
   fetched_at: string;
   impressions: number | null;
@@ -127,6 +172,8 @@ export interface CreatePostPayload {
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   save_as?: 'draft';
+  /** Pilar de conteúdo. `null` tira. */
+  tag_id?: string | null;
   target_caption_overrides?: Record<string, string>;
 }
 
@@ -254,6 +301,7 @@ export function createGridPreview(payload: {
   platform: Platform;
   media_asset_id?: string;
   note?: string;
+  tag_id?: string | null;
   sort_at: string;
 }): Promise<GridPreview> {
   return req('/api/grid-previews', {
@@ -266,7 +314,7 @@ export function createGridPreview(payload: {
 /** Campo ausente = não mexe (é como a reordenação da grade manda só o `sort_at`). */
 export function updateGridPreview(
   id: string,
-  patch: { sort_at?: string; note?: string | null; media_asset_id?: string | null }
+  patch: { sort_at?: string; note?: string | null; media_asset_id?: string | null; tag_id?: string | null }
 ): Promise<GridPreview> {
   return req(`/api/grid-previews/${id}`, {
     method: 'PATCH',

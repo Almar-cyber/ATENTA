@@ -3,13 +3,15 @@ import type { ReactNode } from 'react';
 import { Bookmark, Download, Loader2, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
 import type { FollowerRow, PostMetricRow } from '@/lib/api';
 import { getAccountFeed, getFollowers, getMetrics } from '@/lib/api';
-import { insightsParaVisao } from '@/lib/insights';
+import { desempenhoPorAssunto, insightsParaVisao } from '@/lib/insights';
+import { tagColor } from '@/lib/tags';
 import type { Platform } from '@/lib/types';
 import { PLATFORM_LABELS } from '@/lib/platforms';
 import { useScheduler } from '@/store';
 import { toast } from 'sonner';
 import { fmtDateTime } from '@/lib/format';
 import { PlatformIcon } from './PlatformIcon';
+import { TagChip } from './TagPicker';
 import { BestHoursChart } from './BestHoursChart';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -269,6 +271,8 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
             <Destaques metrics={metrics ?? []} followers={followers} escopo="geral" />
           </Secao>
         )}
+
+        <PorAssunto metrics={metrics ?? []} />
 
         {best && (
           <Secao titulo="Comparando as redes">
@@ -532,6 +536,56 @@ function VazioDeMetricas({ onOpenConnections }: { onOpenConnections: () => void 
       A varredura roda a cada 10 minutos e busca as métricas de cada post publicado. Os indicadores
       aparecem sozinhos assim que a primeira coleta terminar.
     </EmptyState>
+  );
+}
+
+/**
+ * Desempenho por PILAR DE CONTEÚDO.
+ *
+ * É a pergunta que faltava. O painel já sabia dizer qual formato e qual horário rendem — nunca
+ * sobre O QUÊ, porque nada no banco sabia do que o post falava. Com o pilar marcado por quem
+ * escreveu, virou o mesmo cálculo dos outros, sem IA nenhuma.
+ *
+ * A barra é a taxa relativa ao melhor assunto, não à escala absoluta: a pergunta aqui é "qual rende
+ * mais que qual", e uma barra ancorada em 100% deixaria todas curtinhas e indistinguíveis, já que
+ * taxa de engajamento vive na casa de poucos por cento.
+ */
+function PorAssunto({ metrics }: { metrics: PostMetricRow[] }) {
+  const linhas = desempenhoPorAssunto(metrics);
+  // `null` = menos de dois assuntos com amostra. Uma comparação de um item só não é comparação, e a
+  // seção inteira some em vez de mostrar um título com uma barra sozinha embaixo.
+  if (!linhas) return null;
+  const melhor = linhas[0].taxa ?? 0;
+
+  return (
+    <Secao titulo="Por assunto">
+      <div className="space-y-2">
+        {linhas.map((l) => {
+          const cor = tagColor({ color: l.cor });
+          const largura = melhor > 0 && l.taxa != null ? Math.max(6, (l.taxa / melhor) * 100) : 0;
+          return (
+            <div key={l.id} className="rounded-xl border-2 border-brand bg-card p-3 shadow-[3px_3px_0_0_var(--brand)]">
+              <div className="mb-1.5 flex items-center gap-2">
+                <TagChip tag={{ name: l.nome, color: l.cor }} size="sm" />
+                <span className="text-xs text-muted-foreground">
+                  {l.posts} post{l.posts > 1 ? 's' : ''}
+                </span>
+                <span className="ml-auto text-sm font-semibold tabular-nums">
+                  {l.taxa != null ? `${(l.taxa * 100).toFixed(1).replace('.', ',')}%` : '—'}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-secondary">
+                <div className="h-full rounded-full" style={{ width: `${largura}%`, backgroundColor: cor.bg }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Engajamento médio sobre o alcance. Assuntos com menos de 3 posts ficam de fora — com um post
+        só, a média é aquele post.
+      </p>
+    </Secao>
   );
 }
 

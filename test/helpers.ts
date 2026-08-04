@@ -16,6 +16,8 @@ import migration0011 from '../migrations/0011_metrics_expandidas.sql?raw';
 import migration0012 from '../migrations/0012_link_clicks.sql?raw';
 // 0013 reconstrói grid_previews: nota + imagem opcional (prévia virou ideia).
 import migration0013 from '../migrations/0013_ideas.sql?raw';
+// 0014 traz os pilares de conteúdo (tags) e o tag_id em scheduled_posts/grid_previews.
+import migration0014 from '../migrations/0014_tags.sql?raw';
 import { adapters } from '../src/adapters/index.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from '../src/lib/types.js';
 
@@ -26,13 +28,13 @@ import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTa
  */
 export async function resetDb(): Promise<void> {
   // Filhas (post_metrics, account_metrics) primeiro: elas referenciam post_targets/accounts.
-  for (const table of ['signup_invites', 'session', 'account', 'verification', 'user', 'post_metrics', 'account_metrics', 'grid_previews', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
+  for (const table of ['tags', 'signup_invites', 'session', 'account', 'verification', 'user', 'post_metrics', 'account_metrics', 'grid_previews', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
     await env.DB.prepare(`drop table if exists ${table}`).run();
   }
-  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics', 'grid_previews_platform_sort', 'idx_accounts_owner', 'idx_scheduled_posts_owner', 'idx_grid_previews_owner', 'session_userId_idx', 'account_userId_idx', 'verification_identifier_idx', 'idx_media_assets_owner']) {
+  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics', 'grid_previews_platform_sort', 'idx_accounts_owner', 'idx_scheduled_posts_owner', 'idx_grid_previews_owner', 'session_userId_idx', 'account_userId_idx', 'verification_identifier_idx', 'idx_media_assets_owner', 'idx_tags_owner_name', 'idx_scheduled_posts_tag', 'idx_grid_previews_tag']) {
     await env.DB.prepare(`drop index if exists ${index}`).run();
   }
-  for (const sql of splitStatements(`${migration0001}\n${migration0002}\n${migration0003}\n${migration0004}\n${migration0005}\n${migration0006}\n${migration0007}\n${migration0009}\n${migration0010}\n${migration0011}\n${migration0012}\n${migration0013}`)) {
+  for (const sql of splitStatements(`${migration0001}\n${migration0002}\n${migration0003}\n${migration0004}\n${migration0005}\n${migration0006}\n${migration0007}\n${migration0009}\n${migration0010}\n${migration0011}\n${migration0012}\n${migration0013}\n${migration0014}`)) {
     await env.DB.prepare(sql).run();
   }
 }

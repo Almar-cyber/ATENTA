@@ -39,6 +39,7 @@ scheduled_posts ─┘                                          ↑
 | `post_targets` | a **saída** numa conta. Tem o status, o formato, o erro, o id externo. É a unidade real de publicação |
 | `post_target_media` | ordem dos arquivos daquele destino (`position` = ordem no carrossel) |
 | `media_assets` | arquivo no R2 + `public_url`, mime, dimensões, duração |
+| `tags` | um **pilar de conteúdo** ("bastidores", "viagem"). Tabela própria, com índice único normalizado por dono — é o que faz o Insights agrupar por assunto sem partir a amostra em "Viagem"/"viagem" (migração 0014) |
 | `grid_previews` | uma **ideia**: um post que ainda não tem data. Texto e/ou imagem, uma posição na grade, nenhum horário de publicação — o poller nunca a enxerga (migrações 0003 e 0013) |
 
 **Um post, N destinos.** A legenda vive em `scheduled_posts.body`; cada destino pode divergir via
@@ -155,6 +156,7 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | GET | `/api/media/:id/bytes` | os bytes pela nossa origem, pro recorte no navegador não sujar o canvas |
 | GET | `/api/feed/:accountId` | feed real da conta, ao vivo (Instagram e YouTube) |
 | GET/POST/PATCH/DELETE | `/api/grid-previews` | ideias: texto e/ou imagem, sem data. Recusa as duas vazias |
+| GET/POST/PATCH/DELETE | `/api/tags` | pilares de conteúdo. Nome repetido devolve o existente; apagar o pilar não apaga as peças |
 
 ## 7. Princípios
 

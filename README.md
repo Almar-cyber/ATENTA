@@ -30,6 +30,7 @@ wrangler d1 execute social-scheduler --remote --file=migrations/0001_init.sql
 wrangler d1 execute social-scheduler --remote --file=migrations/0002_accounts_multi.sql  # multi-conta por rede (ver nota abaixo)
 wrangler d1 execute social-scheduler --remote --file=migrations/0003_grid_previews.sql   # ideias do Grid IG
 wrangler d1 execute social-scheduler --remote --file=migrations/0013_ideas.sql          # ideia ganha texto; imagem vira opcional
+wrangler d1 execute social-scheduler --remote --file=migrations/0014_tags.sql           # pilares de conteúdo
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
 npm run deploy                               # builda o front (web/ → dist/) e faz wrangler deploy
@@ -191,7 +192,16 @@ Na lista ao lado da grade, escrever e dar **Enter** cria uma ideia. Depois:
   justamente essa leitura.
 - **Agendar** — abre o compositor com o que ela tem (texto e/ou mídia), faltando conta e data. A
   ideia continua na lista até você removê-la.
+- **Marcar o pilar** — "bastidores", "viagem", "produto". Criar e escolher acontecem no mesmo lugar;
+  filtrando a lista por um pilar, a ideia nova já nasce nele.
 - **Remover**.
+
+**Pilares de conteúdo** (`tags`, migração `0014`): o pilar acompanha a ideia quando ela vira post, e
+é isso que faz os **Insights** ganharem a seção *Por assunto* — "seus posts de bastidores engajam 2×
+mais". Era a única pergunta que o painel não sabia responder (ele já dizia qual formato e qual
+horário rendem). Não é texto livre de propósito: o índice único é normalizado por dono, senão
+"Viagem" e "viagem" viram dois pilares com metade da amostra cada e o erro é invisível. Apagar um
+pilar devolve as peças dele a "sem pilar" — nunca apaga post.
 
 Posts cancelados/falhos não aparecem na grade, e o que a API do Instagram devolve como já publicado
 é deduplicado contra o nosso próprio registro (`external_post_id`) pra não aparecer duas vezes —
