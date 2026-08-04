@@ -4,14 +4,19 @@ import { cn } from '@/lib/utils';
 // Estados vazios estavam escritos em 6 lugares com 3 escalas de texto diferentes. Um só formato:
 // `sm` pra dentro de um card/coluna, `md` pra área de conteúdo inteira.
 //
-// ILUSTRAÇÃO: uma tela vazia é o primeiro contato de quem acabou de entrar, e uma linha de texto
-// cinza no meio do branco parece defeito. O doodle diz "está tudo certo, é só cedo". São os mesmos
-// Open Doodles da landing (CC0, recoloridos pro par roxo/amarelo) — ver web/doodles-license.md.
+// ILUSTRAÇÃO: tela vazia é o primeiro contato de quem acabou de entrar, e uma linha de texto cinza
+// no meio do branco parece defeito. O doodle diz "está tudo certo, é só cedo". São os mesmos Open
+// Doodles da landing (CC0, recoloridos pro par roxo/amarelo) — ver web/doodles-license.md.
 //
-// SVG COM ANIMAÇÃO EM CSS, e não GIF: pesa uma fração, escala sem serrilhar e — o que importa mais
+// A arte fica sobre um DISCO de cor: solta no branco ela pairava sem pertencer a nada, e o disco a
+// apoia e a liga à paleta. É o mesmo papel que a moldura faz no vídeo da tela de entrar.
+//
+// SVG com animação em CSS, e não GIF: pesa uma fração, escala sem serrilhar e — o que importa mais
 // — obedece a `prefers-reduced-motion`. GIF não tem como parar.
 //
-// Só no tamanho `md`: dentro de um card ou de uma coluna estreita a arte espremeria o texto.
+// HIERARQUIA: título grande em tinta cheia, descrição menor e apagada, com LARGURA LIMITADA. Sem o
+// limite, a descrição atravessava a tela inteira num monitor largo, e linha longa demais é o
+// jeito mais fácil de tornar um texto curto cansativo de ler.
 
 /** Qual doodle, nomeado pelo MOMENTO e não pelo desenho — o desenho pode ser trocado depois. */
 export type EmptyArt = 'comecando' | 'esperando' | 'conectar' | 'comemorando';
@@ -27,38 +32,60 @@ export function EmptyState({
   size = 'md',
   bordered = false,
   art,
+  title,
+  action,
   className,
   children,
 }: {
   size?: 'sm' | 'md';
   bordered?: boolean;
   art?: EmptyArt;
+  /** A frase principal. Sem ela o bloco continua como antes: só o texto de `children`. */
+  title?: React.ReactNode;
+  /** O próximo passo. Um vazio que não diz o que fazer resolve metade do problema. */
+  action?: React.ReactNode;
   className?: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   const showArt = art && size === 'md';
 
   return (
     <div
       className={cn(
-        'text-center text-muted-foreground',
-        size === 'md' ? 'py-10 text-sm' : 'py-6 text-xs',
+        'text-center',
+        size === 'md' ? 'px-4 py-12' : 'py-6 text-xs',
         bordered && 'rounded-lg border border-dashed px-4',
         className
       )}
     >
       {showArt && (
-        // alt vazio + aria-hidden: é decoração. O texto logo abaixo é que carrega a informação, e
-        // descrever o desenho só faria o leitor de tela repetir o assunto.
-        <img
-          src={ART_FILE[art]}
-          alt=""
-          aria-hidden
-          draggable={false}
-          className="animate-float mx-auto mb-5 h-28 w-auto select-none sm:h-32"
-        />
+        <div className="relative mx-auto mb-6 grid size-40 place-items-center sm:size-48">
+          <div aria-hidden className="absolute inset-0 rounded-full bg-secondary" />
+          {/* alt vazio + aria-hidden: é decoração. O texto abaixo carrega a informação, e descrever
+              o desenho só faria o leitor de tela repetir o assunto. */}
+          <img
+            src={ART_FILE[art]}
+            alt=""
+            aria-hidden
+            draggable={false}
+            className="animate-float relative h-28 w-auto select-none sm:h-32"
+          />
+        </div>
       )}
-      {children}
+
+      {title && <p className="text-lg font-semibold text-foreground">{title}</p>}
+      {children && (
+        <div
+          className={cn(
+            'mx-auto max-w-md text-muted-foreground',
+            size === 'md' ? 'text-sm' : 'text-xs',
+            title && 'mt-1.5'
+          )}
+        >
+          {children}
+        </div>
+      )}
+      {action && <div className="mt-6 flex justify-center">{action}</div>}
     </div>
   );
 }

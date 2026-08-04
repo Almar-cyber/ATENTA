@@ -152,20 +152,14 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
 
   let body: ReactNode;
   if (error) {
-    body = <EmptyState>Não consegui carregar as métricas: {error}</EmptyState>;
+    body = <EmptyState title="Não consegui carregar as métricas">{error}</EmptyState>;
   } else if (metrics === null) {
-    body = <EmptyState>Carregando métricas…</EmptyState>;
+    body = <EmptyState title="Carregando métricas…" />;
   } else if (metrics.length === 0) {
     body = (
-      <EmptyState art="esperando">
-        <div className="space-y-2">
-          <p className="font-semibold text-foreground">Ainda não há métricas.</p>
-          <p>
-            Os indicadores aparecem conforme os posts publicam e a coleta roda. <b>YouTube</b> já
-            coleta com o acesso atual; <b>Instagram</b> e <b>Facebook</b> precisam reconectar em
-            Conexões pra liberar o escopo de insights.
-          </p>
-        </div>
+      <EmptyState art="esperando" title="Ainda não há métricas">
+        Os indicadores aparecem conforme os posts publicam e a coleta roda, a cada 10 minutos. Se
+        você já publicou antes de usar o ATENTA!, dá pra trazer esse histórico pelo botão acima.
       </EmptyState>
     );
   } else if (selected) {

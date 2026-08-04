@@ -5,7 +5,8 @@ import type { Post, Target } from '@/lib/types';
 import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
 import { fmtDateTime, fmtDayHeader, dayKey } from '@/lib/format';
 import { cancelTarget, deleteTarget, queueTarget, reactivateTarget } from '@/lib/api';
-import { requestPrefill } from '@/lib/composer-bus';
+import { Plus } from 'lucide-react';
+import { requestPrefill, requestPrefillDate } from '@/lib/composer-bus';
 import { useScheduler } from '@/store';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -51,7 +52,25 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
   }
 
   if (posts.length === 0) {
-    return <EmptyState art="comecando">Nada por aqui ainda.</EmptyState>;
+    // O botão reaproveita o mesmo caminho do clique num dia vazio do calendário: pedir uma data
+    // abre o compositor. Um vazio que não oferece o próximo passo resolve metade do problema.
+    const daqui = new Date(Date.now() + 60 * 60 * 1000);
+    const local = new Date(daqui.getTime() - daqui.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    return (
+      <EmptyState
+        art="comecando"
+        title="Nada agendado ainda"
+        action={
+          <Button size="lg" onClick={() => requestPrefillDate(local)}>
+            <Plus className="size-4" />
+            Criar o primeiro post
+          </Button>
+        }
+      >
+        O que você agendar aparece aqui, agrupado por dia — com a prévia de como vai ficar em cada
+        rede.
+      </EmptyState>
+    );
   }
 
   return (
