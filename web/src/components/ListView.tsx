@@ -51,7 +51,7 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
   }
 
   if (posts.length === 0) {
-    return <EmptyState>Nada por aqui ainda.</EmptyState>;
+    return <EmptyState art="comecando">Nada por aqui ainda.</EmptyState>;
   }
 
   return (

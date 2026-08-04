@@ -157,7 +157,7 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
     body = <EmptyState>Carregando métricas…</EmptyState>;
   } else if (metrics.length === 0) {
     body = (
-      <EmptyState>
+      <EmptyState art="esperando">
         <div className="space-y-2">
           <p className="font-semibold text-foreground">Ainda não há métricas.</p>
           <p>

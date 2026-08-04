@@ -136,3 +136,14 @@
     @apply font-sans;
     }
 }
+/* Flutuação dos doodles dos estados vazios.
+   Lenta e curta de propósito (6s, 6px): o objetivo é dar sinal de vida, não chamar atenção — a
+   tela vazia já é o lugar onde a pessoa está tentando entender o que fazer.
+   Fora de `prefers-reduced-motion` a arte fica parada, e nada mais muda. */
+@keyframes atenta-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .animate-float { animation: atenta-float 6s ease-in-out infinite; }
+}

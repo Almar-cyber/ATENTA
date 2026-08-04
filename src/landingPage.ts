@@ -352,6 +352,30 @@ const SCRIPT = `
       sync();
     }
 
+    // Quem JÁ está logado não deveria ver "Entrar" e "Comece grátis" numa página de vendas. Os
+    // rótulos passam a apontar pro painel.
+    //
+    // POR QUE TROCAR O RÓTULO E NÃO REDIRECIONAR: sequestrar o "/" é justamente o que faz um
+    // verificador automático concluir que a página inicial está atrás de login — foi o que a
+    // verificação do Google reclamou. Sem sessão nada muda, então crawler nenhum é afetado; a
+    // marcação servida é sempre a versão anônima, e o JS só a promove depois de confirmar a sessão.
+    fetch('/api/auth/get-session', { credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.user) return;
+        document.querySelectorAll('a[href="/app"]').forEach(function (a) {
+          var texto = a.textContent.trim();
+          if (texto === 'Entrar') a.textContent = 'Ir para o painel';
+          else if (texto.indexOf('Comece grátis') === 0) {
+            a.innerHTML = a.innerHTML.replace('Comece grátis', 'Ir para o painel');
+          }
+        });
+        document.querySelectorAll('.nocard').forEach(function (p) {
+          p.textContent = 'Você já está conectada.';
+        });
+      })
+      .catch(function () { /* sem sessão ou rede fora: a página anônima já está correta */ });
+
     // Fechar o <details> com altura animada. Abrir é CSS puro (o conteúdo já está montado);
     // fechar precisa segurar o 'open' até a transição terminar, senão o conteúdo some antes.
     document.querySelectorAll('details').forEach(function (d) {
