@@ -769,7 +769,21 @@ async function handleMetaCallback(code: string, request: Request, url: URL, env:
   if (!pagesRes.ok) return new Response(`meta /me/accounts failed: ${pagesRes.status} ${await pagesRes.text()}`, { status: 502 });
   const pagesJson = (await pagesRes.json()) as { data: Array<{ id: string; name: string; access_token: string }> };
   if (pagesJson.data.length === 0) {
-    return new Response('nenhuma Page encontrada — confirme que você é admin de uma Page do Facebook', { status: 400 });
+    // A mensagem antiga ("confirme que você é admin de uma Page") mandava a pessoa conferir algo
+    // que ela JÁ tinha — uma testadora administrava duas Páginas e recebeu isso. Lista vazia aqui
+    // quase nunca significa "não tem Página": significa que nenhuma foi CONCEDIDA. O consentimento
+    // do Facebook tem um passo de seleção de Páginas, com caixas desmarcadas, que não parece
+    // obrigatório e é fácil de atravessar sem marcar nada.
+    //
+    // O escopo concedido entra na mensagem porque distingue os dois casos: se pages_show_list nem
+    // está lá, o problema é a permissão, não a seleção.
+    const escopos = await fetchMetaGrantedScope(longLived.access_token, env);
+    return new Response(
+      'O Facebook não liberou nenhuma Página para o ATENTA!. Refaça a conexão e, na tela do ' +
+        'Facebook, MARQUE as Páginas que você quer usar — elas vêm desmarcadas por padrão. ' +
+        `(permissões concedidas: ${escopos ?? 'não foi possível ler'})`,
+      { status: 400 }
+    );
   }
 
   const ts = nowIso();
