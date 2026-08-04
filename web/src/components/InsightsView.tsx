@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { ArrowLeft, Bookmark, Download, ChevronDown, ChevronRight, Clock, ExternalLink, Eye, Heart, Lightbulb, MessageCircle, Play, Share2, TrendingDown, TrendingUp, UserPlus } from 'lucide-react';
 import type { FollowerRow, PostMetricRow } from '@/lib/api';
 import { getFollowers, getMetrics } from '@/lib/api';
-import { computeInsights } from '@/lib/insights';
+import { insightsParaVisao } from '@/lib/insights';
 import type { Platform } from '@/lib/types';
 import { PLATFORM_LABELS } from '@/lib/platforms';
 import { useScheduler } from '@/store';
@@ -204,9 +204,11 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
           </Secao>
         )}
 
-        <Secao titulo="Destaques">
-          <Destaques metrics={metrics ?? []} followers={followers} escopo="geral" />
-        </Secao>
+        {insightsParaVisao(metrics ?? [], followers, 'geral').length > 0 && (
+          <Secao titulo="Destaques">
+            <Destaques metrics={metrics ?? []} followers={followers} escopo="geral" />
+          </Secao>
+        )}
 
         {best && (
           <Secao titulo="Comparando as redes">
@@ -354,9 +356,7 @@ function Destaques({
   followers?: FollowerRow[];
   escopo?: 'geral' | 'rede';
 }) {
-  const todos = computeInsights(metrics, followers);
-  const redesComDado = new Set(metrics.map((m) => m.platform)).size;
-  const insights = escopo === 'geral' && redesComDado > 1 ? todos.filter((i) => i.escopo === 'geral') : todos;
+  const insights = insightsParaVisao(metrics, followers, escopo);
   if (insights.length === 0) return null;
   return (
     <div className="grid gap-2 sm:grid-cols-2">
@@ -486,9 +486,11 @@ function PlatformDetail({ platform, metrics, followerRows }: { platform: Platfor
       </div>
 
       {/* Insights só desta rede (melhor post/horário/dia + tendência de seguidores dela). */}
-      <Secao titulo="Destaques">
-        <Destaques metrics={metrics} followers={followerRows} />
-      </Secao>
+      {insightsParaVisao(metrics, followerRows, 'rede').length > 0 && (
+        <Secao titulo="Destaques">
+          <Destaques metrics={metrics} followers={followerRows} />
+        </Secao>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-2">
         {metrics.map((m) => (

@@ -161,7 +161,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
       const bucket = TIME_BUCKETS.find((b) => b.id === best.key)!;
       out.push({
         id: 'best-time',
-      escopo: 'rede',
+      escopo: 'geral',
         headline: `Posts ${bucket.label} engajam ${best.timesVsRest.toFixed(1).replace('.', ',')}× mais`,
         detail: 'o melhor horário do seu perfil',
         tone: 'good',
@@ -212,7 +212,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     if (strongest) {
       out.push({
         id: 'caption',
-      escopo: 'rede',
+      escopo: 'geral',
         headline: `Legendas ${strongest.label} engajam ${times(strongest.times)}× mais`,
         detail: 'vale testar isso mais vezes',
         tone: 'good',
@@ -235,7 +235,7 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
     if (byWeekday && byWeekday.timesVsRest >= 1.25) {
       out.push({
         id: 'best-weekday',
-      escopo: 'rede',
+      escopo: 'geral',
         headline: `${WEEKDAYS[byWeekday.key].charAt(0).toUpperCase() + WEEKDAYS[byWeekday.key].slice(1)}-feira é seu melhor dia`,
         detail: `${byWeekday.timesVsRest.toFixed(1).replace('.', ',')}× o engajamento dos outros dias`,
         tone: 'good',
@@ -244,4 +244,36 @@ export function computeInsights(rows: PostMetricRow[], followers: FollowerRow[] 
   }
 
   return out;
+}
+
+
+/**
+ * Os insights que cabem numa visão.
+ *
+ * Na visão geral entram os de escopo 'geral'. Os de 'rede' comparam peças dentro do vocabulário de
+ * uma rede ("qual post", "qual formato") e viram comparação falsa quando somados — um carrossel do
+ * Instagram e um vídeo do YouTube não disputam a mesma coisa.
+ *
+ * EXCEÇÃO: com uma rede só não há mistura, e esconder informação correta por causa de um risco que
+ * não se materializou seria pior. Aí a visão geral mostra tudo.
+ *
+ * "Uma rede só" é medido por rede com AMOSTRA, não por rede com qualquer linha: três vídeos sem
+ * engajamento não deveriam calar quatorze posts que têm — foi assim que a tela ficou com um título
+ * de seção e nada embaixo.
+ */
+const MIN_POSTS_PARA_CONTAR = 3;
+
+export function insightsParaVisao(
+  metrics: PostMetricRow[],
+  followers: FollowerRow[],
+  visao: 'geral' | 'rede'
+): Insight[] {
+  const todos = computeInsights(metrics, followers);
+  if (visao === 'rede') return todos;
+
+  const porRede = new Map<string, number>();
+  for (const m of metrics) porRede.set(m.platform, (porRede.get(m.platform) ?? 0) + 1);
+  const redesComAmostra = [...porRede.values()].filter((n) => n >= MIN_POSTS_PARA_CONTAR).length;
+
+  return redesComAmostra > 1 ? todos.filter((i) => i.escopo === 'geral') : todos;
 }
