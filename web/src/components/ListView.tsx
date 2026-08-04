@@ -20,7 +20,7 @@ import type { DialogSelection } from './PostDialog';
 const REVIVABLE = new Set<Target['status']>(['canceled', 'failed', 'ambiguous']);
 
 export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogSelection) => void }) {
-  const { reload } = useScheduler();
+  const { accounts, reload } = useScheduler();
 
   const rows = useMemo(() => {
     const out: Array<{ dayHeader?: string; post: Post; target: Target }> = [];
@@ -52,6 +52,15 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
   }
 
   if (posts.length === 0) {
+    // Sem conta conectada, oferecer "criar post" manda pro passo errado: o compositor abre sem
+    // destino possível e a pessoa descobre o problema no fim, não no começo.
+    if (accounts.length === 0) {
+      return (
+        <EmptyState art="conectar" title="Comece conectando uma rede">
+          Depois de conectar, você monta o post aqui e ele sai sozinho no horário marcado.
+        </EmptyState>
+      );
+    }
     // O botão reaproveita o mesmo caminho do clique num dia vazio do calendário: pedir uma data
     // abre o compositor. Um vazio que não oferece o próximo passo resolve metade do problema.
     const daqui = new Date(Date.now() + 60 * 60 * 1000);

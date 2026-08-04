@@ -235,7 +235,7 @@ function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =
         {screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
         ) : screen === 'insights' ? (
-          <InsightsView onBack={() => setScreen('scheduler')} />
+          <InsightsView onBack={() => setScreen('scheduler')} onOpenConnections={() => setScreen('connections')} />
         ) : (
         <section className="flex h-full flex-col rounded-2xl bg-card p-3 border-2 border-brand shadow-[4px_4px_0_0_var(--brand)] sm:p-5">
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">

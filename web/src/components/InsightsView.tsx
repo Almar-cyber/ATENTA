@@ -48,7 +48,7 @@ function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; va
   );
 }
 
-export function InsightsView({ onBack }: { onBack: () => void }) {
+export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void; onOpenConnections: () => void }) {
   const { accounts, reload } = useScheduler();
   const [importing, setImporting] = useState(false);
   /**
@@ -156,12 +156,7 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
   } else if (metrics === null) {
     body = <EmptyState title="Carregando métricas…" />;
   } else if (metrics.length === 0) {
-    body = (
-      <EmptyState art="esperando" title="Ainda não há métricas">
-        Os indicadores aparecem conforme os posts publicam e a coleta roda, a cada 10 minutos. Se
-        você já publicou antes de usar o ATENTA!, dá pra trazer esse histórico pelo botão acima.
-      </EmptyState>
-    );
+    body = <VazioDeMetricas onOpenConnections={onOpenConnections} />;
   } else if (selected) {
     body = (
       <PlatformDetail
@@ -411,6 +406,82 @@ function Destaques({
           </div>
         ))}
     </div>
+  );
+}
+
+/**
+ * Estado vazio dos Insights, ramificado pela CAUSA.
+ *
+ * A mesma frase servia para situações opostas: quem nunca conectou nada, quem conectou mas nunca
+ * publicou, quem publicou e está só esperando a coleta, e quem tem anos de histórico esperando ser
+ * importado. Cada um precisa de uma ação diferente — e "os indicadores aparecem conforme os posts
+ * publicam" não ajuda nenhum deles.
+ *
+ * Fica aqui dentro (e não no InsightsView) porque a ramificação é uma decisão de produto com quatro
+ * ramos; misturada ao corpo da tela, ela vira um `if` gigante no meio do render.
+ */
+function VazioDeMetricas({ onOpenConnections }: { onOpenConnections: () => void }) {
+  const { accounts, posts } = useScheduler();
+
+  // Só Instagram e YouTube têm importação de histórico implementada.
+  const importaveis = accounts.filter((a) => a.platform === 'instagram' || a.platform === 'youtube');
+  const publicados = posts.filter((p) => p.targets.some((t) => t.status === 'published')).length;
+  const semEscopo = accounts.filter((a) => a.metrics_ready === false);
+
+  // 1. Nada conectado: qualquer outra explicação é sobre um passo que ela ainda não deu.
+  if (accounts.length === 0) {
+    return (
+      <EmptyState
+        art="conectar"
+        title="Conecte uma rede para ver seus números"
+        action={
+          <Button size="lg" onClick={onOpenConnections}>
+            Ir para Conexões
+          </Button>
+        }
+      >
+        Assim que uma conta estiver conectada, o ATENTA! passa a coletar alcance, curtidas e
+        comentários de cada post — e a comparar o que funcionou.
+      </EmptyState>
+    );
+  }
+
+  // 2. Conectado, mas sem o escopo de métrica: o problema é permissão, não ausência de dado.
+  if (semEscopo.length > 0 && semEscopo.length === accounts.length) {
+    return (
+      <EmptyState
+        art="conectar"
+        title="Falta permissão para ler as métricas"
+        action={
+          <Button size="lg" variant="outline" onClick={onOpenConnections}>
+            Reconectar em Conexões
+          </Button>
+        }
+      >
+        {semEscopo.map((a) => a.display_name).join(', ')} {semEscopo.length > 1 ? 'foram conectadas' : 'foi conectada'}{' '}
+        antes do recurso de indicadores existir. Reconecte em <b>Conexões</b> para liberar o acesso —
+        a publicação continua funcionando normalmente enquanto isso.
+      </EmptyState>
+    );
+  }
+
+  // 3. Nada publicado por aqui, mas há conta com histórico na rede: importar é o caminho curto.
+  if (publicados === 0 && importaveis.length > 0) {
+    return (
+      <EmptyState art="comecando" title="Traga o que já está publicado">
+        Você ainda não publicou nada pelo ATENTA!, mas dá para importar o histórico de{' '}
+        {importaveis.map((a) => a.display_name).join(' e ')} — com as métricas que a rede guarda.
+        Use o botão <b>Importar histórico</b> aqui em cima.
+      </EmptyState>
+    );
+  }
+
+  // 4. Publicou: é só a coleta ainda não ter rodado.
+  return (
+    <EmptyState art="esperando" title="Coletando os primeiros números">
+      A varredura roda a cada 10 minutos e busca as métricas de cada post publicado. Os indicadores
+      aparecem sozinhos assim que a primeira coleta terminar.
+    </EmptyState>
   );
 }
 
