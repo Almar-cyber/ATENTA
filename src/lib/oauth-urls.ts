@@ -55,14 +55,24 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
         //   instagram_manage_insights→ insights do post + followers_count
         //   read_insights            → post_impressions da Página
         //
-        // business_management SAIU: era pedido desde o commit da tela de Conexões, mas nenhuma
-        // chamada nossa toca /businesses. Permissão de alto escrutínio sem uso demonstrável atrasa
-        // ou derruba a análise. Se um dia /me/accounts deixar de enxergar Página de Business
-        // Manager, volta — com a chamada que a justifica junto.
+        //   business_management    → GET /me/accounts ENXERGAR Página de Portfólio de Negócios
+        //
+        // Sobre o business_management: eu o removi por um raciocínio errado — "não chamamos
+        // /businesses, logo não usamos". A chamada direta de fato não existe, mas ele é
+        // pré-requisito para o /me/accounts LISTAR Página que pertence a um Portfólio de Negócios,
+        // e sem ele a resposta vem vazia mesmo com pages_show_list concedido.
+        //
+        // A prova veio de uma comparação controlada, quando a primeira testadora não conseguiu
+        // conectar: token com business_management devolveu 2 Páginas; token sem, 0 — os dois com
+        // pages_show_list. Contas antigas não sentiram porque o Facebook re-concede permissão já
+        // autorizada; só quem conectou DEPOIS da remoção passou pelo caminho quebrado.
+        //
+        // Lição: "não há chamada explícita" não é prova de que uma permissão não é usada. Algumas
+        // são pré-requisito de VISIBILIDADE em endpoints que já chamamos.
         //
         // Escopo novo só tem efeito ao (re)conectar: conta já conectada precisa passar pelo
         // consentimento de novo pra ganhá-lo.
-        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,read_insights'
+        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,read_insights,business_management'
       );
       return u.toString();
     }

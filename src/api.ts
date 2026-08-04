@@ -1166,7 +1166,7 @@ async function getMediaBytes(id: string, env: Env): Promise<Response> {
 async function listMetrics(owner: string, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select pt.id as target_id, pt.platform, pt.external_url, pt.published_at,
-            a.display_name as account_name,
+            a.id as account_id, a.display_name as account_name,
             -- Formato (post/reel/story/video/short) pros insights por formato — vem do options JSON.
             json_extract(pt.options, '$.format') as format,
             -- Duração do vídeo (maior mídia do destino) pro insight de "duração ideal".

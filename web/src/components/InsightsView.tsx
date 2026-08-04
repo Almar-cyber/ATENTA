@@ -50,8 +50,16 @@ function Stat({ icon, label, value, hint }: { icon: ReactNode; label: string; va
 export function InsightsView({ onBack }: { onBack: () => void }) {
   const { accounts, reload } = useScheduler();
   const [importing, setImporting] = useState(false);
-  const [metrics, setMetrics] = useState<PostMetricRow[] | null>(null);
-  const [followers, setFollowers] = useState<FollowerRow[]>([]);
+  /**
+   * Conta em foco. '' = todas.
+   *
+   * Existe porque os Insights agregavam por REDE, e quem tem dois Instagram via os dois somados num
+   * número só — sem jeito de saber qual perfil rendeu o quê, que é justamente a pergunta de quem
+   * cuida de mais de uma conta.
+   */
+  const [conta, setConta] = useState('');
+  const [metricsAll, setMetrics] = useState<PostMetricRow[] | null>(null);
+  const [followersAll, setFollowers] = useState<FollowerRow[]>([]);
   const [selected, setSelected] = useState<Platform | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +80,17 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
       clearInterval(t);
     };
   }, []);
+
+  // Filtro de conta aplicado na origem: tudo abaixo (agregados, totais, insights, gráfico de
+  // horários) deriva daqui, então filtrar num lugar só evita que um bloco escape do filtro.
+  const metrics = useMemo(
+    () => (conta ? (metricsAll ?? []).filter((m) => m.account_id === conta) : metricsAll),
+    [metricsAll, conta]
+  );
+  const followers = useMemo(
+    () => (conta ? followersAll.filter((f) => f.account_id === conta) : followersAll),
+    [followersAll, conta]
+  );
 
   // Agregados por rede (só as que têm post com métrica).
   const byPlatform = useMemo(() => {
@@ -303,16 +322,27 @@ export function InsightsView({ onBack }: { onBack: () => void }) {
           </p>
         </div>
         {!selected && (
-          <Button
-            variant="outline"
-            size="default"
-            className="ml-auto"
-            disabled={importing}
-            onClick={() => void importHistory()}
-          >
-            <Download className="size-4" />
-            <span className="hidden sm:inline">{importing ? 'Importando…' : 'Importar histórico'}</span>
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            {accounts.length > 1 && (
+              <select
+                value={conta}
+                onChange={(e) => setConta(e.target.value)}
+                aria-label="Filtrar por conta"
+                className="h-8 max-w-[42vw] rounded-lg border-2 border-brand bg-card px-2 text-sm font-medium sm:max-w-none"
+              >
+                <option value="">Todas as contas</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {PLATFORM_LABELS[a.platform]} — {a.display_name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button variant="outline" size="default" disabled={importing} onClick={() => void importHistory()}>
+              <Download className="size-4" />
+              <span className="hidden sm:inline">{importing ? 'Importando…' : 'Importar histórico'}</span>
+            </Button>
+          </div>
         )}
       </CardHeader>
       {/* pb-6 pra a sombra deslocada dos cards do último bloco não ser cortada pelo scroll. */}

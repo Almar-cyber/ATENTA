@@ -26,6 +26,7 @@ export interface PostMetricRow {
   platform: Platform;
   external_url: string | null;
   published_at: string | null;
+  account_id: string;
   account_name: string;
   caption: string | null;
   format: string | null;
