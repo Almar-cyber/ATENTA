@@ -307,11 +307,11 @@ export function InsightsView({ onBack, onOpenConnections }: { onBack: () => void
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex-row items-center gap-3 space-y-0">
+      <CardHeader className="flex items-center gap-3 space-y-0">
         <Button variant="ghost" size="icon-sm" onClick={selected ? () => setSelected(null) : onBack} aria-label="Voltar">
           <ArrowLeft className="size-4" />
         </Button>
-        <div>
+        <div className="min-w-0">
           <CardTitle>{selected ? PLATFORM_LABELS[selected] : 'Insights'}</CardTitle>
           <p className="text-xs text-muted-foreground">
             {selected ? 'Detalhe dos posts dessa rede.' : 'Como os posts publicados performaram.'}

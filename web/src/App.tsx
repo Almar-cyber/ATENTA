@@ -77,12 +77,11 @@ function Header({
             ))
           )}
         </button>
-        {/* Conexões e Insights são navegação secundária: só o ícone no mobile (rótulo hidden sm),
-            pra sobrar a linha pro "Novo post" (o CTA primário, esse mantém o rótulo). */}
-        <Button size="lg" variant="outline" onClick={onOpenConnections} aria-label="Conexões" className="px-3 sm:px-6">
-          <Link2 className="size-4" />
-          <span className="hidden sm:inline">Conexões</span>
-        </Button>
+        {/* Insights é o único destino secundário no cabeçalho, e a razão é FREQUÊNCIA: é consulta
+            recorrente. Conexões desceu pro menu da conta — você conecta uma vez e volta lá raramente,
+            e ocupar espaço permanente na barra por uma visita ocasional empurra o CTA primário. Os
+            caminhos que levam a ela continuam: o avatar das contas ao lado e os estados vazios, que
+            é por onde a pessoa chega da primeira vez. Configurações entram no mesmo menu depois. */}
         <Button size="lg" variant="outline" onClick={onOpenInsights} aria-label="Insights" className="px-3 sm:px-6">
           <BarChart3 className="size-4" />
           <span className="hidden sm:inline">Insights</span>
@@ -107,6 +106,11 @@ function Header({
               <span className="block text-xs text-muted-foreground">Conectado como</span>
               <span className="block truncate font-medium">{user.email}</span>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onOpenConnections}>
+              <Link2 className="size-4" />
+              Conexões
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={async () => {
