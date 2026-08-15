@@ -80,12 +80,12 @@ export function privacyPage(): string {
 
 <h2>1. Who this policy covers</h2>
 <p>
-  ${APP_NAME} ("the app") is a personal, single-user scheduling tool operated by an individual
-  developer, reachable at <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>. The app publishes
-  posts that the operator has written in advance to the operator's own social media accounts. It
-  offers no sign-up, has no end users other than the operator, and does not collect data from
-  visitors to this site. This policy describes what data the app handles, how it is protected, how
-  long it is kept, and how access can be revoked.
+  ${APP_NAME} ("the app") is a personal, single-user scheduling tool. It publishes posts that its
+  operator has written in advance to that operator's own social media accounts. It offers no
+  sign-up, has no end users other than the operator, and does not collect data from visitors to
+  this site. This policy describes what data the app handles, how it is protected, how long it is
+  kept, and how access can be revoked. Privacy questions and requests are handled through the
+  contact address in section 11.
 </p>
 
 <h2>2. Data the app accesses and why</h2>
@@ -276,24 +276,23 @@ export function privacyPage(): string {
 
 <h2>1. A quem esta política se aplica</h2>
 <p>
-  O ${APP_NAME} ("o app") é uma ferramenta pessoal de agendamento, de usuário único, operada por
-  uma desenvolvedora individual, contato <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>. O
-  app publica posts escritos previamente pela operadora nas contas de redes sociais da própria
-  operadora. Não há cadastro, não existem usuários além da operadora, e nenhum dado é coletado de
-  visitantes deste site.
+  O ${APP_NAME} ("o app") é uma ferramenta pessoal de agendamento, de usuário único. O app publica
+  posts escritos previamente por quem o opera, nas contas de redes sociais dessa mesma pessoa. Não
+  há cadastro, não existem usuários além de quem opera, e nenhum dado é coletado de visitantes deste
+  site. Dúvidas e pedidos relativos a privacidade são tratados pelo endereço de contato da seção 11.
 </p>
 
 <h2>2. Dados acessados e por quê</h2>
 <p>
-  O app acessa apenas o necessário para publicar um post em nome da operadora, sempre pelo escopo
+  O app acessa apenas o necessário para publicar um post em nome de quem o opera, sempre pelo escopo
   mais restrito que cada plataforma oferece. No caso do Google, o escopo é
   <code>https://www.googleapis.com/auth/youtube.upload</code> — um escopo somente de envio, que não
   permite ler métricas, inscritos, comentários nem histórico de visualização. Os demais escopos
   estão listados na tabela da versão em inglês.
 </p>
 <p>São armazenados apenas: credenciais OAuth (access token, refresh token e validade),
-  identificadores de conta da plataforma e um nome de exibição digitado pela própria operadora, e o
-  conteúdo dos posts que a operadora criou (legendas, títulos, opções, horário agendado, status e
+  identificadores de conta da plataforma e um nome de exibição digitado por quem opera o app, e o
+  conteúdo dos posts criados por essa pessoa (legendas, títulos, opções, horário agendado, status e
   mídia). Nada além disso é obtido ou guardado.</p>
 
 <h2>3. Como os dados sensíveis são protegidos</h2>
@@ -308,14 +307,14 @@ export function privacyPage(): string {
       volta no painel. Ou seja: um vazamento apenas do banco não expõe nenhum token.</li>
   <li><strong>Criptografia em trânsito.</strong> Todo o tráfego usa HTTPS/TLS ponta a ponta. A única
       exceção, por definição do próprio fluxo do Google para aplicativos instalados, é o redirect
-      de loopback (<code>http://127.0.0.1</code>), que nunca sai da máquina da operadora.</li>
+      de loopback (<code>http://127.0.0.1</code>), que nunca sai da máquina de quem opera o app.</li>
   <li><strong>Criptografia em repouso da infraestrutura.</strong> Banco (Cloudflare D1) e mídia
       (Cloudflare R2) também são criptografados em repouso pelo provedor, por baixo da criptografia
       da aplicação.</li>
   <li><strong>Controle de acesso e menor privilégio.</strong> O app não expõe nenhum endpoint que
       leia ou devolva dados armazenados: as únicas rotas públicas são esta política, uma página
       inicial estática e o callback OAuth. Não há painel administrativo nem acesso de terceiros. O
-      acesso administrativo ao banco é exclusivo da operadora, por conta com autenticação em dois
+      acesso administrativo ao banco é exclusivo de quem opera o app, por conta com autenticação em dois
       fatores e token de API restrito a esse único banco.</li>
   <li><strong>Segredos nunca vão para log.</strong> Tokens, texto cifrado, chave de criptografia e
       client secrets das plataformas nunca são registrados em log.</li>
@@ -331,11 +330,11 @@ export function privacyPage(): string {
   O uso e a transferência de informações recebidas das APIs do Google pelo ${APP_NAME} seguem a
   <a href="https://developers.google.com/terms/api-services-user-data-policy">Política de Dados do
   Usuário dos Serviços de API do Google</a>, incluindo os requisitos de Uso Limitado. Os dados
-  obtidos via APIs do Google são usados exclusivamente para enviar ao canal do YouTube da própria
-  operadora os vídeos que ela agendou. Nunca são vendidos, transferidos a terceiros (salvo exigência
+  obtidos via APIs do Google são usados exclusivamente para enviar os vídeos agendados ao canal do
+  YouTube de quem opera o app. Nunca são vendidos, transferidos a terceiros (salvo exigência
   legal), usados para publicidade, usados para treinar modelos de inteligência artificial, nem lidos
   por pessoas — exceto quando estritamente necessário por segurança, por exigência legal ou com
-  consentimento explícito da operadora. O uso do app com uma conta do YouTube implica concordância
+  consentimento explícito de quem opera o app. O uso do app com uma conta do YouTube implica concordância
   com os <a href="https://www.youtube.com/t/terms">Termos de Serviço do YouTube</a>; o tratamento de
   dados pelo Google está descrito na
   <a href="https://policies.google.com/privacy">Política de Privacidade do Google</a>.
@@ -353,7 +352,7 @@ export function privacyPage(): string {
 <p>
   Tokens são mantidos apenas enquanto a conta estiver conectada; reautenticar sobrescreve,
   desconectar apaga. Posts agendados e mídia ficam guardados como registro do que foi publicado até
-  que a operadora os apague. Como a operadora controla a infraestrutura diretamente, a exclusão é
+  que sejam apagados. Como quem opera o app controla a infraestrutura diretamente, a exclusão é
   imediata e completa. Pedidos de exclusão ou dúvidas:
   <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>, respondidos em até 30 dias.
 </p>
