@@ -7,7 +7,9 @@
 // sync with the code it describes: if token storage, scopes, or retention change, change this too.
 
 export const APP_NAME = 'social-scheduler';
-export const CONTACT_EMAIL = 'alexia01native@gmail.com';
+// Contact channel published in the policy (§6 deletion requests, §11 contact) and on the home
+// page. Platform reviews expect a reachable address here — keep it one that's actually monitored.
+export const CONTACT_EMAIL = 'contato@omangue.co';
 export const POLICY_LAST_UPDATED = '2026-08-15';
 
 const STYLE = `
