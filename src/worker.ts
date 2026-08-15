@@ -2,6 +2,7 @@ import { adapters } from './adapters/index.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
+import { homePage, privacyPage } from './pages.js';
 import type { Env } from './lib/env.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from './lib/types.js';
 
@@ -22,9 +23,29 @@ export default {
     if (match) {
       return handleOAuthCallback(match[1] as 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url, env);
     }
+    // Public pages. Every platform's app review wants a reachable policy URL, and Google's OAuth
+    // verification for the sensitive youtube.upload scope requires it to describe how the data is
+    // protected — hence /privacy living in the Worker itself, on the same origin as the callbacks.
+    if (url.pathname === '/privacy' || url.pathname === '/privacy.html') {
+      return htmlResponse(privacyPage());
+    }
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      return htmlResponse(homePage());
+    }
     return new Response('not found', { status: 404 });
   },
 };
+
+function htmlResponse(html: string): Response {
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      // Reviewers (Google, Meta, TikTok, Pinterest) re-fetch these pages; a short cache keeps an
+      // edited policy from lingering behind a stale copy.
+      'Cache-Control': 'public, max-age=300',
+    },
+  });
+}
 
 // Cron entrypoint. NOTE: unlike the original GitHub Actions design, Cron Triggers have no
 // built-in "run failed" email — failures here only show up in `wrangler tail` / the dashboard

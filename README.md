@@ -10,7 +10,7 @@ Repo: https://github.com/Almar-cyber/social-scheduler
 
 - **Cloudflare Worker** (`src/worker.ts`) — um único Worker com dois handlers:
   - `scheduled()` — o poller, disparado por um **Cron Trigger** nativo (substitui GitHub Actions inteiro, sem limite de minutos e sem precisar de repo público)
-  - `fetch()` — callback OAuth para LinkedIn, Meta, Pinterest e TikTok (YouTube usa loopback local, não passa por aqui)
+  - `fetch()` — callback OAuth para LinkedIn, Meta, Pinterest e TikTok (YouTube usa loopback local, não passa por aqui), mais as páginas públicas `/` e `/privacy` (ver [Política de privacidade](#política-de-privacidade))
 - **Cloudflare D1** (SQLite) — banco `social-scheduler`, via binding `DB`
 - **Cloudflare R2** — bucket `social-scheduler-media`, via binding `MEDIA`. Domínio público: `https://scheduler-media.omangue.co` (subdomínio novo — não toca no site que já roda em omangue.co)
 - **Web Crypto (AES-GCM)** (`src/lib/crypto.ts`) — criptografia dos tokens OAuth, chave só existe como secret do Worker
@@ -105,6 +105,27 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 5. **Fase 4** ✅ (código, confiança menor) — TikTok. Falta gerar o app e submeter a auditoria — comece esse passo primeiro, é o que demora mais.
 
 Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que falta em todos os casos é você gerar as credenciais OAuth de cada plataforma (não posso criar essas contas/apps por você) e rodar o CLI de auth correspondente.
+
+## Política de privacidade
+
+Toda review de app (Google/YouTube, Meta, TikTok, Pinterest) exige uma URL pública de política de privacidade, e a verificação OAuth do Google para o escopo sensível `youtube.upload` exige que essa política **descreva os mecanismos de proteção dos dados sensíveis** — foi exatamente esse o ponto reprovado na primeira submissão ("your privacy policy does not specify any data protection mechanisms for sensitive data").
+
+- Fonte: `src/pages.ts` (bilíngue EN/PT — a versão em inglês é a que o revisor do Google lê).
+- URLs, depois do deploy:
+  - `https://social-scheduler.zona21.workers.dev/privacy` — política
+  - `https://social-scheduler.zona21.workers.dev/` — home (o Google também olha a home do app; antes era 404)
+
+O que a política afirma sobre proteção de dados vem direto do código — se qualquer um desses pontos mudar, atualize `src/pages.ts` junto:
+
+| Afirmação na política | Onde está no código |
+| --- | --- |
+| Tokens cifrados com AES-256-GCM + IV aleatório antes de ir pro banco | `src/lib/crypto.ts`, `src/lib/tokens.ts` |
+| Chave só existe como secret do Worker, nunca no repo/log | `TOKEN_ENCRYPTION_KEY` (`wrangler secret put`), `.gitignore` |
+| Nenhum endpoint público lê/devolve dado armazenado | `fetch()` em `src/worker.ts` — só `/`, `/privacy` e `/oauth/callback/*` |
+| Escopo do Google é só `youtube.upload` (envio, sem leitura) | `src/cli/youtube-auth.ts` |
+| Um registro por plataforma; reautenticar sobrescreve | `platform text not null unique` em `migrations/0001_init.sql` |
+
+Depois de `npm run deploy`, no Cloud Console: OAuth consent screen → colar a URL de `/privacy` em **Privacy policy link** (e a home em **Application home page**) → **resubmit**. Depois **responder o e-mail da review** confirmando o que foi corrigido — sem essa resposta a verificação não anda.
 
 ## Pendências
 
