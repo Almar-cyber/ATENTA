@@ -25,6 +25,10 @@ export interface Env {
   /** Shared secret gating /admin — the posting UI writes to D1 and spends platform quota. */
   ADMIN_TOKEN: string;
 
+  /** Pins the OAuth redirect_uri when the Worker answers on more than one hostname — it must match
+   *  what each platform's console has registered. Defaults to the host the browser is on. */
+  OAUTH_REDIRECT_BASE?: string;
+
   /** Public base URL of the R2 custom domain, e.g. https://scheduler-media.omangue.co. Optional:
    *  only Instagram, Facebook and Pinterest fetch media by URL. Set as a wrangler var, not a secret. */
   MEDIA_PUBLIC_BASE?: string;

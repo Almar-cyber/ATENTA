@@ -107,7 +107,9 @@ A legenda vai em `post_info.title` (limite de 2200 caracteres, truncada se passa
 
 `https://social-scheduler.zona21.workers.dev/admin?key=SUA_SENHA` — página servida pelo próprio Worker: escolhe o arquivo, escreve a legenda, marca as contas, define a hora e pronto. Embaixo do formulário aparece a fila com o status de cada post.
 
-A chave só precisa ir na URL uma vez: ela vira um cookie `HttpOnly` (90 dias, restrito a `/admin`) e a URL é limpa por redirect, pra senha não ficar no histórico do navegador. Salve `/admin` nos favoritos depois disso.
+Abrir `/admin` sem estar logado mostra uma tela de senha comum — é o caminho normal; salve nos favoritos e a sessão dura 90 dias (cookie `HttpOnly` restrito a `/admin`). O `?key=` continua funcionando como atalho e é convertido em cookie por redirect, pra senha não ficar no histórico.
+
+**Conectar contas também é pela página.** Cada plataforma tem um botão que abre o consentimento dela e volta pra cá — mesma URL de consentimento que os scripts `*-auth-url` imprimiam, só que sem terminal. Duas ressalvas: o `redirect_uri` mostrado na página precisa estar registrado igual no painel da plataforma (se você acessa o Worker por mais de um domínio, fixe com a var `OAUTH_REDIRECT_BASE`), e o **YouTube continua pelo terminal** (`npm run youtube-auth`) porque a credencial dele é do tipo Desktop e exige redirect local, que um celular não tem como servir.
 
 ```bash
 wrangler secret put ADMIN_TOKEN     # openssl rand -base64 24
