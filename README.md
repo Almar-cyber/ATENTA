@@ -140,13 +140,21 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 
 ### Migrations pendentes
 
-**Rode a migration antes do deploy** — o poller passou a consultar `post_targets.retry_after`, então um Worker novo contra um banco velho quebra em toda rodada:
+**Migration antes do deploy, sempre** — o poller consulta colunas (`retry_after`, `processing_since`, `next_check_after`) que só existem depois delas; um Worker novo contra um banco velho quebra em toda rodada.
 
 ```bash
 wrangler d1 execute social-scheduler --remote --file=migrations/0002_post_target_retry_after.sql
 wrangler d1 execute social-scheduler --remote --file=migrations/0003_processing_recheck_backoff.sql
 npm run deploy
 ```
+
+### Deploy sem terminal (celular)
+
+Os dois passos acima precisam de credencial da Cloudflare, o que normalmente quer dizer terminal. `.github/workflows/deploy.yml` transforma isso num botão: **Actions → Deploy → Run workflow**, dá pra apertar do navegador do celular. Ele aplica as migrations que você listar no campo (já vem preenchido com as pendentes) e publica o Worker.
+
+Uma vez só, antes de usar: em **Settings → Secrets and variables → Actions**, criar `CLOUDFLARE_API_TOKEN` (token com Workers Scripts:Edit, D1:Edit e Workers R2 Storage:Edit) e `CLOUDFLARE_ACCOUNT_ID`. E o workflow só aparece na aba Actions depois de estar na branch padrão.
+
+Aplicar a mesma migration duas vezes dá erro de coluna duplicada — depois da primeira execução, limpe o campo de migrations e deixe só o deploy marcado. Isso **não** é o poller: o agendamento continua no Cron Trigger do Worker, e o workflow só roda quando você aperta o botão.
 
 ## Fases
 
