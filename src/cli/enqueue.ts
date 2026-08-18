@@ -20,7 +20,11 @@ async function main(): Promise<void> {
         '  instagram: {"as_story": true}                — post as a Story instead of feed/Reel\n' +
         '  youtube:   {"categoryId": "22", "title": "..."}\n' +
         '  pinterest: {"board_id": "..."}                — overrides the account\'s default board\n' +
-        '  tiktok:    {"privacy_level": "PUBLIC_TO_EVERYONE", "disable_duet": true, ...}'
+        '  tiktok:    {"privacy_level": "PUBLIC_TO_EVERYONE", "disable_duet": true, "disable_comment": true,\n' +
+        '             "disable_stitch": true, "brand_content_toggle": true, "brand_organic_toggle": true,\n' +
+        '             "is_aigc": true, "video_cover_timestamp_ms": 1000}\n' +
+        '             privacy_level default = PUBLIC_TO_EVERYONE; precisa estar entre as opções que\n' +
+        '             a conta oferece (creator_info). Outros valores: MUTUAL_FOLLOW_FRIENDS, FOLLOWER_OF_CREATOR, SELF_ONLY'
     );
     process.exit(1);
     return;

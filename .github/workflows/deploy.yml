@@ -1,0 +1,70 @@
+# Deploy e migrations pelo navegador — inclusive do celular.
+#
+# Por que existe: os passos de publicar (`wrangler deploy`) e aplicar migration no D1 exigem um
+# terminal com credencial da Cloudflare. Aqui eles viram um botão em Actions → Deploy → "Run
+# workflow", que é a única forma de fazer isso de um telefone.
+#
+# Isto NÃO é o poller. O agendamento continua no Cron Trigger do Worker (wrangler.toml); este
+# workflow só roda quando você aperta o botão, então não encosta nos minutos gratuitos do Actions —
+# que foi o motivo de o projeto ter saído do GitHub Actions em primeiro lugar.
+#
+# Segredos necessários no repositório (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — token com Workers Scripts:Edit, D1:Edit e Workers R2 Storage:Edit
+#   CLOUDFLARE_ACCOUNT_ID  — o Account ID que aparece na home do dashboard da Cloudflare
+#
+# Os secrets do Worker (TOKEN_ENCRYPTION_KEY, chaves de OAuth) não entram aqui: já estão gravados
+# no Worker e `wrangler deploy` não os toca.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      migrations:
+        description: 'Migrations a aplicar, separadas por vírgula (vazio = nenhuma). Aplicar duas vezes dá erro de coluna duplicada, então limpe o campo depois da primeira vez.'
+        required: false
+        default: '0002_post_target_retry_after.sql,0003_processing_recheck_backoff.sql'
+      deploy:
+        description: 'Publicar o Worker depois das migrations'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Barato, e evita publicar um Worker que nem compila.
+      - run: npm run typecheck
+
+      # Ordem importa: o Worker novo consulta colunas que só existem depois da migration, então
+      # migrar sempre vem antes de publicar.
+      - name: Aplicar migrations
+        if: inputs.migrations != ''
+        run: |
+          IFS=',' read -ra FILES <<< "${{ inputs.migrations }}"
+          for file in "${FILES[@]}"; do
+            file="$(echo "$file" | xargs)"
+            [ -z "$file" ] && continue
+            if [ ! -f "migrations/$file" ]; then
+              echo "::error::migrations/$file não existe"
+              exit 1
+            fi
+            echo "--- aplicando $file"
+            npx wrangler d1 execute social-scheduler --remote --file="migrations/$file"
+          done
+
+      - name: Publicar o Worker
+        if: inputs.deploy
+        run: npx wrangler deploy

@@ -2,9 +2,9 @@
 // LinkedIn/Meta/Pinterest. The Worker does the token exchange (see worker.ts
 // handleTiktokCallback); this just prints the consent URL. `state` carries the display_name.
 //
-// Requires the Content Posting API scope to have been granted for this app (review with a demo
-// video + privacy policy — see README). Until then, posts are forced SELF_ONLY to sandbox test
-// accounts regardless of what this script or the adapter request.
+// The Content Posting API audit is approved for this app, so `video.publish` grants real
+// direct-post access — posts go out at the privacy level the account actually offers (see
+// adapters/tiktok.ts), not the SELF_ONLY sandbox the unaudited flow was stuck with.
 import { requireEnv } from './d1-client.js';
 
 function parseArgs(argv: string[]): Record<string, string> {
@@ -42,7 +42,7 @@ function main(): void {
   console.log('Abra esta URL no navegador, logado com a conta que vai postar:\n');
   console.log(url.toString());
   console.log(`\n(redirect_uri usado: ${redirectUri} — precisa estar registrado igualzinho no app do TikTok Developers)`);
-  console.log('\nSem a auditoria da Content Posting API aprovada, posts ficam forçados a SELF_ONLY numa conta de sandbox.');
+  console.log('\nAceite os dois pedidos de permissão (perfil + publicar vídeo) — sem o escopo video.publish o adapter não posta.');
 }
 
 main();

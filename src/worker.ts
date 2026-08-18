@@ -10,6 +10,8 @@ const PROCESSING_RECHECK_BATCH_SIZE = 10;
 const PUBLISHING_STALE_MINUTES = 30;
 const PROCESSING_TIMEOUT_HOURS = 6;
 const MAX_ATTEMPTS = 5;
+const RETRY_BASE_DELAY_MS = 60_000;
+const RETRY_MAX_DELAY_MS = 15 * 60_000;
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -45,6 +47,13 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
     const account = rowToAccount(row);
     const adapter = adapters[account.platform];
     if (!adapter.needsRefresh(account)) continue;
+    // At a one-minute cron, a run that's still uploading a video overlaps the next two or three
+    // runs — and TikTok (like Google) rotates the refresh token on use, so two refreshes racing on
+    // the same account would leave one of them holding a token the platform has already revoked,
+    // bricking it until a manual reauth. Claim the refresh the same way posts are claimed: an
+    // atomic compare-and-set on updated_at, where only the run that still sees the row as it read
+    // it is allowed to proceed.
+    if (!(await claimTokenRefresh(env, account.id, row.updated_at))) continue;
     try {
       await adapter.ensureFreshToken(account, env);
     } catch (err) {
@@ -60,18 +69,23 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
 // RETURNING id, so two overlapping runs never double-publish.
 async function stepClaimAndPublishDue(env: Env): Promise<void> {
   const { results } = await env.DB.prepare(
-    `select pt.* from post_targets pt
+    `select pt.*, sp.body as post_body from post_targets pt
      join accounts a on a.id = pt.account_id
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      where pt.status = 'queued' and sp.scheduled_for <= ? and a.status = 'active'
+       and (pt.retry_after is null or pt.retry_after <= ?)
      order by sp.scheduled_for asc
      limit ?`
   )
-    .bind(nowIso(), CLAIM_BATCH_SIZE)
+    .bind(nowIso(), nowIso(), CLAIM_BATCH_SIZE)
     .all<any>();
 
   for (const row of results ?? []) {
     const target = rowToPostTarget(row);
+    // scheduled_posts.body is the canonical caption; post_targets.caption_override is exactly
+    // that — an override. Adapters only ever see the target, so resolve the fallback here or the
+    // caption typed into `npm run enqueue --caption=...` never reaches the platform at all.
+    target.caption_override = target.caption_override ?? (row.post_body as string | null);
     const claimed = await claim(env, target.id, 'queued', 'publishing');
     if (!claimed) continue; // another run already grabbed it
 
@@ -97,10 +111,11 @@ async function stepRecheckProcessing(env: Env): Promise<void> {
     `select pt.* from post_targets pt
      join accounts a on a.id = pt.account_id
      where pt.status = 'processing' and a.status = 'active'
-     order by pt.updated_at asc
+       and (pt.next_check_after is null or pt.next_check_after <= ?)
+     order by pt.next_check_after asc
      limit ?`
   )
-    .bind(PROCESSING_RECHECK_BATCH_SIZE)
+    .bind(nowIso(), PROCESSING_RECHECK_BATCH_SIZE)
     .all<any>();
 
   for (const row of results ?? []) {
@@ -124,18 +139,32 @@ async function stepSweeps(env: Env): Promise<void> {
     .bind(nowIso(), publishingCutoff)
     .run();
 
+  // coalesce(): every recheck bumps updated_at, so measuring the timeout from it meant the row
+  // looked fresh again a minute later and the 6h deadline never actually arrived.
   const processingCutoff = new Date(Date.now() - PROCESSING_TIMEOUT_HOURS * 3_600_000).toISOString();
   await env.DB.prepare(
     `update post_targets set status = 'failed', last_error = 'timed out waiting on platform processing', updated_at = ?
-     where status = 'processing' and updated_at < ?`
+     where status = 'processing' and coalesce(processing_since, updated_at) < ?`
   )
     .bind(nowIso(), processingCutoff)
     .run();
 }
 
-async function claim(env: Env, id: string, fromStatus: string, toStatus: string): Promise<boolean> {
+async function claimTokenRefresh(env: Env, accountId: string, seenUpdatedAt: string): Promise<boolean> {
   const { results } = await env.DB.prepare(
-    `update post_targets set status = ?, updated_at = ? where id = ? and status = ? returning id`
+    `update accounts set updated_at = ? where id = ? and updated_at = ? returning id`
+  )
+    .bind(nowIso(), accountId, seenUpdatedAt)
+    .all<{ id: string }>();
+  return (results?.length ?? 0) > 0;
+}
+
+async function claim(env: Env, id: string, fromStatus: string, toStatus: string): Promise<boolean> {
+  // The processing clocks are cleared on the way in: a requeued target that publishes again starts
+  // a brand new processing phase, and a leftover processing_since would time it out immediately.
+  const { results } = await env.DB.prepare(
+    `update post_targets set status = ?, processing_since = null, next_check_after = null, updated_at = ?
+     where id = ? and status = ? returning id`
   )
     .bind(toStatus, nowIso(), id, fromStatus)
     .all<{ id: string }>();
@@ -172,13 +201,36 @@ async function applyPublishResult(env: Env, target: PostTarget, result: PublishR
   }
 
   if (result.state === 'processing') {
-    await env.DB.prepare(`update post_targets set status = 'processing', adapter_state = ?, updated_at = ? where id = ?`)
-      .bind(JSON.stringify(result.adapterState ?? target.adapter_state), ts, target.id)
+    const processingSince = target.processing_since ?? ts;
+    await env.DB.prepare(
+      `update post_targets set status = 'processing', adapter_state = ?, processing_since = ?, next_check_after = ?, updated_at = ?
+       where id = ?`
+    )
+      .bind(
+        JSON.stringify(result.adapterState ?? target.adapter_state),
+        processingSince,
+        new Date(Date.now() + nextRecheckDelayMs(processingSince)).toISOString(),
+        ts,
+        target.id
+      )
       .run();
     return;
   }
 
   await handleFailure(env, target, result.class, result.message);
+}
+
+// Platforms resolve a normal upload in well under a minute, so the first few minutes are polled at
+// full cron speed — the point of the fast cron is that a post shows as published as soon as it is.
+// Only once a post has clearly stalled does the interval open up, which caps a 6h worst case at
+// ~30 rechecks instead of 360.
+function nextRecheckDelayMs(processingSince: string): number {
+  const ageMs = Date.now() - new Date(processingSince).getTime();
+  // Zero, not 60s: the cron tick is already the floor, and asking for "now + 1min" would land just
+  // after the next tick and cost the post a whole extra minute of showing as unpublished.
+  if (ageMs < 5 * 60_000) return 0;
+  if (ageMs < 30 * 60_000) return 5 * 60_000;
+  return 15 * 60_000;
 }
 
 async function handlePublishError(env: Env, target: PostTarget, adapter: PlatformAdapter, err: unknown): Promise<void> {
@@ -200,7 +252,11 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     await env.DB.prepare(`update accounts set status = 'needs_reauth', updated_at = ? where id = ?`)
       .bind(ts, target.account_id)
       .run();
-    await env.DB.prepare(`update post_targets set status = 'queued', last_error = ?, updated_at = ? where id = ?`)
+    // retry_after is cleared, not preserved: once the account is re-authed the post should go out
+    // on the next tick, not sit out a backoff it inherited from an unrelated earlier failure.
+    await env.DB.prepare(
+      `update post_targets set status = 'queued', last_error = ?, retry_after = null, updated_at = ? where id = ?`
+    )
       .bind(message, ts, target.id)
       .run();
     return;
@@ -229,10 +285,16 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     return;
   }
 
+  // Backoff is exponential from one minute rather than a flat 15: a transient blip should cost the
+  // post a single cron tick, not a quarter of an hour, while a genuinely sick platform still backs
+  // off (1, 2, 4, 8 min...) instead of being hammered.
   // TODO (per adapter, Phase 1+): use the platform's real quota-reset boundary instead of a flat 24h.
-  const delayMs = errorClass === 'quota' ? 24 * 3_600_000 : 15 * 60_000;
+  const delayMs =
+    errorClass === 'quota'
+      ? 24 * 3_600_000
+      : Math.min(RETRY_BASE_DELAY_MS * 2 ** (attemptCount - 1), RETRY_MAX_DELAY_MS);
   await env.DB.prepare(
-    `update post_targets set status = 'queued', last_error = ?, attempt_count = ?, scheduled_for = ?, updated_at = ? where id = ?`
+    `update post_targets set status = 'queued', last_error = ?, attempt_count = ?, retry_after = ?, updated_at = ? where id = ?`
   )
     .bind(message, attemptCount, new Date(Date.now() + delayMs).toISOString(), ts, target.id)
     .run();
@@ -528,6 +590,8 @@ async function handleTiktokCallback(code: string, url: URL, env: Env): Promise<R
     access_token: string;
     refresh_token: string;
     expires_in: number;
+    refresh_expires_in?: number;
+    scope?: string;
     open_id: string;
   };
 
@@ -538,8 +602,18 @@ async function handleTiktokCallback(code: string, url: URL, env: Env): Promise<R
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
   const ts = nowIso();
 
+  // The refresh token is finite too (~365 days) and rotates on every use — recording its expiry
+  // lets the adapter say "reauth" instead of burning refresh attempts that can no longer succeed.
+  const refreshExpiresAt = tokenJson.refresh_expires_in
+    ? new Date(Date.now() + tokenJson.refresh_expires_in * 1000).toISOString()
+    : null;
+
   await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, ts);
-  await env.DB.prepare(`update accounts set access_token_expires_at = ? where platform = 'tiktok'`).bind(expiresAt).run();
+  await env.DB.prepare(
+    `update accounts set access_token_expires_at = ?, refresh_token_expires_at = ?, scope = ? where platform = 'tiktok'`
+  )
+    .bind(expiresAt, refreshExpiresAt, tokenJson.scope ?? null)
+    .run();
 
   return new Response(`Conta "${displayName}" autenticada no TikTok. Pode fechar esta aba.`);
 }
