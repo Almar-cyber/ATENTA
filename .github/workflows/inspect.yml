@@ -1,0 +1,51 @@
+# Diagnóstico — SÓ LEITURA. Não publica, não migra, não altera nada.
+#
+# Existe para responder uma pergunta específica: o que estava publicado no Worker
+# `social-scheduler` antes, quem aponta o domínio atenta.omangue.co para ele, e o que mais existe
+# nessa conta da Cloudflare. Cada passo é `continue-on-error` porque o token pode não ter permissão
+# para parte disso, e uma consulta negada não deve esconder as outras.
+name: Inspecionar
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      API: https://api.cloudflare.com/client/v4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Historico de deployments do social-scheduler
+        continue-on-error: true
+        run: npx wrangler deployments list
+
+      - name: Versoes do social-scheduler
+        continue-on-error: true
+        run: npx wrangler versions list
+
+      - name: Todos os Workers da conta
+        continue-on-error: true
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" > out.json
+          jq -r 'if .success then (.result[] | "\(.id)\tcriado=\(.created_on)\tmodificado=\(.modified_on)") else "falhou: \(.errors)" end' out.json
+
+      - name: Dominios customizados apontando para Workers
+        continue-on-error: true
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" > out.json
+          jq -r 'if .success then (.result[] | "\(.hostname)\t-> worker=\(.service)\tenv=\(.environment)") else "falhou: \(.errors)" end' out.json
+
+      - name: Projetos do Cloudflare Pages
+        continue-on-error: true
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects" > out.json
+          jq -r 'if .success then (.result[] | "\(.name)\tsubdominio=\(.subdomain)\tdominios=\(.domains | tostring)") else "falhou (token pode nao ter permissao de Pages): \(.errors)" end' out.json

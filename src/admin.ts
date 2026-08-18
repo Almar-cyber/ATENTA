@@ -5,9 +5,11 @@
 // unusable from a phone, which is where the videos actually are. These three routes do the same
 // work over HTTP so the whole loop — pick a file, write a caption, choose when — fits in a form.
 //
-// GET  /admin           the form, plus the queue as it stands
-// PUT  /admin/media     raw upload, streamed straight into R2
-// POST /admin/enqueue   JSON, creates the post and its targets
+// GET  /admin                     login screen, or the form plus accounts and queue
+// POST /admin/login               password in, session cookie out
+// PUT  /admin/media               raw upload, streamed straight into R2
+// POST /admin/enqueue             JSON, creates the post and its targets
+// GET  /admin/connect/:platform   redirect into that platform's consent screen
 //
 // Auth is a single shared secret (ADMIN_TOKEN), because the Worker URL is public and the routes
 // below write to the database and spend platform quota. Give it once as ?key=..., and it moves to
@@ -24,14 +26,45 @@ const QUEUE_ROWS = 15;
 // the file's bytes (no multipart), so this is the real ceiling for a video posted from the phone.
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
+const BASE_STYLE = `<style>
+  :root { color-scheme: light dark; --line: #8883; }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 640px; margin-inline: auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 16px; }
+  h2 { font-size: 1rem; margin: 28px 0 8px; }
+  label { display: block; margin: 14px 0 4px; font-weight: 600; }
+  input, textarea, select, button { font: inherit; width: 100%; padding: 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: transparent; color: inherit; }
+  textarea { min-height: 96px; resize: vertical; }
+  .pick { display: flex; align-items: center; gap: 10px; font-weight: 400; margin: 0 0 8px;
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .pick input { width: auto; }
+  button { margin-top: 20px; padding: 16px; font-weight: 700; border: 0; background: #2563eb; color: #fff; }
+  button:disabled { opacity: .5; }
+  #out { margin-top: 14px; padding: 12px; border-radius: 10px; white-space: pre-wrap; display: none; }
+  #out.ok { display: block; background: #16a34a22; }
+  #out.err { display: block; background: #dc262622; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-top: 8px; }
+  td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .s-failed { color: #dc2626; } .s-published { color: #16a34a; }
+  .hint { font-size: .8rem; opacity: .7; font-weight: 400; margin-top: 4px; }
+  .mini { width: auto; margin: 0; padding: 8px 14px; font-size: .85rem; border-radius: 8px; }
+  code { font-size: .78rem; word-break: break-all; }
+</style>`;
+
 export async function handleAdmin(request: Request, url: URL, env: Env): Promise<Response> {
   if (!env.ADMIN_TOKEN) {
     return new Response('ADMIN_TOKEN não configurado — rode: wrangler secret put ADMIN_TOKEN', { status: 503 });
   }
 
   const provided = presentedToken(request, url);
-  if (!provided || !safeEqual(provided, env.ADMIN_TOKEN)) {
-    // Same answer for "no key" and "wrong key" — nothing here should confirm a guess.
+  const authed = !!provided && safeEqual(provided, env.ADMIN_TOKEN);
+
+  // The page itself answers with a login screen; the data routes stay a flat 401, which keeps
+  // "no key" and "wrong key" indistinguishable to anything that isn't a person at a form.
+  if (!authed) {
+    if (request.method === 'POST' && url.pathname === '/admin/login') return handleLogin(request, env);
+    if (request.method === 'GET' && url.pathname === '/admin') return renderLogin();
     return new Response('não autorizado', { status: 401 });
   }
 
@@ -45,7 +78,7 @@ export async function handleAdmin(request: Request, url: URL, env: Env): Promise
   }
 
   if (request.method === 'GET' && url.pathname === '/admin') {
-    return renderPage(env);
+    return renderPage(url, env);
   }
   if (request.method === 'PUT' && url.pathname === '/admin/media') {
     return handleUpload(request, url, env);
@@ -53,7 +86,111 @@ export async function handleAdmin(request: Request, url: URL, env: Env): Promise
   if (request.method === 'POST' && url.pathname === '/admin/enqueue') {
     return handleEnqueue(request, env);
   }
+  if (request.method === 'POST' && url.pathname === '/admin/login') {
+    return new Response(null, { status: 302, headers: { Location: '/admin' } });
+  }
+  const connect = /^\/admin\/connect\/(linkedin|meta|pinterest|tiktok)$/.exec(url.pathname);
+  if (request.method === 'GET' && connect) {
+    return startConnect(connect[1] as ConnectablePlatform, url, env);
+  }
   return new Response('não encontrado', { status: 404 });
+}
+
+type ConnectablePlatform = 'linkedin' | 'meta' | 'pinterest' | 'tiktok';
+
+// Same consent URLs the src/cli/*-auth-url.ts scripts print, built here instead so connecting an
+// account is a button rather than a terminal. The Worker already owns the other half of this
+// handshake (handleOAuthCallback in worker.ts), so only the outbound redirect was missing.
+//
+// YouTube is deliberately absent: its credential is a Desktop-app client using a loopback
+// redirect, which a phone browser cannot serve. It stays on `npm run youtube-auth`.
+function consentUrl(platform: ConnectablePlatform, displayName: string, redirectBase: string, env: Env): string {
+  const redirectUri = `${redirectBase}/oauth/callback/${platform}`;
+  const state = Buffer.from(JSON.stringify({ displayName })).toString('base64url');
+
+  if (platform === 'linkedin') {
+    const url = new URL('https://www.linkedin.com/oauth/v2/authorization');
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', env.LINKEDIN_CLIENT_ID);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('state', state);
+    url.searchParams.set('scope', 'openid profile w_member_social');
+    return url.toString();
+  }
+  if (platform === 'meta') {
+    const url = new URL('https://www.facebook.com/v21.0/dialog/oauth');
+    url.searchParams.set('client_id', env.META_APP_ID);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('state', state);
+    url.searchParams.set(
+      'scope',
+      'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,business_management'
+    );
+    return url.toString();
+  }
+  if (platform === 'pinterest') {
+    const url = new URL('https://www.pinterest.com/oauth/');
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', env.PINTEREST_CLIENT_ID);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('state', state);
+    url.searchParams.set('scope', 'boards:read,pins:read,pins:write');
+    return url.toString();
+  }
+  const url = new URL('https://www.tiktok.com/v2/auth/authorize/');
+  url.searchParams.set('client_key', env.TIKTOK_CLIENT_KEY);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'user.info.basic,video.publish,video.upload');
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('state', state);
+  return url.toString();
+}
+
+// The redirect_uri has to match what's registered in each platform's console byte for byte, and
+// this Worker answers on more than one hostname. OAUTH_REDIRECT_BASE pins it; without it we use
+// whichever host the browser is on, which is right whenever that's the registered one.
+function redirectBase(url: URL, env: Env): string {
+  return (env.OAUTH_REDIRECT_BASE ?? url.origin).replace(/\/$/, '');
+}
+
+function startConnect(platform: ConnectablePlatform, url: URL, env: Env): Response {
+  const displayName = (url.searchParams.get('name') ?? '').trim();
+  if (!displayName) return new Response('faltou o nome da conta', { status: 400 });
+
+  const credential = { linkedin: env.LINKEDIN_CLIENT_ID, meta: env.META_APP_ID, pinterest: env.PINTEREST_CLIENT_ID, tiktok: env.TIKTOK_CLIENT_KEY }[platform];
+  if (!credential) {
+    return new Response(`credencial de ${platform} não configurada no Worker`, { status: 503 });
+  }
+
+  return new Response(null, { status: 302, headers: { Location: consentUrl(platform, displayName, redirectBase(url, env), env) } });
+}
+
+async function handleLogin(request: Request, env: Env): Promise<Response> {
+  const form = await request.formData();
+  const password = String(form.get('password') ?? '');
+  if (!safeEqual(password, env.ADMIN_TOKEN)) return renderLogin('Senha incorreta.');
+  return new Response(null, { status: 302, headers: { Location: '/admin', 'Set-Cookie': authCookie(env.ADMIN_TOKEN) } });
+}
+
+function renderLogin(error?: string): Response {
+  const html = `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar</title>${BASE_STYLE}</head>
+<body>
+<h1>Agendador</h1>
+${error ? `<div id="out" class="err" style="display:block">${esc(error)}</div>` : ''}
+<form method="post" action="/admin/login">
+  <label for="password">Senha</label>
+  <input type="password" id="password" name="password" autocomplete="current-password" autofocus>
+  <button type="submit">Entrar</button>
+</form>
+</body></html>`;
+  // 401 on a wrong password, 200 on the first visit — the browser shouldn't cache either.
+  return new Response(html, {
+    status: error ? 401 : 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
 }
 
 function presentedToken(request: Request, url: URL): string | null {
@@ -180,7 +317,7 @@ async function handleEnqueue(request: Request, env: Env): Promise<Response> {
   return json({ post_id: postId, targets: accounts.length, scheduled_for: scheduledFor.toISOString() });
 }
 
-async function renderPage(env: Env): Promise<Response> {
+async function renderPage(url: URL, env: Env): Promise<Response> {
   const { results: accounts } = await env.DB.prepare(
     `select id, platform, display_name from accounts where status = 'active' order by platform`
   ).all<{ id: string; platform: string; display_name: string }>();
@@ -215,35 +352,26 @@ async function renderPage(env: Env): Promise<Response> {
     )
     .join('');
 
+  const connected = new Set((accounts ?? []).map((a) => a.platform));
+  const base = redirectBase(url, env);
+  const connectRows = (['tiktok', 'linkedin', 'meta', 'pinterest'] as ConnectablePlatform[])
+    .map((platform) => {
+      const label = platform === 'meta' ? 'facebook + instagram' : platform;
+      const already = platform === 'meta' ? connected.has('facebook') || connected.has('instagram') : connected.has(platform);
+      return `<div class="pick">
+        <span style="flex:1">${esc(label)}${already ? ' <b>· conectado</b>' : ''}</span>
+        <button type="button" class="mini" data-connect="${esc(platform)}">${already ? 'reconectar' : 'conectar'}</button>
+      </div>`;
+    })
+    .join('');
+
   const html = `<!doctype html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agendar post</title>
-<style>
-  :root { color-scheme: light dark; --line: #8883; }
-  * { box-sizing: border-box; }
-  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 640px; margin-inline: auto; }
-  h1 { font-size: 1.25rem; margin: 0 0 16px; }
-  h2 { font-size: 1rem; margin: 28px 0 8px; }
-  label { display: block; margin: 14px 0 4px; font-weight: 600; }
-  input, textarea, select, button { font: inherit; width: 100%; padding: 12px; border-radius: 10px;
-    border: 1px solid var(--line); background: transparent; color: inherit; }
-  textarea { min-height: 96px; resize: vertical; }
-  .pick { display: flex; align-items: center; gap: 10px; font-weight: 400; margin: 0 0 8px;
-    padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
-  .pick input { width: auto; }
-  button { margin-top: 20px; padding: 16px; font-weight: 700; border: 0; background: #2563eb; color: #fff; }
-  button:disabled { opacity: .5; }
-  #out { margin-top: 14px; padding: 12px; border-radius: 10px; white-space: pre-wrap; display: none; }
-  #out.ok { display: block; background: #16a34a22; }
-  #out.err { display: block; background: #dc262622; }
-  table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-top: 8px; }
-  td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
-  .s-failed { color: #dc2626; } .s-published { color: #16a34a; }
-  .hint { font-size: .8rem; opacity: .7; font-weight: 400; margin-top: 4px; }
-</style>
+${BASE_STYLE}
 </head>
 <body>
 <h1>Agendar post</h1>
@@ -275,6 +403,11 @@ async function renderPage(env: Env): Promise<Response> {
   <div id="out"></div>
 </form>
 
+<h2>Contas</h2>
+<div class="hint" style="margin-bottom:8px">Conectar abre o login da plataforma. Depois de autorizar, volte para esta página.</div>
+${connectRows}
+<div class="hint">redirect_uri usado: <code>${esc(base)}/oauth/callback/&lt;plataforma&gt;</code> — precisa estar registrado igual no painel de cada plataforma. YouTube é o único que continua pelo terminal (<code>npm run youtube-auth</code>), porque a credencial dele exige redirect local.</div>
+
 <h2>Fila</h2>
 <table>
   <tr><th>quando</th><th>onde</th><th>status</th><th></th></tr>
@@ -285,6 +418,16 @@ async function renderPage(env: Env): Promise<Response> {
 const $ = (id) => document.getElementById(id);
 const out = $('out');
 function say(msg, ok) { out.textContent = msg; out.className = ok ? 'ok' : 'err'; }
+
+document.querySelectorAll('[data-connect]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const platform = btn.dataset.connect;
+    const name = prompt('Nome para essa conta (só pra você identificar):');
+    if (!name) return;
+    // Full navigation, not fetch: the platform's consent screen has to open in the browser.
+    location.href = '/admin/connect/' + platform + '?name=' + encodeURIComponent(name);
+  });
+});
 
 $('f').addEventListener('submit', async (e) => {
   e.preventDefault();
