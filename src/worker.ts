@@ -60,7 +60,7 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
 // RETURNING id, so two overlapping runs never double-publish.
 async function stepClaimAndPublishDue(env: Env): Promise<void> {
   const { results } = await env.DB.prepare(
-    `select pt.* from post_targets pt
+    `select pt.*, sp.body as post_body from post_targets pt
      join accounts a on a.id = pt.account_id
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      where pt.status = 'queued' and sp.scheduled_for <= ? and a.status = 'active'
@@ -72,6 +72,10 @@ async function stepClaimAndPublishDue(env: Env): Promise<void> {
 
   for (const row of results ?? []) {
     const target = rowToPostTarget(row);
+    // scheduled_posts.body is the canonical caption; post_targets.caption_override is exactly
+    // that — an override. Adapters only ever see the target, so resolve the fallback here or the
+    // caption typed into `npm run enqueue --caption=...` never reaches the platform at all.
+    target.caption_override = target.caption_override ?? (row.post_body as string | null);
     const claimed = await claim(env, target.id, 'queued', 'publishing');
     if (!claimed) continue; // another run already grabbed it
 
@@ -528,6 +532,8 @@ async function handleTiktokCallback(code: string, url: URL, env: Env): Promise<R
     access_token: string;
     refresh_token: string;
     expires_in: number;
+    refresh_expires_in?: number;
+    scope?: string;
     open_id: string;
   };
 
@@ -538,8 +544,18 @@ async function handleTiktokCallback(code: string, url: URL, env: Env): Promise<R
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
   const ts = nowIso();
 
+  // The refresh token is finite too (~365 days) and rotates on every use — recording its expiry
+  // lets the adapter say "reauth" instead of burning refresh attempts that can no longer succeed.
+  const refreshExpiresAt = tokenJson.refresh_expires_in
+    ? new Date(Date.now() + tokenJson.refresh_expires_in * 1000).toISOString()
+    : null;
+
   await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, ts);
-  await env.DB.prepare(`update accounts set access_token_expires_at = ? where platform = 'tiktok'`).bind(expiresAt).run();
+  await env.DB.prepare(
+    `update accounts set access_token_expires_at = ?, refresh_token_expires_at = ?, scope = ? where platform = 'tiktok'`
+  )
+    .bind(expiresAt, refreshExpiresAt, tokenJson.scope ?? null)
+    .run();
 
   return new Response(`Conta "${displayName}" autenticada no TikTok. Pode fechar esta aba.`);
 }

@@ -66,13 +66,36 @@ Para os CLIs locais (`enqueue`, `youtube-auth`, `*-auth-url`), copiar `.env.exam
 4. `npm run pinterest-auth-url -- --account="Meu Perfil" --redirect-base=https://social-scheduler.zona21.workers.dev` — o Worker troca o código por token, busca seus boards e usa o primeiro como padrão (`accounts.extra.default_board_id`; dá pra sobrescrever por post com `options.board_id`).
 5. Pinterest não tem agendamento nativo — timing é 100% o poller, igual LinkedIn/Instagram/TikTok. Imagem publica direto; vídeo passa por registro + poll (igual o Instagram).
 
-## Fase 4 — TikTok
+## Fase 4 — TikTok (auditoria **aprovada**)
 
-1. No [TikTok Developers](https://developers.tiktok.com/apps/): criar app → adicionar o produto "Content Posting API" e submeter a auditoria (vídeo de demonstração do fluxo + política de privacidade — **submeta isso o quanto antes**, é o maior gargalo de tempo do projeto todo, de dias a semanas) → registrar o redirect URI: `https://social-scheduler.zona21.workers.dev/oauth/callback/tiktok`.
+1. No [TikTok Developers](https://developers.tiktok.com/apps/): app criado, produto "Content Posting API" com a auditoria **aprovada** (era o maior gargalo do projeto — já passou), redirect URI registrado: `https://social-scheduler.zona21.workers.dev/oauth/callback/tiktok`.
 2. `wrangler secret put TIKTOK_CLIENT_KEY` e `wrangler secret put TIKTOK_CLIENT_SECRET` (Worker).
 3. Preencher `TIKTOK_CLIENT_KEY` no `.env` local.
-4. `npm run tiktok-auth-url -- --account="Minha Conta" --redirect-base=https://social-scheduler.zona21.workers.dev`.
-5. **Enquanto a auditoria não passa**: posts saem forçados `SELF_ONLY` numa conta de sandbox, não públicos de verdade. `src/adapters/tiktok.ts` está com confiança menor que os outros — os nomes exatos de campos vieram de padrões documentados, não de um teste real contra a API; testar com um post real antes de confiar 100% nele.
+4. `npm run tiktok-auth-url -- --account="Minha Conta" --redirect-base=https://social-scheduler.zona21.workers.dev` — aceitar as duas permissões (perfil + publicar vídeo). Se a conta já tinha sido autenticada antes da aprovação, **refaça esse passo**: o token antigo foi emitido para um app não auditado e continua limitado.
+5. Com a auditoria aprovada, o post sai de verdade: `privacy_level` default é `PUBLIC_TO_EVERYONE`. O adapter só aceita um valor que a própria conta oferece — ele lê `creator_info` antes de cada post e usa a lista de lá.
+
+### Opções por post (`--options`)
+
+```bash
+npm run enqueue -- --platform=tiktok --account="Minha Conta" --scheduled_for=2026-09-01T12:00:00Z \
+  --caption="legenda com #hashtag" \
+  --options='{"privacy_level":"PUBLIC_TO_EVERYONE","disable_duet":true}'
+```
+
+| opção | default | o que faz |
+| --- | --- | --- |
+| `privacy_level` | `PUBLIC_TO_EVERYONE` | `MUTUAL_FOLLOW_FRIENDS`, `FOLLOWER_OF_CREATOR`, `SELF_ONLY` — precisa estar entre as opções que `creator_info` devolve pra conta |
+| `disable_comment` / `disable_duet` / `disable_stitch` | `false` | se a conta já desabilitou a interação nas configurações dela, o adapter força `true` (mandar o contrário é erro na API) |
+| `brand_content_toggle` | `false` | conteúdo pago por terceiro (não combina com `SELF_ONLY`) |
+| `brand_organic_toggle` | `false` | você promovendo sua própria marca |
+| `is_aigc` | — | marca o vídeo como gerado por IA |
+| `video_cover_timestamp_ms` | — | frame usado como capa |
+
+A legenda vai em `post_info.title` (limite de 2200 caracteres, truncada se passar). O vídeo sobe direto de bytes do R2 — TikTok não precisa do domínio público, diferente de Instagram/Pinterest.
+
+### Como o upload funciona
+
+`video/init` → `PUT` de cada chunk → poll de `status/fetch` até `PUBLISH_COMPLETE` (o poller cuida disso na etapa "processing", com timeout de 6h). Chunks seguem as regras do Media Transfer Guide: 5MB–64MB cada, o último absorve o resto, `total_chunk_count = floor(video_size / chunk_size)`, máximo de 1000. Vídeo de até 64MB sobe inteiro num chunk só; acima disso o adapter fatia em 16MB e lê cada pedaço do R2 por byte-range, então um vídeo grande nunca fica inteiro na memória do Worker (limite de 128MB por isolate).
 
 ## Enfileirando um post
 
@@ -102,7 +125,7 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 2. **Fase 1** ✅ (código) — YouTube + LinkedIn com integração real. Falta só você gerar as credenciais (passos acima) e rodar os CLIs de auth.
 3. **Fase 2** ✅ (código) — Instagram + Facebook via Meta Graph API. Falta você gerar o app Meta e rodar o CLI de auth; Instagram também depende do domínio customizado do R2 (ver Pendências).
 4. **Fase 3** ✅ (código) — Pinterest. Falta gerar o app e, principalmente, conseguir o Standard access.
-5. **Fase 4** ✅ (código, confiança menor) — TikTok. Falta gerar o app e submeter a auditoria — comece esse passo primeiro, é o que demora mais.
+5. **Fase 4** ✅ — TikTok. Auditoria da Content Posting API **aprovada**; adapter reescrito em cima disso (privacy level real, upload em chunks, códigos de erro do TikTok mapeados). Falta o primeiro post real pra confirmar ponta a ponta.
 
 Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que falta em todos os casos é você gerar as credenciais OAuth de cada plataforma (não posso criar essas contas/apps por você) e rodar o CLI de auth correspondente.
 
@@ -113,5 +136,6 @@ Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que
 - **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker.
 - **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
 - **Sem carrossel/multi-mídia** — `instagram.ts`, `linkedin.ts` e `pinterest.ts` cobrem só um arquivo de mídia por post.
-- **TikTok tem confiança menor** — nomes de campos vieram de padrões documentados, não de teste real contra a API (não dá pra testar de verdade até a auditoria da Content Posting API aprovar). Verificar contra a doc atual antes de confiar em produção.
+- **TikTok: falta o primeiro post real** — com a auditoria aprovada dá pra testar de verdade agora. Os campos do adapter foram conferidos contra a doc atual (Direct Post, Media Transfer Guide, Get Post Status), mas nenhum post passou pela API ainda. Comece com um vídeo curto e `{"privacy_level":"SELF_ONLY"}` pra validar o fluxo sem publicar pro mundo, depois solte um público.
+- **TikTok: upload não é retomável** — se o Worker morrer no meio dos chunks, a sweep de 30min requeue o post e ele recomeça do `video/init`. Aceitável pros tamanhos normais; um vídeo de centenas de MB pode ficar preso nesse ciclo.
 - **Pinterest: upload de vídeo é a parte menos certa** — o formato exato de `upload_url`/`upload_parameters` do endpoint `/v5/media` pode variar; imagem (via `image_url`) é o caminho mais testado/documentado.
