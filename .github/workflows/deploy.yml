@@ -20,10 +20,13 @@ name: Deploy
 on:
   workflow_dispatch:
     inputs:
+      # SEM default de propósito: o GitHub troca input vazio pelo default declarado, então um campo
+      # com valor padrão não teria como ser desligado — limpar a caixa reaplicaria as mesmas
+      # migrations e o passo morreria em "duplicate column name". Migrar é a exceção; deixe vazio
+      # a menos que exista migration nova, e aí digite o nome do arquivo (ex: 0004_algo.sql).
       migrations:
-        description: 'Migrations a aplicar, separadas por vírgula (vazio = nenhuma). Aplicar duas vezes dá erro de coluna duplicada, então limpe o campo depois da primeira vez.'
+        description: 'Migrations novas a aplicar, separadas por vírgula. Vazio = nenhuma (o normal). Aplicar a mesma duas vezes dá erro.'
         required: false
-        default: '0002_post_target_retry_after.sql,0003_processing_recheck_backoff.sql'
       deploy:
         description: 'Publicar o Worker depois das migrations'
         type: boolean
@@ -36,6 +39,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,8 +75,6 @@ jobs:
       # o passo é pulado e a senha que já estiver no Worker continua valendo.
       - name: Sincronizar ADMIN_TOKEN
         if: inputs.deploy && env.ADMIN_TOKEN != ''
-        env:
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: printf '%s' "$ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN
 
       - name: Publicar o Worker
