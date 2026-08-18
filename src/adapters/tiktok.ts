@@ -1,8 +1,9 @@
 import type { ErrorClass, MediaAsset, PlatformAdapter } from '../lib/types.js';
+import type { Env } from '../lib/env.js';
 import { classifyByKnownCodes } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
-import { nowIso } from '../lib/db.js';
+import { nowIso, saveAdapterState } from '../lib/db.js';
 
 const API_BASE = 'https://open.tiktokapis.com/v2';
 
@@ -18,15 +19,27 @@ const CHUNK_BYTES = 16 * 1024 * 1024;
 const MAX_CHUNKS = 1000;
 const MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_TITLE_CHARS = 2200;
+// TikTok documents the signed upload URL as good for about an hour. 45min is that minus a margin:
+// past it a resume is abandoned and the post re-inits, which is safe precisely because a partial
+// upload never publishes anything.
+const UPLOAD_URL_TTL_MS = 45 * 60_000;
 
 interface TiktokTokens {
   access_token: string;
   refresh_token: string;
 }
 
+// Two shapes share this column. Mid-upload it carries the whole resumable transfer; once the bytes
+// are in, publish() narrows it to what checkStatus actually needs.
 interface AdapterState {
   publish_id?: string;
   creator_username?: string;
+  upload_url?: string;
+  upload_started_at?: string;
+  video_size?: number;
+  chunk_size?: number;
+  total_chunks?: number;
+  next_chunk?: number;
   [key: string]: unknown;
 }
 
@@ -102,6 +115,22 @@ function planChunks(sizeBytes: number): { chunkSize: number; totalChunks: number
   return { chunkSize, totalChunks: Math.floor(sizeBytes / chunkSize) };
 }
 
+// A publish() that died mid-transfer left its progress in adapter_state; the poller's stale sweep
+// requeues the target and we land back here. Resuming is only valid while every premise still
+// holds — same video, an upload URL that hasn't aged out, and chunks genuinely left to send.
+function resumableUpload(prior: AdapterState, sizeBytes: number): Required<
+  Pick<AdapterState, 'publish_id' | 'upload_url' | 'chunk_size' | 'total_chunks' | 'next_chunk'>
+> | null {
+  const { publish_id, upload_url, upload_started_at, chunk_size, total_chunks } = prior;
+  if (!publish_id || !upload_url || !upload_started_at) return null;
+  if (typeof chunk_size !== 'number' || typeof total_chunks !== 'number') return null;
+  if (prior.video_size !== sizeBytes) return null;
+  const next_chunk = prior.next_chunk ?? 0;
+  if (next_chunk <= 0 || next_chunk >= total_chunks) return null;
+  if (Date.now() - new Date(upload_started_at).getTime() > UPLOAD_URL_TTL_MS) return null;
+  return { publish_id, upload_url, chunk_size, total_chunks, next_chunk };
+}
+
 // The audit is approved, so PUBLIC_TO_EVERYONE is a real option now and is the sane default for a
 // scheduler. Anything explicitly requested still has to appear in creator_info's list — TikTok
 // rejects a mismatch server-side, and failing here saves the upload.
@@ -120,6 +149,48 @@ function pickPrivacyLevel(requested: string | undefined, available: string[]): s
     throw new TiktokError('privacy_level_option_mismatch', 'tiktok: creator_info returned no privacy_level_options');
   }
   return available[0];
+}
+
+// Chunks go up strictly in order, each one read out of R2 by byte range so a large video never has
+// to exist in the isolate all at once. Progress is written back after every chunk — that is what
+// makes a resume possible, and the updated_at bump it carries also tells the stale-'publishing'
+// sweep that this target is alive and must not be requeued mid-transfer.
+async function uploadChunks(
+  postTargetId: string,
+  asset: MediaAsset,
+  uploadUrl: string,
+  chunkSize: number,
+  totalChunks: number,
+  fromChunk: number,
+  state: AdapterState,
+  env: Env
+): Promise<void> {
+  for (let index = fromChunk; index < totalChunks; index++) {
+    const start = index * chunkSize;
+    const end = index === totalChunks - 1 ? asset.size_bytes - 1 : start + chunkSize - 1;
+    const part = await env.MEDIA.get(asset.storage_key, { range: { offset: start, length: end - start + 1 } });
+    if (!part) throw new Error(`tiktok: media not found in R2: ${asset.storage_key}`);
+
+    const uploadRes = await fetchWithRetry(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': asset.mime_type,
+        'Content-Range': `bytes ${start}-${end}/${asset.size_bytes}`,
+      },
+      body: await part.arrayBuffer(),
+    });
+    if (!uploadRes.ok) {
+      // Distinct from TikTok's own invalid_file_upload (a bad file, permanent): a chunk that dies
+      // mid-transfer after fetchWithRetry already exhausted its 5xx retries is worth one more shot,
+      // and now it resumes from here instead of restarting. The poller's attempt cap bounds it.
+      throw new TiktokError(
+        'chunk_upload_failed',
+        `tiktok: chunk ${index + 1}/${totalChunks} upload failed: ${uploadRes.status} ${(await uploadRes.text()).slice(0, 300)}`
+      );
+    }
+
+    await saveAdapterState(env.DB, postTargetId, { ...state, next_chunk: index + 1 });
+  }
 }
 
 export const tiktokAdapter: PlatformAdapter = {
@@ -205,6 +276,29 @@ export const tiktokAdapter: PlatformAdapter = {
       'Content-Type': 'application/json; charset=UTF-8',
     };
 
+    const asset = media[0];
+    const prior = target.adapter_state as AdapterState;
+
+    // Every chunk already went up on an earlier run and only the bookkeeping was lost. TikTok is
+    // holding a complete video against that publish_id, so the one thing we must not do is init a
+    // second upload — that publishes the same video twice. Hand it to checkStatus instead.
+    if (prior.publish_id && prior.total_chunks !== undefined && (prior.next_chunk ?? 0) >= prior.total_chunks) {
+      return {
+        state: 'processing',
+        adapterState: { publish_id: prior.publish_id, creator_username: prior.creator_username } satisfies AdapterState,
+      };
+    }
+
+    const resume = resumableUpload(prior, asset.size_bytes);
+    if (resume) {
+      console.log(`[tiktok] resuming upload ${resume.publish_id} at chunk ${resume.next_chunk + 1}/${resume.total_chunks}`);
+      await uploadChunks(target.id, asset, resume.upload_url, resume.chunk_size, resume.total_chunks, resume.next_chunk, prior, env);
+      return {
+        state: 'processing',
+        adapterState: { publish_id: resume.publish_id, creator_username: prior.creator_username } satisfies AdapterState,
+      };
+    }
+
     // Mandatory pre-call: it is the only source of truth for which privacy levels this creator can
     // use, which interactions they've turned off account-wide, and how long a video they may post.
     const creator = requireData<CreatorInfo>(
@@ -216,7 +310,6 @@ export const tiktokAdapter: PlatformAdapter = {
     );
 
     const options = target.options as TiktokOptions;
-    const asset = media[0];
 
     if (
       creator.max_video_post_duration_sec &&
@@ -271,32 +364,21 @@ export const tiktokAdapter: PlatformAdapter = {
       'video/init'
     );
 
-    // Chunks go up strictly in order, each one read out of R2 by byte range so a large video never
-    // has to exist in the isolate all at once.
-    for (let index = 0; index < totalChunks; index++) {
-      const start = index * chunkSize;
-      const end = index === totalChunks - 1 ? asset.size_bytes - 1 : start + chunkSize - 1;
-      const part = await env.MEDIA.get(asset.storage_key, { range: { offset: start, length: end - start + 1 } });
-      if (!part) throw new Error(`tiktok: media not found in R2: ${asset.storage_key}`);
+    // Checkpoint before the first byte moves: from here on the upload is resumable, and a crash
+    // costs the remaining chunks rather than the whole transfer.
+    const uploadState: AdapterState = {
+      publish_id: init.publish_id,
+      creator_username: creator.creator_username,
+      upload_url: init.upload_url,
+      upload_started_at: nowIso(),
+      video_size: asset.size_bytes,
+      chunk_size: chunkSize,
+      total_chunks: totalChunks,
+      next_chunk: 0,
+    };
+    await saveAdapterState(env.DB, target.id, uploadState);
 
-      const uploadRes = await fetchWithRetry(init.upload_url, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': asset.mime_type,
-          'Content-Range': `bytes ${start}-${end}/${asset.size_bytes}`,
-        },
-        body: await part.arrayBuffer(),
-      });
-      if (!uploadRes.ok) {
-        // Distinct from TikTok's own invalid_file_upload (a bad file, permanent): a chunk that
-        // dies mid-transfer after fetchWithRetry already exhausted its 5xx retries is worth one
-        // more shot from the top, so it stays retryable and the poller's attempt cap bounds it.
-        throw new TiktokError(
-          'chunk_upload_failed',
-          `tiktok: chunk ${index + 1}/${totalChunks} upload failed: ${uploadRes.status} ${(await uploadRes.text()).slice(0, 300)}`
-        );
-      }
-    }
+    await uploadChunks(target.id, asset, init.upload_url, chunkSize, totalChunks, 0, uploadState, env);
 
     return {
       state: 'processing',

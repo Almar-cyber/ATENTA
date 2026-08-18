@@ -97,6 +97,12 @@ A legenda vai em `post_info.title` (limite de 2200 caracteres, truncada se passa
 
 `video/init` → `PUT` de cada chunk → poll de `status/fetch` até `PUBLISH_COMPLETE` (o poller cuida disso na etapa "processing", com timeout de 6h). Chunks seguem as regras do Media Transfer Guide: 5MB–64MB cada, o último absorve o resto, `total_chunk_count = floor(video_size / chunk_size)`, máximo de 1000. Vídeo de até 64MB sobe inteiro num chunk só; acima disso o adapter fatia em 16MB e lê cada pedaço do R2 por byte-range, então um vídeo grande nunca fica inteiro na memória do Worker (limite de 128MB por isolate).
 
+**O upload é retomável.** O progresso (`publish_id`, `upload_url`, chunk atual) é gravado em `post_targets.adapter_state` antes do primeiro byte e depois de cada chunk. Se o Worker morrer no meio, a sweep de 30min requeue o post e o adapter continua do chunk seguinte, no mesmo `publish_id`. Três guardas em volta disso:
+
+- se todos os chunks já subiram e só a escrita final se perdeu, o adapter **não** faz um novo `video/init` — ele devolve o `publish_id` antigo pro `status/fetch`, senão o mesmo vídeo seria publicado duas vezes;
+- se a `upload_url` já passou de 45min (a assinatura do TikTok vale ~1h), a retomada é abandonada e o post recomeça — seguro porque upload incompleto nunca publica nada;
+- enquanto os chunks estão subindo, cada checkpoint atualiza o `updated_at`, então a sweep de `publishing` travado não arranca um upload que está vivo.
+
 ## Enfileirando um post
 
 ```bash
@@ -123,6 +129,7 @@ O que **não** atrasa a primeira publicação:
 - `retry_after` só é preenchido depois de uma falha — post novo tem `null` e nunca espera por causa dele.
 - Rodadas sobrepostas (um upload de vídeo longo atravessa o próximo tick) são seguras: tanto o claim do post (`queued` → `publishing`) quanto o claim do refresh de token são atômicos, então nada publica duas vezes nem gira o refresh token duas vezes em paralelo.
 - Backoff de erro retryable agora começa em 1min e dobra (1, 2, 4, 8, 15min de teto) em vez de 15min fixos — um erro transitório custa um tick, não um quarto de hora. Erro de `quota` continua esperando 24h de propósito.
+- O backoff do recheck de `processing` só começa depois de 5min: nos primeiros 5min o post é consultado em todo tick, então ele aparece como publicado assim que a plataforma termina. Depois disso abre pra 5min e, passados 30min, pra 15min — o que corta o pior caso de 6h de 360 consultas pra ~30 sem atrasar o caso normal.
 
 ## Rodando localmente
 
@@ -137,6 +144,7 @@ npm run deploy   # publica de verdade (ativa o Cron Trigger real)
 
 ```bash
 wrangler d1 execute social-scheduler --remote --file=migrations/0002_post_target_retry_after.sql
+wrangler d1 execute social-scheduler --remote --file=migrations/0003_processing_recheck_backoff.sql
 npm run deploy
 ```
 
@@ -154,10 +162,8 @@ Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que
 
 - **Domínio customizado pro R2** — falta configurar (precisa de um dos seus domínios na Cloudflare). Bloqueia Instagram, posts com mídia do Facebook e imagens/vídeos do Pinterest (todos buscam a mídia por URL pública; YouTube/LinkedIn/TikTok recebem os bytes direto, não precisam disso).
 - **Alerta de falha** — Cron Triggers não têm o e-mail automático que o GitHub Actions teria. Falhas só aparecem em `wrangler tail` / dashboard. TODO em `src/worker.ts` (`runPoller`).
-- **Recheck de `processing` não tem backoff** — com o cron de 1min, um post preso em `processing` é consultado 1×/min até resolver ou estourar o timeout de 6h (360 chamadas no pior caso). Nenhuma plataforma reclamou nesse volume, mas se aparecer rate limit é aqui que se coloca um intervalo crescente.
-- **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker.
+- **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker. O TikTok já usa o padrão que dá pra copiar aqui: chunk + `saveAdapterState` a cada pedaço (`src/lib/db.ts`).
 - **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
 - **Sem carrossel/multi-mídia** — `instagram.ts`, `linkedin.ts` e `pinterest.ts` cobrem só um arquivo de mídia por post.
 - **TikTok: falta o primeiro post real** — com a auditoria aprovada dá pra testar de verdade agora. Os campos do adapter foram conferidos contra a doc atual (Direct Post, Media Transfer Guide, Get Post Status), mas nenhum post passou pela API ainda. Comece com um vídeo curto e `{"privacy_level":"SELF_ONLY"}` pra validar o fluxo sem publicar pro mundo, depois solte um público.
-- **TikTok: upload não é retomável** — se o Worker morrer no meio dos chunks, a sweep de 30min requeue o post e ele recomeça do `video/init`. Aceitável pros tamanhos normais; um vídeo de centenas de MB pode ficar preso nesse ciclo.
 - **Pinterest: upload de vídeo é a parte menos certa** — o formato exato de `upload_url`/`upload_parameters` do endpoint `/v5/media` pode variar; imagem (via `image_url`) é o caminho mais testado/documentado.

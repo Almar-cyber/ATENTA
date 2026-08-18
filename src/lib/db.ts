@@ -4,6 +4,22 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Checkpoint an in-flight adapter_state mid-publish, so an upload that spans several cron runs can
+ * pick up where it left off instead of starting over. Bumping updated_at is part of the point: it
+ * keeps the stale-'publishing' sweep from yanking a target that is actively uploading.
+ */
+export async function saveAdapterState(
+  db: D1Database,
+  postTargetId: string,
+  state: Record<string, unknown>
+): Promise<void> {
+  await db
+    .prepare('update post_targets set adapter_state = ?, updated_at = ? where id = ?')
+    .bind(JSON.stringify(state), nowIso(), postTargetId)
+    .run();
+}
+
 interface AccountRow {
   id: string;
   platform: string;
@@ -47,6 +63,7 @@ interface PostTargetRow {
   external_url: string | null;
   attempt_count: number;
   last_error: string | null;
+  processing_since: string | null;
   published_at: string | null;
   updated_at: string;
 }
@@ -65,6 +82,7 @@ export function rowToPostTarget(row: PostTargetRow): PostTarget {
     external_url: row.external_url,
     attempt_count: row.attempt_count,
     last_error: row.last_error,
+    processing_since: row.processing_since,
     published_at: row.published_at,
     updated_at: row.updated_at,
   };

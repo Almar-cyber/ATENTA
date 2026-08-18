@@ -54,6 +54,8 @@ export interface PostTarget {
   external_url: string | null;
   attempt_count: number;
   last_error: string | null;
+  /** Set once when the target enters 'processing'; the recheck backoff and the 6h timeout are both measured from it. */
+  processing_since: string | null;
   published_at: string | null;
   updated_at: string;
 }

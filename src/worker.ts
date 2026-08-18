@@ -111,10 +111,11 @@ async function stepRecheckProcessing(env: Env): Promise<void> {
     `select pt.* from post_targets pt
      join accounts a on a.id = pt.account_id
      where pt.status = 'processing' and a.status = 'active'
-     order by pt.updated_at asc
+       and (pt.next_check_after is null or pt.next_check_after <= ?)
+     order by pt.next_check_after asc
      limit ?`
   )
-    .bind(PROCESSING_RECHECK_BATCH_SIZE)
+    .bind(nowIso(), PROCESSING_RECHECK_BATCH_SIZE)
     .all<any>();
 
   for (const row of results ?? []) {
@@ -138,10 +139,12 @@ async function stepSweeps(env: Env): Promise<void> {
     .bind(nowIso(), publishingCutoff)
     .run();
 
+  // coalesce(): every recheck bumps updated_at, so measuring the timeout from it meant the row
+  // looked fresh again a minute later and the 6h deadline never actually arrived.
   const processingCutoff = new Date(Date.now() - PROCESSING_TIMEOUT_HOURS * 3_600_000).toISOString();
   await env.DB.prepare(
     `update post_targets set status = 'failed', last_error = 'timed out waiting on platform processing', updated_at = ?
-     where status = 'processing' and updated_at < ?`
+     where status = 'processing' and coalesce(processing_since, updated_at) < ?`
   )
     .bind(nowIso(), processingCutoff)
     .run();
@@ -157,8 +160,11 @@ async function claimTokenRefresh(env: Env, accountId: string, seenUpdatedAt: str
 }
 
 async function claim(env: Env, id: string, fromStatus: string, toStatus: string): Promise<boolean> {
+  // The processing clocks are cleared on the way in: a requeued target that publishes again starts
+  // a brand new processing phase, and a leftover processing_since would time it out immediately.
   const { results } = await env.DB.prepare(
-    `update post_targets set status = ?, updated_at = ? where id = ? and status = ? returning id`
+    `update post_targets set status = ?, processing_since = null, next_check_after = null, updated_at = ?
+     where id = ? and status = ? returning id`
   )
     .bind(toStatus, nowIso(), id, fromStatus)
     .all<{ id: string }>();
@@ -195,13 +201,36 @@ async function applyPublishResult(env: Env, target: PostTarget, result: PublishR
   }
 
   if (result.state === 'processing') {
-    await env.DB.prepare(`update post_targets set status = 'processing', adapter_state = ?, updated_at = ? where id = ?`)
-      .bind(JSON.stringify(result.adapterState ?? target.adapter_state), ts, target.id)
+    const processingSince = target.processing_since ?? ts;
+    await env.DB.prepare(
+      `update post_targets set status = 'processing', adapter_state = ?, processing_since = ?, next_check_after = ?, updated_at = ?
+       where id = ?`
+    )
+      .bind(
+        JSON.stringify(result.adapterState ?? target.adapter_state),
+        processingSince,
+        new Date(Date.now() + nextRecheckDelayMs(processingSince)).toISOString(),
+        ts,
+        target.id
+      )
       .run();
     return;
   }
 
   await handleFailure(env, target, result.class, result.message);
+}
+
+// Platforms resolve a normal upload in well under a minute, so the first few minutes are polled at
+// full cron speed — the point of the fast cron is that a post shows as published as soon as it is.
+// Only once a post has clearly stalled does the interval open up, which caps a 6h worst case at
+// ~30 rechecks instead of 360.
+function nextRecheckDelayMs(processingSince: string): number {
+  const ageMs = Date.now() - new Date(processingSince).getTime();
+  // Zero, not 60s: the cron tick is already the floor, and asking for "now + 1min" would land just
+  // after the next tick and cost the post a whole extra minute of showing as unpublished.
+  if (ageMs < 5 * 60_000) return 0;
+  if (ageMs < 30 * 60_000) return 5 * 60_000;
+  return 15 * 60_000;
 }
 
 async function handlePublishError(env: Env, target: PostTarget, adapter: PlatformAdapter, err: unknown): Promise<void> {
