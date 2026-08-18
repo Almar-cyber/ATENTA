@@ -21,4 +21,11 @@ export interface Env {
 
   TIKTOK_CLIENT_KEY: string;
   TIKTOK_CLIENT_SECRET: string;
+
+  /** Shared secret gating /admin — the posting UI writes to D1 and spends platform quota. */
+  ADMIN_TOKEN: string;
+
+  /** Public base URL of the R2 custom domain, e.g. https://scheduler-media.omangue.co. Optional:
+   *  only Instagram, Facebook and Pinterest fetch media by URL. Set as a wrangler var, not a secret. */
+  MEDIA_PUBLIC_BASE?: string;
 }

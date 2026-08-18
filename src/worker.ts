@@ -1,4 +1,5 @@
 import { adapters } from './adapters/index.js';
+import { handleAdmin } from './admin.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { encryptJSON } from './lib/crypto.js';
 import { fetchWithRetry } from './lib/http.js';
@@ -23,6 +24,10 @@ export default {
     const match = /^\/oauth\/callback\/(linkedin|meta|pinterest|tiktok)$/.exec(url.pathname);
     if (match) {
       return handleOAuthCallback(match[1] as 'linkedin' | 'meta' | 'pinterest' | 'tiktok', url, env);
+    }
+    // The phone-side posting UI — upload, caption, schedule (see admin.ts). Token-gated.
+    if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+      return handleAdmin(request, url, env);
     }
     return new Response('not found', { status: 404 });
   },
