@@ -170,7 +170,7 @@ Os dois passos acima precisam de credencial da Cloudflare, o que normalmente que
 
 Uma vez só, antes de usar: em **Settings → Secrets and variables → Actions**, criar `CLOUDFLARE_API_TOKEN` (token com Workers Scripts:Edit, D1:Edit e Workers R2 Storage:Edit) e `CLOUDFLARE_ACCOUNT_ID`. E o workflow só aparece na aba Actions depois de estar na branch padrão.
 
-Aplicar a mesma migration duas vezes dá erro de coluna duplicada — depois da primeira execução, limpe o campo de migrations e deixe só o deploy marcado. Isso **não** é o poller: o agendamento continua no Cron Trigger do Worker, e o workflow só roda quando você aperta o botão.
+O campo de migrations vem **vazio** e é assim que deve ficar no dia a dia: só preencha quando existir migration nova, com o nome do arquivo. Aplicar a mesma duas vezes dá erro de coluna duplicada. (O campo não tem valor padrão de propósito — o GitHub troca input vazio pelo default declarado, então um padrão preenchido seria impossível de desligar.) Isso **não** é o poller: o agendamento continua no Cron Trigger do Worker, e o workflow só roda quando você aperta o botão.
 
 ## Fases
 
