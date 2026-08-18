@@ -9,6 +9,7 @@ interface Row {
   display_name: string;
   status: string;
   attempt_count: number;
+  retry_after: string | null;
   last_error: string | null;
   external_url: string | null;
 }
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
   const statusFilter = args.status;
 
   const rows = await d1Query<Row>(
-    `select sp.scheduled_for, pt.platform, a.display_name, pt.status, pt.attempt_count, pt.last_error, pt.external_url
+    `select sp.scheduled_for, pt.platform, a.display_name, pt.status, pt.attempt_count, pt.retry_after, pt.last_error, pt.external_url
      from post_targets pt
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      join accounts a on a.id = pt.account_id
@@ -48,6 +49,8 @@ async function main(): Promise<void> {
       conta: r.display_name,
       status: r.status,
       tentativas: r.attempt_count,
+      // Only a target serving a backoff has this — a queued row with an empty column is due now.
+      proxima_tentativa: r.retry_after ?? '',
       erro: r.last_error ?? '',
       link: r.external_url ?? '',
     }))

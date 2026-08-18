@@ -3,7 +3,7 @@
 Agendador pessoal de posts para YouTube, LinkedIn, Instagram, Facebook, Pinterest e TikTok.
 Custo alvo: $0/mês.
 
-Live: `https://social-scheduler.zona21.workers.dev` — cron rodando a cada 10min.
+Live: `https://social-scheduler.zona21.workers.dev` — cron rodando **a cada 1min**.
 Repo: https://github.com/Almar-cyber/social-scheduler
 
 ## Stack
@@ -112,11 +112,32 @@ wrangler d1 execute social-scheduler --remote --command "insert into media_asset
 wrangler d1 execute social-scheduler --remote --command "insert into post_target_media (post_target_id, media_asset_id) values ('...', '...')"
 ```
 
+## Latência de publicação
+
+O cron **é** o atraso: um post só sai no tick seguinte ao `scheduled_for` dele. Estava em `*/10`, ou seja 0–10min de espera (5min na média) — foi pra `* * * * *`, então o pior caso é ~60s. Um minuto é a granularidade mínima do Cron Trigger da Cloudflare; abaixo disso só saindo de cron pra um alarme de Durable Object por post, o que sai do free tier de $0.
+
+Continua $0/mês: 1440 invocações/dia contra as 100k requests/dia do plano free, e as leituras do poller são poucas e indexadas.
+
+O que **não** atrasa a primeira publicação:
+
+- `retry_after` só é preenchido depois de uma falha — post novo tem `null` e nunca espera por causa dele.
+- Rodadas sobrepostas (um upload de vídeo longo atravessa o próximo tick) são seguras: tanto o claim do post (`queued` → `publishing`) quanto o claim do refresh de token são atômicos, então nada publica duas vezes nem gira o refresh token duas vezes em paralelo.
+- Backoff de erro retryable agora começa em 1min e dobra (1, 2, 4, 8, 15min de teto) em vez de 15min fixos — um erro transitório custa um tick, não um quarto de hora. Erro de `quota` continua esperando 24h de propósito.
+
 ## Rodando localmente
 
 ```bash
 npm run dev      # wrangler dev — Worker local (D1 local + cron testável via /__scheduled)
 npm run deploy   # publica de verdade (ativa o Cron Trigger real)
+```
+
+### Migrations pendentes
+
+**Rode a migration antes do deploy** — o poller passou a consultar `post_targets.retry_after`, então um Worker novo contra um banco velho quebra em toda rodada:
+
+```bash
+wrangler d1 execute social-scheduler --remote --file=migrations/0002_post_target_retry_after.sql
+npm run deploy
 ```
 
 ## Fases
@@ -133,6 +154,7 @@ Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que
 
 - **Domínio customizado pro R2** — falta configurar (precisa de um dos seus domínios na Cloudflare). Bloqueia Instagram, posts com mídia do Facebook e imagens/vídeos do Pinterest (todos buscam a mídia por URL pública; YouTube/LinkedIn/TikTok recebem os bytes direto, não precisam disso).
 - **Alerta de falha** — Cron Triggers não têm o e-mail automático que o GitHub Actions teria. Falhas só aparecem em `wrangler tail` / dashboard. TODO em `src/worker.ts` (`runPoller`).
+- **Recheck de `processing` não tem backoff** — com o cron de 1min, um post preso em `processing` é consultado 1×/min até resolver ou estourar o timeout de 6h (360 chamadas no pior caso). Nenhuma plataforma reclamou nesse volume, mas se aparecer rate limit é aqui que se coloca um intervalo crescente.
 - **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker.
 - **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
 - **Sem carrossel/multi-mídia** — `instagram.ts`, `linkedin.ts` e `pinterest.ts` cobrem só um arquivo de mídia por post.

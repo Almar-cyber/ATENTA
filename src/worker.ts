@@ -10,6 +10,8 @@ const PROCESSING_RECHECK_BATCH_SIZE = 10;
 const PUBLISHING_STALE_MINUTES = 30;
 const PROCESSING_TIMEOUT_HOURS = 6;
 const MAX_ATTEMPTS = 5;
+const RETRY_BASE_DELAY_MS = 60_000;
+const RETRY_MAX_DELAY_MS = 15 * 60_000;
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -45,6 +47,13 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
     const account = rowToAccount(row);
     const adapter = adapters[account.platform];
     if (!adapter.needsRefresh(account)) continue;
+    // At a one-minute cron, a run that's still uploading a video overlaps the next two or three
+    // runs — and TikTok (like Google) rotates the refresh token on use, so two refreshes racing on
+    // the same account would leave one of them holding a token the platform has already revoked,
+    // bricking it until a manual reauth. Claim the refresh the same way posts are claimed: an
+    // atomic compare-and-set on updated_at, where only the run that still sees the row as it read
+    // it is allowed to proceed.
+    if (!(await claimTokenRefresh(env, account.id, row.updated_at))) continue;
     try {
       await adapter.ensureFreshToken(account, env);
     } catch (err) {
@@ -64,10 +73,11 @@ async function stepClaimAndPublishDue(env: Env): Promise<void> {
      join accounts a on a.id = pt.account_id
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      where pt.status = 'queued' and sp.scheduled_for <= ? and a.status = 'active'
+       and (pt.retry_after is null or pt.retry_after <= ?)
      order by sp.scheduled_for asc
      limit ?`
   )
-    .bind(nowIso(), CLAIM_BATCH_SIZE)
+    .bind(nowIso(), nowIso(), CLAIM_BATCH_SIZE)
     .all<any>();
 
   for (const row of results ?? []) {
@@ -137,6 +147,15 @@ async function stepSweeps(env: Env): Promise<void> {
     .run();
 }
 
+async function claimTokenRefresh(env: Env, accountId: string, seenUpdatedAt: string): Promise<boolean> {
+  const { results } = await env.DB.prepare(
+    `update accounts set updated_at = ? where id = ? and updated_at = ? returning id`
+  )
+    .bind(nowIso(), accountId, seenUpdatedAt)
+    .all<{ id: string }>();
+  return (results?.length ?? 0) > 0;
+}
+
 async function claim(env: Env, id: string, fromStatus: string, toStatus: string): Promise<boolean> {
   const { results } = await env.DB.prepare(
     `update post_targets set status = ?, updated_at = ? where id = ? and status = ? returning id`
@@ -204,7 +223,11 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     await env.DB.prepare(`update accounts set status = 'needs_reauth', updated_at = ? where id = ?`)
       .bind(ts, target.account_id)
       .run();
-    await env.DB.prepare(`update post_targets set status = 'queued', last_error = ?, updated_at = ? where id = ?`)
+    // retry_after is cleared, not preserved: once the account is re-authed the post should go out
+    // on the next tick, not sit out a backoff it inherited from an unrelated earlier failure.
+    await env.DB.prepare(
+      `update post_targets set status = 'queued', last_error = ?, retry_after = null, updated_at = ? where id = ?`
+    )
       .bind(message, ts, target.id)
       .run();
     return;
@@ -233,10 +256,16 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     return;
   }
 
+  // Backoff is exponential from one minute rather than a flat 15: a transient blip should cost the
+  // post a single cron tick, not a quarter of an hour, while a genuinely sick platform still backs
+  // off (1, 2, 4, 8 min...) instead of being hammered.
   // TODO (per adapter, Phase 1+): use the platform's real quota-reset boundary instead of a flat 24h.
-  const delayMs = errorClass === 'quota' ? 24 * 3_600_000 : 15 * 60_000;
+  const delayMs =
+    errorClass === 'quota'
+      ? 24 * 3_600_000
+      : Math.min(RETRY_BASE_DELAY_MS * 2 ** (attemptCount - 1), RETRY_MAX_DELAY_MS);
   await env.DB.prepare(
-    `update post_targets set status = 'queued', last_error = ?, attempt_count = ?, scheduled_for = ?, updated_at = ? where id = ?`
+    `update post_targets set status = 'queued', last_error = ?, attempt_count = ?, retry_after = ?, updated_at = ? where id = ?`
   )
     .bind(message, attemptCount, new Date(Date.now() + delayMs).toISOString(), ts, target.id)
     .run();
