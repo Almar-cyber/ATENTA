@@ -103,7 +103,23 @@ A legenda vai em `post_info.title` (limite de 2200 caracteres, truncada se passa
 - se a `upload_url` já passou de 45min (a assinatura do TikTok vale ~1h), a retomada é abandonada e o post recomeça — seguro porque upload incompleto nunca publica nada;
 - enquanto os chunks estão subindo, cada checkpoint atualiza o `updated_at`, então a sweep de `publishing` travado não arranca um upload que está vivo.
 
-## Enfileirando um post
+## Postando pelo celular (`/admin`)
+
+`https://social-scheduler.zona21.workers.dev/admin?key=SUA_SENHA` — página servida pelo próprio Worker: escolhe o arquivo, escreve a legenda, marca as contas, define a hora e pronto. Embaixo do formulário aparece a fila com o status de cada post.
+
+A chave só precisa ir na URL uma vez: ela vira um cookie `HttpOnly` (90 dias, restrito a `/admin`) e a URL é limpa por redirect, pra senha não ficar no histórico do navegador. Salve `/admin` nos favoritos depois disso.
+
+```bash
+wrangler secret put ADMIN_TOKEN     # openssl rand -base64 24
+```
+
+Sem terminal: crie o secret `ADMIN_TOKEN` no GitHub (mesmo lugar dos secrets da Cloudflare) e rode o workflow de Deploy — ele grava a senha no Worker.
+
+Como funciona por dentro: o arquivo sobe por um `PUT /admin/media` que faz stream direto pro R2 (nada de multipart, então um vídeo grande não precisa caber na memória do Worker), e o `POST /admin/enqueue` cria post, targets e o vínculo da mídia num `D1.batch` só — um post meio criado nunca chega a ser reivindicado pelo poller.
+
+Limites: 100MB por upload (teto de corpo de requisição do plano free da Cloudflare) e uma mídia por post. Um post pode ir pra várias contas de uma vez.
+
+## Enfileirando um post pelo terminal
 
 ```bash
 npm run enqueue -- --platform=youtube --account="Meu Canal" --scheduled_for=2026-08-01T12:00:00Z --caption="..."
@@ -173,5 +189,6 @@ Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que
 - **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker. O TikTok já usa o padrão que dá pra copiar aqui: chunk + `saveAdapterState` a cada pedaço (`src/lib/db.ts`).
 - **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
 - **Sem carrossel/multi-mídia** — `instagram.ts`, `linkedin.ts` e `pinterest.ts` cobrem só um arquivo de mídia por post.
+- **`/admin` não mostra progresso de upload** — em vídeo grande no 4G a tela fica em "Enviando..." sem barra até terminar. Falta trocar o `fetch` por `XMLHttpRequest`, que é o único jeito de ter evento de progresso de upload no navegador.
 - **TikTok: falta o primeiro post real** — com a auditoria aprovada dá pra testar de verdade agora. Os campos do adapter foram conferidos contra a doc atual (Direct Post, Media Transfer Guide, Get Post Status), mas nenhum post passou pela API ainda. Comece com um vídeo curto e `{"privacy_level":"SELF_ONLY"}` pra validar o fluxo sem publicar pro mundo, depois solte um público.
 - **Pinterest: upload de vídeo é a parte menos certa** — o formato exato de `upload_url`/`upload_parameters` do endpoint `/v5/media` pode variar; imagem (via `image_url`) é o caminho mais testado/documentado.

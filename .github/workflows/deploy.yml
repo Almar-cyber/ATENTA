@@ -11,6 +11,7 @@
 # Segredos necessários no repositório (Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN   — token com Workers Scripts:Edit, D1:Edit e Workers R2 Storage:Edit
 #   CLOUDFLARE_ACCOUNT_ID  — o Account ID que aparece na home do dashboard da Cloudflare
+#   ADMIN_TOKEN            — (opcional) senha da página /admin; se presente, é gravada no Worker
 #
 # Os secrets do Worker (TOKEN_ENCRYPTION_KEY, chaves de OAuth) não entram aqui: já estão gravados
 # no Worker e `wrangler deploy` não os toca.
@@ -64,6 +65,15 @@ jobs:
             echo "--- aplicando $file"
             npx wrangler d1 execute social-scheduler --remote --file="migrations/$file"
           done
+
+      # A senha do /admin vive como secret do Worker. Definir por aqui é o que permite trocá-la sem
+      # terminal: basta atualizar o secret ADMIN_TOKEN no GitHub e rodar o workflow. Sem o secret,
+      # o passo é pulado e a senha que já estiver no Worker continua valendo.
+      - name: Sincronizar ADMIN_TOKEN
+        if: inputs.deploy && env.ADMIN_TOKEN != ''
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: printf '%s' "$ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN
 
       - name: Publicar o Worker
         if: inputs.deploy

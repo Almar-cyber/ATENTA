@@ -30,3 +30,9 @@ crons = ["* * * * *"]
 #   META_APP_ID / META_APP_SECRET
 #   PINTEREST_CLIENT_ID / PINTEREST_CLIENT_SECRET
 #   TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET
+#   ADMIN_TOKEN            senha da página /admin (openssl rand -base64 24)
+
+# Domínio público do R2, quando existir — só Instagram/Facebook/Pinterest precisam dele. Não é
+# secret, é configuração: descomente e preencha depois de configurar o domínio customizado.
+# [vars]
+# MEDIA_PUBLIC_BASE = "https://scheduler-media.omangue.co"
