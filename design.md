@@ -83,6 +83,10 @@ Regras que valem a pena não esquecer:
 - **Claim atômico**: `UPDATE ... WHERE status='queued'` garante que duas execuções do cron não
   publiquem o mesmo destino.
 - **Sweep de travados**: `publishing` parado além do limite volta pra `queued`.
+- **Recheck com cadência**: quem está em `processing` não é reconsultado a cada tique. `updated_at`
+  é congelado na entrada (nunca bumpado por um recheck), então ele é a idade do processamento, e
+  `next_check_after` diz quando perguntar de novo: sem espera nos 5 primeiros minutos, 5min até os
+  30, 15min depois. É o que transforma o pior caso de 6h em ~30 chamadas à plataforma em vez de 360.
 
 ## 4. Formato do post
 

@@ -1,0 +1,84 @@
+# Deploy e migrations pelo navegador — inclusive do celular.
+#
+# Por que existe: os passos de publicar (`wrangler deploy`) e aplicar migration no D1 exigem um
+# terminal com credencial da Cloudflare. Aqui eles viram um botão em Actions → Deploy → "Run
+# workflow", que é a única forma de fazer isso de um telefone.
+#
+# Isto NÃO é o poller. O agendamento continua no Cron Trigger do Worker (wrangler.toml); este
+# workflow só roda quando você aperta o botão, então não encosta nos minutos gratuitos do Actions —
+# que foi o motivo de o projeto ter saído do GitHub Actions em primeiro lugar.
+#
+# Segredos necessários no repositório (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — token com Workers Scripts:Edit, D1:Edit e Workers R2 Storage:Edit
+#   CLOUDFLARE_ACCOUNT_ID  — o Account ID que aparece na home do dashboard da Cloudflare
+#
+# Os secrets do Worker (TOKEN_ENCRYPTION_KEY, chaves de OAuth) não entram aqui: já estão gravados
+# no Worker e `wrangler deploy` não os toca.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      # SEM default de propósito: o GitHub troca input vazio pelo default declarado, então um campo
+      # com valor padrão não teria como ser desligado — limpar a caixa reaplicaria as mesmas
+      # migrations e o passo morreria em "duplicate column name". Migrar é a exceção; deixe vazio
+      # a menos que exista migration nova, e aí digite o nome do arquivo (ex: 0004_algo.sql).
+      migrations:
+        description: 'Migrations novas a aplicar, separadas por vírgula. Vazio = nenhuma (o normal). Aplicar a mesma duas vezes dá erro.'
+        required: false
+      deploy:
+        description: 'Publicar o Worker depois das migrations'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # O dashboard é um app Vite em web/, com node_modules próprio. Sem este passo o build do
+      # front quebra no runner, mesmo com o npm ci acima tendo passado.
+      - run: npm run web:install
+
+      # Barato, e evita publicar um Worker que nem compila.
+      - run: npm run typecheck
+
+      # O mesmo pro front: um erro de tipo em web/ só aparece aqui, porque o typecheck acima é só
+      # do Worker.
+      - run: npm --prefix web exec tsc -- -b --noEmit
+
+      # Ordem importa: o Worker novo consulta colunas que só existem depois da migration, então
+      # migrar sempre vem antes de publicar.
+      - name: Aplicar migrations
+        if: inputs.migrations != ''
+        run: |
+          IFS=',' read -ra FILES <<< "${{ inputs.migrations }}"
+          for file in "${FILES[@]}"; do
+            file="$(echo "$file" | xargs)"
+            [ -z "$file" ] && continue
+            if [ ! -f "migrations/$file" ]; then
+              echo "::error::migrations/$file não existe"
+              exit 1
+            fi
+            echo "--- aplicando $file"
+            npx wrangler d1 execute social-scheduler --remote --file="migrations/$file"
+          done
+
+      # `npm run deploy`, e não `wrangler deploy` direto: o Worker serve o dashboard pelos static
+      # assets (dist/), então publicar sem buildar o front primeiro sobe o Worker novo com a
+      # interface antiga, ou com nenhuma.
+      - name: Publicar o Worker
+        if: inputs.deploy
+        run: npm run deploy

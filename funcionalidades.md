@@ -31,7 +31,7 @@ Legenda de estado:
 | LinkedIn | `src/adapters/linkedin.ts` | ✅ |
 | Instagram (post, reel, story) | `src/adapters/instagram.ts` | ✅ |
 | Facebook | `src/adapters/facebook.ts` | ✅ |
-| TikTok | `src/adapters/tiktok.ts` | ✅ desde a correção do upload em partes |
+| TikTok | `src/adapters/tiktok.ts` | ✅ desde a correção do upload em partes. Publica público desde 18/08/2026 |
 | Pinterest | `src/adapters/pinterest.ts` | 🚧 **sem credencial em produção** (ver §6) |
 | Carrossel (IG, FB, LinkedIn, Pinterest) | os quatro adapters | ⚠️ escrito a partir da doc, **nenhum publicado de verdade** |
 | Vários Stories seguidos (1 post por arquivo, 1min de intervalo) | `src/api.ts` (`createPost`) | ✅ |
@@ -63,7 +63,7 @@ promessa de "falhar na criação, não na publicação".
 | Coleta com cadência crescente (1h, 6h, 1d, 7d) | `src/metrics/cadence.ts` | ✅ |
 | Instagram | `src/metrics/instagram.ts` | ✅ |
 | YouTube | `src/metrics/youtube.ts` | ✅ |
-| TikTok | `src/metrics/tiktok.ts` | ⚠️ só enxerga vídeo público; enquanto a auditoria não passa, os posts saem `SELF_ONLY` e a consulta volta vazia |
+| TikTok | `src/metrics/tiktok.ts` | ⚠️ só enxerga vídeo público. Com a auditoria aprovada (18/08/2026) os posts passaram a sair `PUBLIC_TO_EVERYONE`, então a consulta deve responder. Ainda não conferido contra um post real |
 | Facebook | `src/metrics/facebook.ts` | 🚧 curtidas/comentários vêm dos campos do post; **alcance e demografia devolvem 403** até a Meta aprovar |
 | "Quem comenta com você" | `post_comments`, migrações 0015 e 0016 | ✅ |
 | Insights por assunto (pilar) | `InsightsView.tsx` | ✅ |
@@ -116,8 +116,7 @@ enviada à Meta diz que a Cloudflare é a única operadora. Custo: ~28 Neurons p
 | Lacuna | Quem destrava | Consequência hoje |
 | --- | --- | --- |
 | Alcance e demografia do Facebook | App Review da Meta | os cards de alcance ficam vazios pra Páginas |
-| TikTok publica só pra si (`SELF_ONLY`) | auditoria da Content Posting API | nenhum post do TikTok é público, e a métrica dele volta vazia |
-| TikTok não publica foto | mesma auditoria | `PLATFORM_REQUIRES_MEDIA.tiktok: 'vídeo'` continua no front |
+| TikTok não publica foto | trabalho nosso, não mais auditoria | com a auditoria aprovada o Photo Mode virou implementável (`/post/publish/content/init/` com `media_type: PHOTO`, no MESMO escopo `video.publish`). Enquanto não entra, `PLATFORM_REQUIRES_MEDIA.tiktok: 'vídeo'` continua no front |
 | Pins só em modo Sandbox | Standard Access do Pinterest | exige vídeo demonstrando o fluxo |
 
 ### 6.2 Depende só de configuração sua
@@ -168,6 +167,7 @@ e, adiante, 2FA.
 | --- | --- | --- |
 | **Recorte vale pra todas as redes de uma vez** | `PostComposer.tsx` + `MediaCropDialog.tsx` | com Instagram e Facebook selecionados, recortar pra um aplica o mesmo recorte no outro. Cada rede tem proporção aceita diferente, então a peça sai errada em uma delas. **Relatado e ainda não corrigido** |
 | Meta usa só a primeira Página | `handleMetaCallback` em `src/worker.ts` | se `/me/accounts` devolver mais de uma Página concedida, as outras são ignoradas |
+| **Worker duplicado publicando da mesma fila** | conta Cloudflare | existe um segundo Worker chamado `social-scheduler`, criado em 18/08/2026 pelos deploys da branch `main`. Ele não atende domínio nenhum, mas tem Cron Trigger de 1 em 1 minuto e aponta pro MESMO D1, então vem publicando da fila com o código antigo. Não duplica post (o claim é atômico), mas decide QUEM publica por corrida. Apagar: `npx wrangler delete --name social-scheduler` |
 | Popover de sugestão cobre o compositor | `LegendaIA.tsx` | com o modal curto, o popover abre pra cima e tapa mídia e formato. Não impede o uso |
 
 ---
