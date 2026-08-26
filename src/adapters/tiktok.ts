@@ -48,10 +48,10 @@ interface AdapterState {
   [key: string]: unknown;
 }
 
-// Phase 4 — the longest lead time of all six platforms: the Content Posting API scope needs a
-// review (demo video + privacy policy, ~5 days to 6 weeks) before this can post anything but
-// SELF_ONLY to sandboxed test accounts. Submit that application as early as possible; this
-// adapter is written so the integration is ready the moment it clears, not blocking on it.
+// Fase 4. Era o maior prazo de espera das seis redes: a auditoria do escopo da Content Posting API
+// (vídeo de demonstração mais política de privacidade) precisava sair antes que isto conseguisse
+// publicar qualquer coisa além de SELF_ONLY numa conta de sandbox. APROVADA em 18/08/2026, então
+// creator_info passou a oferecer PUBLIC_TO_EVERYONE e é ela que escolherPrivacidade prefere.
 //
 // LOWER CONFIDENCE THAN THE OTHER ADAPTERS: TikTok's exact request/response field names below
 // come from documented patterns at research time, not a live test against their API — verify
@@ -101,7 +101,7 @@ export const tiktokAdapter: PlatformAdapter = {
     if (!tokens?.access_token) throw new Error('tiktok: missing access_token');
 
     // Chamada obrigatória, e também de onde sai a lista de privacidades que esta conta aceita.
-    // Enquanto a auditoria da Content Posting API não tinha saído, ela vinha só com SELF_ONLY.
+    // Antes de a auditoria sair, esta lista vinha só com SELF_ONLY.
     const creatorRes = await fetchWithRetry(`${API_BASE}/post/publish/creator_info/query/`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },

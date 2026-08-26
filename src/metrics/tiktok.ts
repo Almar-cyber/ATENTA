@@ -57,10 +57,14 @@ export const tiktokMetrics: MetricsFetcher = {
     const parsed = safeParseJson(await res.text()) as VideoQueryResponse | undefined;
     const video = parsed?.data?.videos?.[0];
     if (!video) {
-      // Caso NORMAL enquanto a auditoria não aprova, não um defeito: post SELF_ONLY não tem
-      // `publicaly_available_post_id`, então o adapter guardou o publish_id como external_post_id
-      // (ver checkStatus) — e /v2/video/query/ só enxerga vídeo PÚBLICO. Resolve-se sozinho quando
-      // a aprovação permitir publicar público: aí o id certo é gravado e a consulta acha.
+      // Post PUBLICADO ANTES DE 18/08/2026 nunca vai resolver, e isso não é defeito: ele saiu
+      // SELF_ONLY, não tem `publicaly_available_post_id`, e o adapter guardou o publish_id como
+      // external_post_id (ver checkStatus). O /v2/video/query/ só enxerga vídeo PÚBLICO, então o id
+      // gravado não casa com nada e nunca vai casar. Não há o que corrigir a posteriori: a TikTok
+      // não expõe o id público de um vídeo que era privado na hora da publicação.
+      //
+      // Com a auditoria aprovada, o que sai daqui pra frente grava o id certo e é encontrado. Se
+      // este aviso aparecer pra um post NOVO, aí sim é defeito: significa que ele saiu privado.
       console.warn(`[metrics] tiktok: nenhum vídeo público para ${target.external_post_id} (post privado?)`);
       return null;
     }
