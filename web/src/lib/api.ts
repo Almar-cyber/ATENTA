@@ -80,6 +80,8 @@ export interface CreatePostPayload {
   cover_timestamp_ms?: number;
   save_as?: 'draft';
   target_caption_overrides?: Record<string, string>;
+  /** Mídia própria de uma conta, por account_id — o recorte daquela rede. Ausente = usa media_asset_ids. */
+  target_media_asset_ids?: Record<string, string[]>;
 }
 
 export function createPost(payload: CreatePostPayload): Promise<{ id: string; target_count: number }> {

@@ -42,7 +42,11 @@ scheduled_posts ─┘                                          ↑
 | `grid_previews` | imagem posta na grade **sem virar post**, só pra ver a capa do feed (migração 0003) |
 
 **Um post, N destinos.** A legenda vive em `scheduled_posts.body`; cada destino pode divergir via
-`post_targets.caption_override`. O horário é um só, compartilhado por todos os destinos.
+`post_targets.caption_override`. A **mídia** diverge do mesmo jeito: `post_target_media` sempre foi
+por destino, então a mesma foto pode entrar recortada numa proporção por rede (4:5 no feed, 9:16 no
+Reel) dentro de um post só — `POST /api/posts` recebe isso em `target_media_asset_ids`, um mapa de
+`account_id` pra lista de mídia, e quem não aparece no mapa usa a lista compartilhada do post. O
+horário é um só, compartilhado por todos os destinos.
 
 `options` (JSON em `post_targets`) carrega o que é específico de rede: `format`, `privacyStatus`,
 `board_id`, `cover_media_id`, `cover_timestamp_ms`.

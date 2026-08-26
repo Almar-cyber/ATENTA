@@ -323,6 +323,10 @@ interface CreatePostBody {
   save_as?: string;
   // Keyed by account_id; overrides the shared `body` for just that one target's caption.
   target_caption_overrides?: Record<string, string>;
+  // Keyed by account_id; overrides the shared media list for just that one target. É o que permite
+  // recortar a MESMA foto numa proporção por rede (4:5 no feed, 9:16 no Reel) dentro de um post só.
+  // Conta ausente do mapa = usa media_asset_ids, como sempre.
+  target_media_asset_ids?: Record<string, string[]>;
 }
 
 // Same fields as CreatePostBody minus save_as — an edit never re-decides the initial
@@ -346,6 +350,7 @@ interface UpdatePostBody {
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   target_caption_overrides?: Record<string, string>;
+  target_media_asset_ids?: Record<string, string[]>;
 }
 
 interface AccountRow {
@@ -371,6 +376,8 @@ interface ValidateAccountsAndMediaParams {
   accountIds: string[] | undefined;
   mediaAssetId?: string;
   mediaAssetIds?: string[];
+  /** Mídia própria de uma conta (o recorte daquela rede), por account_id. Ausente = usa a lista compartilhada. */
+  targetMediaAssetIds?: Record<string, string[]>;
   options?: Record<string, unknown>;
   youtubePrivacyStatus?: string;
   pinterestBoardId?: string;
@@ -391,8 +398,13 @@ interface ValidateAccountsAndMediaParams {
 }
 
 type ValidateAccountsAndMediaResult =
-  | { ok: true; media: MediaAsset[]; targets: TargetToInsert[] }
+  | { ok: true; mediaByAccount: Map<string, MediaAsset[]>; targets: TargetToInsert[] }
   | { ok: false; response: Response };
+
+/** Algum destino trouxe mídia própria? (uma conta com lista vazia não conta como conteúdo.) */
+function hasPerTargetMedia(map: Record<string, string[]> | undefined): boolean {
+  return Object.values(map ?? {}).some((ids) => ids.length > 0);
+}
 
 // Shared by createPost and updatePost's full-replace branch: validate the target accounts exist
 // and are active, validate the requested media exists with no duplicates, then — per target —
@@ -428,24 +440,49 @@ async function validateAccountsAndMedia(env: Env, owner: string, params: Validat
     };
   }
 
-  // media_asset_ids is the carousel-capable form; media_asset_id is kept for single-media callers.
-  // Order matters (it becomes post_target_media.position), so each id is fetched in turn rather
-  // than with one IN (...) query, whose result order SQLite doesn't guarantee.
-  const mediaIds = params.mediaAssetIds?.length ? params.mediaAssetIds : params.mediaAssetId ? [params.mediaAssetId] : [];
-  // post_target_media's primary key is (post_target_id, media_asset_id, role), so the same asset
-  // can't legally appear twice in one target — reject it here with a readable message instead of
-  // letting the insert fail mid-loop.
-  if (new Set(mediaIds).size !== mediaIds.length) {
-    return { ok: false, response: jsonResponse({ error: 'a mesma mídia foi enviada mais de uma vez no carrossel' }, 400) };
-  }
-  const media: MediaAsset[] = [];
-  for (const mediaId of mediaIds) {
-    const row = await env.DB.prepare(`select * from media_assets where id = ?`).bind(mediaId).first<any>();
-    if (!row) return { ok: false, response: jsonResponse({ error: `media_asset_id não encontrado: ${mediaId}` }, 400) };
-    media.push(rowToMediaAsset(row));
+  // Cache por id do arquivo. O caso comum é várias contas apontando pro MESMO asset (quem não tem
+  // recorte próprio pra aquela rede cai na lista compartilhada); sem o cache, cada conta repetiria
+  // as mesmas consultas.
+  const mediaCache = new Map<string, MediaAsset>();
+
+  // Devolve os assets na ORDEM pedida (vira post_target_media.position), ou a Response de 400 a
+  // mandar de volta. Cada id é buscado em separado de propósito: um `IN (...)` não garante ordem
+  // no SQLite.
+  async function resolveMedia(ids: string[]): Promise<MediaAsset[] | Response> {
+    // post_target_media's primary key is (post_target_id, media_asset_id, role), so the same asset
+    // can't legally appear twice in one target — reject it here with a readable message instead of
+    // letting the insert fail mid-loop.
+    if (new Set(ids).size !== ids.length) {
+      return jsonResponse({ error: 'a mesma mídia foi enviada mais de uma vez no carrossel' }, 400);
+    }
+    const out: MediaAsset[] = [];
+    for (const mediaId of ids) {
+      const cached = mediaCache.get(mediaId);
+      if (cached) {
+        out.push(cached);
+        continue;
+      }
+      const row = await env.DB.prepare(`select * from media_assets where id = ?`).bind(mediaId).first<any>();
+      if (!row) return jsonResponse({ error: `media_asset_id não encontrado: ${mediaId}` }, 400);
+      const asset = rowToMediaAsset(row);
+      mediaCache.set(mediaId, asset);
+      out.push(asset);
+    }
+    return out;
   }
 
+  // media_asset_ids is the carousel-capable form; media_asset_id is kept for single-media callers.
+  // Esta é a lista COMPARTILHADA: o padrão do post, usado por toda conta sem recorte próprio. É
+  // resolvida mesmo quando todas as contas divergem, pra que um id inexistente continue sendo 400
+  // aqui e não vire uma lista silenciosamente ignorada.
+  const sharedMediaIds = params.mediaAssetIds?.length ? params.mediaAssetIds : params.mediaAssetId ? [params.mediaAssetId] : [];
+  const sharedMedia = await resolveMedia(sharedMediaIds);
+  if (!Array.isArray(sharedMedia)) return { ok: false, response: sharedMedia };
+
   const ts = nowIso();
+  // A mídia de cada destino, resolvida no laço abaixo — é ela que o validate() do adapter julga e
+  // que o insertTargets grava em post_target_media.
+  const mediaByAccount = new Map<string, MediaAsset[]>();
   const targets: TargetToInsert[] = [];
 
   // Reuse each adapter's own validate() so an impossible post (missing required video, missing
@@ -485,6 +522,19 @@ async function validateAccountsAndMedia(env: Env, owner: string, params: Validat
       options.cover_timestamp_ms = params.coverTimestampMs;
     }
 
+    // Mídia POR DESTINO: cada rede tem a proporção ideal dela (4:5 no feed, 9:16 no Reel), e o
+    // recorte que serve numa não serve na outra — daí a mesma foto poder entrar recortada de um
+    // jeito por conta, dentro de UM post. Mesma forma de captionOverrides, que já faz isso com a
+    // legenda: chave presente = esta conta diverge; ausente = usa o padrão do post.
+    const ownMediaIds = params.targetMediaAssetIds?.[account.id];
+    let media = sharedMedia;
+    if (ownMediaIds) {
+      const resolved = await resolveMedia(ownMediaIds);
+      if (!Array.isArray(resolved)) return { ok: false, response: resolved };
+      media = resolved;
+    }
+    mediaByAccount.set(account.id, media);
+
     const status = params.getTargetStatus(account.id);
     if (status !== 'draft') {
       const fakeTarget: PostTarget = {
@@ -520,7 +570,7 @@ async function validateAccountsAndMedia(env: Env, owner: string, params: Validat
     targets.push({ id: crypto.randomUUID(), account, status, options });
   }
 
-  return { ok: true, media, targets };
+  return { ok: true, mediaByAccount, targets };
 }
 
 // Shared by createPost and updatePost's full-replace branch: insert one post_targets row per
@@ -530,7 +580,7 @@ async function insertTargets(
   env: Env,
   scheduledPostId: string,
   targets: TargetToInsert[],
-  media: MediaAsset[],
+  mediaByAccount: Map<string, MediaAsset[]>,
   captionOverrides: Record<string, string> | undefined
 ): Promise<void> {
   for (const t of targets) {
@@ -548,6 +598,8 @@ async function insertTargets(
       )
       .run();
 
+    // A mídia DESTE destino — o recorte próprio da rede, ou a lista compartilhada do post.
+    const media = mediaByAccount.get(t.account.id) ?? [];
     for (let i = 0; i < media.length; i++) {
       await env.DB.prepare(
         `insert into post_target_media (post_target_id, media_asset_id, position, role) values (?, ?, ?, 'primary')`
@@ -568,7 +620,8 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
 
   // Legenda NÃO é obrigatória: Instagram publica sem legenda e Story sequer a exibe. O que não faz
   // sentido é um post vazio — então exige conteúdo: legenda OU mídia.
-  const hasMediaOnCreate = (payload.media_asset_ids?.length ?? 0) > 0 || !!payload.media_asset_id;
+  const hasMediaOnCreate =
+    (payload.media_asset_ids?.length ?? 0) > 0 || !!payload.media_asset_id || hasPerTargetMedia(payload.target_media_asset_ids);
   if (!payload.body?.trim() && !hasMediaOnCreate) {
     return jsonResponse({ error: 'Escreva uma legenda ou anexe um arquivo' }, 400);
   }
@@ -582,6 +635,7 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
     accountIds: payload.target_account_ids,
     mediaAssetId: payload.media_asset_id,
     mediaAssetIds: payload.media_asset_ids,
+    targetMediaAssetIds: payload.target_media_asset_ids,
     options: payload.options,
     youtubePrivacyStatus: payload.youtube_privacy_status,
     pinterestBoardId: payload.pinterest_board_id,
@@ -601,7 +655,7 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
     .bind(scheduledPostId, payload.title ?? null, payload.body, payload.scheduled_for, owner)
     .run();
 
-  await insertTargets(env, scheduledPostId, result.targets, result.media, payload.target_caption_overrides);
+  await insertTargets(env, scheduledPostId, result.targets, result.mediaByAccount, payload.target_caption_overrides);
 
   return jsonResponse({ id: scheduledPostId, target_count: result.targets.length }, 201);
 }
@@ -622,7 +676,8 @@ async function updatePost(id: string, request: Request, owner: string, env: Env)
   }
   // Mesma regra do createPost: limpar a legenda é permitido desde que sobre mídia — o que não pode
   // é o post ficar sem nada.
-  const hasMediaOnUpdate = (payload.media_asset_ids?.length ?? 0) > 0 || !!payload.media_asset_id;
+  const hasMediaOnUpdate =
+    (payload.media_asset_ids?.length ?? 0) > 0 || !!payload.media_asset_id || hasPerTargetMedia(payload.target_media_asset_ids);
   if (payload.body !== undefined && !payload.body.trim() && !hasMediaOnUpdate) {
     return jsonResponse({ error: 'Escreva uma legenda ou anexe um arquivo' }, 400);
   }
@@ -663,6 +718,7 @@ async function updatePost(id: string, request: Request, owner: string, env: Env)
       accountIds: payload.target_account_ids,
       mediaAssetId: payload.media_asset_id,
       mediaAssetIds: payload.media_asset_ids,
+      targetMediaAssetIds: payload.target_media_asset_ids,
       options: payload.options,
       youtubePrivacyStatus: payload.youtube_privacy_status,
       pinterestBoardId: payload.pinterest_board_id,
@@ -683,7 +739,7 @@ async function updatePost(id: string, request: Request, owner: string, env: Env)
     // Cascades to post_target_media (ON DELETE CASCADE — migrations/0001_init.sql), so the fresh
     // insert below starts from a clean slate instead of trying to diff old vs new media rows.
     await env.DB.prepare(`delete from post_targets where scheduled_post_id = ?`).bind(id).run();
-    await insertTargets(env, id, result.targets, result.media, payload.target_caption_overrides);
+    await insertTargets(env, id, result.targets, result.mediaByAccount, payload.target_caption_overrides);
   }
 
   // D1 bind semantics have no clean "leave this column alone if it wasn't sent" (a plain
