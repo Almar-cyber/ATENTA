@@ -559,3 +559,90 @@ describe('end-to-end auth classification', () => {
     expect(row.attempt_count).toBe(0);
   });
 });
+
+// A cadência de recheck de quem está em 'processing'. Sem ela o poller reconsulta todo destino em
+// processing a cada tique: no cron de 1 em 1 minuto, um container travado vira 360 chamadas à API
+// da plataforma antes de o sweep de 6h desistir dele.
+//
+// A idade do processamento é lida do updated_at, que é congelado de propósito na entrada e nunca
+// bumpado por um recheck (ver applyPublishResult). Não existe uma segunda coluna pra isso, e é por
+// isso que estes testes mexem no updated_at pra simular um post travado.
+describe('cadência de recheck do processing', () => {
+  async function emProcessing(updatedAt: string, nextCheckAfter: string | null): Promise<string> {
+    fake('instagram', {
+      onPublish: () => ({ state: 'processing', adapterState: { creation_id: 'c1' } }),
+      onCheckStatus: () => ({ state: 'processing', adapterState: { creation_id: 'c1' } }),
+    });
+    const accountId = await insertAccount({ platform: 'instagram' });
+    const targetId = await insertPost({ accountId, platform: 'instagram', body: 'oi' });
+    await runPoller();
+    await env.DB.prepare(`update post_targets set updated_at = ?, next_check_after = ? where id = ?`)
+      .bind(updatedAt, nextCheckAfter, targetId)
+      .run();
+    return targetId;
+  }
+
+  const minutosAtras = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+  const minutosAFrente = (n: number) => new Date(Date.now() + n * 60_000).toISOString();
+
+  it('processamento recente é rechecado no próximo tique, sem espera', async () => {
+    const targetId = await emProcessing(minutosAtras(1), minutosAtras(1));
+    await runPoller();
+
+    // Zero de espera, e não "agora + 1min": o tique do cron já é o piso, e adiar um minuto custaria
+    // ao post um tique inteiro aparecendo como não publicado.
+    const { next_check_after } = await getTarget(targetId);
+    expect(next_check_after).not.toBeNull();
+    expect(new Date(next_check_after!).getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  it('processamento parado há mais de 30min afasta o próximo recheck', async () => {
+    const targetId = await emProcessing(minutosAtras(40), minutosAtras(1));
+    await runPoller();
+
+    const { next_check_after } = await getTarget(targetId);
+    const esperaMin = (new Date(next_check_after!).getTime() - Date.now()) / 60_000;
+    expect(esperaMin).toBeGreaterThan(14);
+    expect(esperaMin).toBeLessThan(16);
+  });
+
+  it('não reconsulta a plataforma enquanto o next_check_after está no futuro', async () => {
+    // A etapa de recheck roda na MESMA passada da publicação, então o fake precisa continuar em
+    // processing na primeira volta; senão o post já sai publicado antes de haver o que testar.
+    let jaPublica = false;
+    const spy = fake('instagram', {
+      onPublish: () => ({ state: 'processing', adapterState: { creation_id: 'c1' } }),
+      onCheckStatus: () =>
+        jaPublica ? { state: 'published', externalId: 'ext-1' } : { state: 'processing', adapterState: { creation_id: 'c1' } },
+    });
+    const accountId = await insertAccount({ platform: 'instagram' });
+    const targetId = await insertPost({ accountId, platform: 'instagram', body: 'oi' });
+    await runPoller();
+    await env.DB.prepare(`update post_targets set next_check_after = ? where id = ?`)
+      .bind(minutosAFrente(10), targetId)
+      .run();
+
+    // A partir daqui o fake publicaria na primeira consulta. Se o poller respeitar o relógio, ele
+    // nem chega a perguntar, e é isso que o teste cobra.
+    jaPublica = true;
+    const antes = spy.checkStatusCalls.length;
+    await runPoller();
+
+    expect(spy.checkStatusCalls.length).toBe(antes);
+    expect((await getTarget(targetId)).status).toBe('processing');
+  });
+
+  it('reclamar o destino limpa o relógio herdado da fase anterior', async () => {
+    fake('instagram', { onPublish: () => ({ state: 'published', externalId: 'ext-1' }) });
+    const accountId = await insertAccount({ platform: 'instagram' });
+    const targetId = await insertPost({ accountId, platform: 'instagram', body: 'oi' });
+    await env.DB.prepare(`update post_targets set next_check_after = ? where id = ?`)
+      .bind(minutosAFrente(10), targetId)
+      .run();
+
+    await runPoller();
+
+    // Sem isso, uma fase de processamento nova nasceria já devendo a espera da fase anterior.
+    expect((await getTarget(targetId)).next_check_after).toBeNull();
+  });
+});

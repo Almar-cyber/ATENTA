@@ -11,6 +11,12 @@ recursos abaixo (D1, R2) continuam com o nome antigo de propósito: renomear um 
 exigiria recriar o recurso, e `social-scheduler`/`social-scheduler-media` são só identificadores
 internos, não aparecem pra ninguém.
 
+Existe um segundo Worker chamado `social-scheduler` na mesma conta, criado em 18/08/2026 pelos
+deploys da branch `main` enquanto ela era um tronco separado. Ele não atende domínio nenhum, mas
+aponta pro MESMO D1, então continua com um Cron Trigger próprio publicando da fila. Com os dois
+troncos unificados ele virou duplicata: apague com `npx wrangler delete --name social-scheduler`
+depois de conferir no painel da Cloudflare que ele não tem secret que o `atenta` não tenha.
+
 ## Stack
 
 - **Cloudflare Worker** (`src/worker.ts`) — um único Worker com dois handlers:
@@ -114,7 +120,8 @@ o poller publicando por um fantasma. O callback agora recusa conexão sem dono n
 2. `wrangler secret put TIKTOK_CLIENT_KEY` e `wrangler secret put TIKTOK_CLIENT_SECRET` (Worker).
 3. Preencher `TIKTOK_CLIENT_KEY` no `.env` local.
 4. Conecte pelo app: header → **Conexões** → **Conectar**.
-5. **Enquanto a auditoria não passa**: posts saem forçados `SELF_ONLY` numa conta de sandbox, não públicos de verdade. `src/adapters/tiktok.ts` está com confiança menor que os outros — os nomes exatos de campos vieram de padrões documentados, não de um teste real contra a API; testar com um post real antes de confiar 100% nele.
+5. **Auditoria aprovada** (18/08/2026). `privacy_level_options` do `creator_info` passou a oferecer `PUBLIC_TO_EVERYONE`, e é essa que o adapter escolhe quando o post não pede outra. Não dá pra pegar o primeiro item da lista: a TikTok não promete ordem nela, e cair em `SELF_ONLY` é publicar pra ninguém, o que é pior que falhar (falha aparece no painel, post invisível não).
+6. Uma privacidade pedida explicitamente é conferida contra a lista da conta antes do upload. A TikTok recusa a divergência do lado dela de qualquer jeito; recusar aqui economiza subir o vídeo inteiro pra ouvir não.
 
 ## Dashboard
 

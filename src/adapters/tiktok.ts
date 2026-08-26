@@ -100,8 +100,8 @@ export const tiktokAdapter: PlatformAdapter = {
     const tokens = await getAccountTokens<TiktokTokens>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
     if (!tokens?.access_token) throw new Error('tiktok: missing access_token');
 
-    // Mandatory pre-call — also where the enforced SELF_ONLY privacy_level (until the scope
-    // audit clears) becomes visible in privacy_level_options.
+    // Chamada obrigatória, e também de onde sai a lista de privacidades que esta conta aceita.
+    // Enquanto a auditoria da Content Posting API não tinha saído, ela vinha só com SELF_ONLY.
     const creatorRes = await fetchWithRetry(`${API_BASE}/post/publish/creator_info/query/`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
@@ -117,8 +117,7 @@ export const tiktokAdapter: PlatformAdapter = {
     };
 
     const options = target.options as { privacy_level?: string; disable_duet?: boolean; disable_comment?: boolean; disable_stitch?: boolean; cover_timestamp_ms?: number };
-    const privacyLevel = options.privacy_level ?? creatorJson.data.privacy_level_options[0];
-    if (!privacyLevel) throw new Error('tiktok: no privacy_level available from creator_info');
+    const privacyLevel = escolherPrivacidade(options.privacy_level, creatorJson.data.privacy_level_options ?? []);
 
     const asset = media[0];
 
@@ -240,6 +239,36 @@ export const tiktokAdapter: PlatformAdapter = {
     });
   },
 };
+
+/**
+ * Qual privacidade usar, dada a que o post pediu e a lista que esta conta aceita.
+ *
+ * A auditoria da Content Posting API foi APROVADA, então PUBLIC_TO_EVERYONE virou opção de verdade
+ * e é o padrão são pra um agendador. Pegar `privacy_level_options[0]` não serve: a TikTok não
+ * promete ordem nessa lista, e cair em SELF_ONLY é publicar pra ninguém. Isso é pior que falhar,
+ * porque falha aparece no painel e post invisível não.
+ *
+ * Uma privacidade pedida explicitamente ainda precisa estar na lista da conta. A TikTok recusa a
+ * divergência do lado dela; recusar aqui economiza o upload inteiro do vídeo antes da recusa.
+ */
+export function escolherPrivacidade(pedida: string | undefined, disponiveis: string[]): string {
+  if (pedida) {
+    if (disponiveis.length > 0 && !disponiveis.includes(pedida)) {
+      throw Object.assign(
+        new Error(`tiktok: privacidade "${pedida}" não é oferecida para esta conta (${disponiveis.join(', ')})`),
+        { code: 'privacy_level_option_mismatch' }
+      );
+    }
+    return pedida;
+  }
+  if (disponiveis.includes('PUBLIC_TO_EVERYONE')) return 'PUBLIC_TO_EVERYONE';
+  if (disponiveis.length === 0) {
+    throw Object.assign(new Error('tiktok: creator_info não devolveu privacy_level_options'), {
+      code: 'privacy_level_option_mismatch',
+    });
+  }
+  return disponiveis[0];
+}
 
 // TikTok's v2 envelope: { data, error: { code, message, log_id } } — `error.code` is the
 // documented machine-readable string (e.g. "access_token_invalid"), matching classifyError's

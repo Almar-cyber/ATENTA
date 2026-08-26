@@ -542,10 +542,11 @@ async function stepRecheckProcessing(env: Env): Promise<void> {
      join accounts a on a.id = pt.account_id
      join scheduled_posts sp on sp.id = pt.scheduled_post_id
      where pt.status = 'processing' and a.status = 'active'
-     order by pt.updated_at asc
+       and (pt.next_check_after is null or pt.next_check_after <= ?)
+     order by pt.next_check_after asc
      limit ?`
   )
-    .bind(PROCESSING_RECHECK_BATCH_SIZE)
+    .bind(nowIso(), PROCESSING_RECHECK_BATCH_SIZE)
     .all<any>();
 
   for (const row of results ?? []) {
@@ -583,9 +584,26 @@ async function stepSweeps(env: Env): Promise<void> {
   }
 }
 
+// Quanto esperar até rechecar um destino que a plataforma ainda está processando.
+//
+// Upload normal resolve em bem menos de um minuto, então os primeiros minutos são consultados na
+// velocidade do cron: o sentido de ter cron de 1 em 1 minuto é o post aparecer como publicado assim
+// que ele publica. O intervalo só abre depois que a coisa claramente empacou, o que transforma o
+// pior caso de 6h em ~30 rechecks em vez de 360, com uma chamada à API da plataforma em cada um.
+function proximoRecheckMs(processandoDesde: string): number {
+  const idadeMs = Date.now() - new Date(processandoDesde).getTime();
+  // Zero, e não 60s: o tique do cron já é o piso, e pedir "agora + 1min" cairia logo DEPOIS do
+  // próximo tique, custando ao post um minuto inteiro a mais aparecendo como não publicado.
+  if (idadeMs < 5 * 60_000) return 0;
+  if (idadeMs < 30 * 60_000) return 5 * 60_000;
+  return 15 * 60_000;
+}
+
 async function claim(env: Env, id: string, fromStatus: string, toStatus: string): Promise<boolean> {
   const { results } = await env.DB.prepare(
-    `update post_targets set status = ?, updated_at = ? where id = ? and status = ? returning id`
+    // next_check_after zerado junto: sair de 'processing' encerra aquela fase, e um relógio herdado
+    // faria a fase seguinte já nascer devendo espera.
+    `update post_targets set status = ?, next_check_after = null, updated_at = ? where id = ? and status = ? returning id`
   )
     .bind(toStatus, nowIso(), id, fromStatus)
     .all<{ id: string }>();
@@ -631,12 +649,21 @@ async function applyPublishResult(env: Env, target: PostTarget, result: PublishR
     // ainda processando. O sweep de 6h mede a idade por essa coluna — bumpá-la a cada 10min
     // empurraria o prazo pra sempre e o sweep nunca dispararia justamente no caso que ele existe
     // pra pegar (um container que travou no processamento da plataforma).
+    // O processando-desde é o updated_at congelado acima: na primeira transição ele é `ts`, e daí
+    // em diante fica parado, que é exatamente a idade que o backoff quer medir.
+    const processandoDesde = target.status === 'processing' ? target.updated_at : ts;
     await env.DB.prepare(
       `update post_targets set status = 'processing', adapter_state = ?, last_error = null,
+         next_check_after = ?,
          updated_at = case when status = 'processing' then updated_at else ? end
        where id = ?`
     )
-      .bind(JSON.stringify(result.adapterState ?? target.adapter_state), ts, target.id)
+      .bind(
+        JSON.stringify(result.adapterState ?? target.adapter_state),
+        new Date(Date.now() + proximoRecheckMs(processandoDesde)).toISOString(),
+        ts,
+        target.id
+      )
       .run();
     return;
   }
