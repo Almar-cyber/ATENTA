@@ -1,10 +1,15 @@
-# social-scheduler
+# atenta
 
 Agendador pessoal de posts para YouTube, LinkedIn, Instagram, Facebook, Pinterest e TikTok.
 Custo alvo: $0/mês.
 
-Live: `https://social-scheduler.zona21.workers.dev` — cron rodando a cada 10min.
-Repo: https://github.com/Almar-cyber/social-scheduler
+Live: `https://atenta.omangue.co` — cron rodando de minuto em minuto.
+Repo: https://github.com/Almar-cyber/ATENTA
+
+O Worker na Cloudflare se chama `atenta` (antes `social-scheduler` — renomeado em 15/08/2026). Os
+recursos abaixo (D1, R2) continuam com o nome antigo de propósito: renomear um binding existente
+exigiria recriar o recurso, e `social-scheduler`/`social-scheduler-media` são só identificadores
+internos, não aparecem pra ninguém.
 
 ## Stack
 
@@ -13,6 +18,7 @@ Repo: https://github.com/Almar-cyber/social-scheduler
   - `fetch()` — callback OAuth para LinkedIn, Meta, Pinterest e TikTok (YouTube usa loopback local, não passa por aqui)
 - **Cloudflare D1** (SQLite) — banco `social-scheduler`, via binding `DB`
 - **Cloudflare R2** — bucket `social-scheduler-media`, via binding `MEDIA`. Domínio público: `https://scheduler-media.omangue.co` (subdomínio novo — não toca no site que já roda em omangue.co)
+- **Cloudflare Workers AI** (`src/lib/legenda.ts`) — sugestão de legenda, via binding `AI`. Sem conta nem chave nova: 10.000 Neurons/dia de graça, e uma legenda custa ~28. Está aqui, e não numa API de IA de terceiro, porque a declaração de tratamento de dados enviada à Meta diz que a Cloudflare é a única operadora — trocar isso obrigaria a voltar lá
 - **Web Crypto (AES-GCM)** (`src/lib/crypto.ts`) — criptografia dos tokens OAuth, chave só existe como secret do Worker
 
 ## Por que migrou de Supabase
@@ -31,6 +37,8 @@ wrangler d1 execute social-scheduler --remote --file=migrations/0002_accounts_mu
 wrangler d1 execute social-scheduler --remote --file=migrations/0003_grid_previews.sql   # ideias do Grid IG
 wrangler d1 execute social-scheduler --remote --file=migrations/0013_ideas.sql          # ideia ganha texto; imagem vira opcional
 wrangler d1 execute social-scheduler --remote --file=migrations/0014_tags.sql           # pilares de conteúdo
+wrangler d1 execute social-scheduler --remote --file=migrations/0018_ai_usage.sql       # teto diário da legenda por IA
+wrangler d1 execute social-scheduler --remote --file=migrations/0019_media_uploads.sql  # dono de cada upload em partes
 wrangler r2 bucket create social-scheduler-media
 wrangler secret put TOKEN_ENCRYPTION_KEY     # valor: `openssl rand -base64 32`
 npm run deploy                               # builda o front (web/ → dist/) e faz wrangler deploy
@@ -77,7 +85,7 @@ o poller publicando por um fantasma. O callback agora recusa conexão sem dono n
 
 ## Fase 1 — LinkedIn
 
-1. Acesse [developer.linkedin.com](https://developer.linkedin.com) → **My apps** (canto superior direito) → **Create app**. Pede uma LinkedIn Page associada — dá pra criar uma ali mesmo se não tiver. Depois, adicionar os produtos "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn" (ambos self-serve, sem aprovação de parceiro) → em Auth, registrar o redirect URI exato: `https://social-scheduler.zona21.workers.dev/oauth/callback/linkedin`.
+1. Acesse [developer.linkedin.com](https://developer.linkedin.com) → **My apps** (canto superior direito) → **Create app**. Pede uma LinkedIn Page associada — dá pra criar uma ali mesmo se não tiver. Depois, adicionar os produtos "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn" (ambos self-serve, sem aprovação de parceiro) → em Auth, registrar o redirect URI exato: `https://atenta.omangue.co/oauth/callback/linkedin`.
 2. `wrangler secret put LINKEDIN_CLIENT_ID` e `wrangler secret put LINKEDIN_CLIENT_SECRET` (Worker).
 3. Preencher `LINKEDIN_CLIENT_ID` no `.env` local (o secret fica só no Worker, que faz a troca de código por token).
 4. Conecte pelo app: header → **Conexões** → **Conectar**.
@@ -85,7 +93,7 @@ o poller publicando por um fantasma. O callback agora recusa conexão sem dono n
 
 ## Fase 2 — Instagram + Facebook (Meta Graph API)
 
-1. No [Meta for Developers](https://developers.facebook.com/apps/): criar app tipo "Business" → adicionar os produtos "Facebook Login" (dá acesso ao fluxo OAuth) → em Configurações → Básico, anotar App ID/Secret → em Facebook Login → Configurações, registrar o redirect URI exato: `https://social-scheduler.zona21.workers.dev/oauth/callback/meta`.
+1. No [Meta for Developers](https://developers.facebook.com/apps/): criar app tipo "Business" → adicionar os produtos "Facebook Login" (dá acesso ao fluxo OAuth) → em Configurações → Básico, anotar App ID/Secret → em Facebook Login → Configurações, registrar o redirect URI exato: `https://atenta.omangue.co/oauth/callback/meta`.
 2. `wrangler secret put META_APP_ID` e `wrangler secret put META_APP_SECRET` (Worker).
 3. Preencher `META_APP_ID` no `.env` local.
 4. Conecte pelo app: header → **Conexões** → **Conectar**.
@@ -94,7 +102,7 @@ o poller publicando por um fantasma. O callback agora recusa conexão sem dono n
 
 ## Fase 3 — Pinterest
 
-1. No [Pinterest Developers](https://developers.pinterest.com/apps/): criar app → em Redirect URIs, registrar `https://social-scheduler.zona21.workers.dev/oauth/callback/pinterest` → pedir acesso Trial (automático) e, quando for usar de verdade, solicitar **Standard access** (exige um vídeo curto demonstrando o fluxo de publicação — sem isso os Pins só ficam visíveis em modo Sandbox, só pra você).
+1. No [Pinterest Developers](https://developers.pinterest.com/apps/): criar app → em Redirect URIs, registrar `https://atenta.omangue.co/oauth/callback/pinterest` → pedir acesso Trial (automático) e, quando for usar de verdade, solicitar **Standard access** (exige um vídeo curto demonstrando o fluxo de publicação — sem isso os Pins só ficam visíveis em modo Sandbox, só pra você).
 2. `wrangler secret put PINTEREST_CLIENT_ID` e `wrangler secret put PINTEREST_CLIENT_SECRET` (Worker).
 3. Preencher `PINTEREST_CLIENT_ID` no `.env` local.
 4. Conecte pelo app: header → **Conexões** → **Conectar**.
@@ -102,7 +110,7 @@ o poller publicando por um fantasma. O callback agora recusa conexão sem dono n
 
 ## Fase 4 — TikTok
 
-1. No [TikTok Developers](https://developers.tiktok.com/apps/): criar app → adicionar o produto "Content Posting API" e submeter a auditoria (vídeo de demonstração do fluxo + política de privacidade — **submeta isso o quanto antes**, é o maior gargalo de tempo do projeto todo, de dias a semanas) → registrar o redirect URI: `https://social-scheduler.zona21.workers.dev/oauth/callback/tiktok`.
+1. No [TikTok Developers](https://developers.tiktok.com/apps/): criar app → adicionar o produto "Content Posting API" e submeter a auditoria (vídeo de demonstração do fluxo + política de privacidade — **submeta isso o quanto antes**, é o maior gargalo de tempo do projeto todo, de dias a semanas) → registrar o redirect URI: `https://atenta.omangue.co/oauth/callback/tiktok`.
 2. `wrangler secret put TIKTOK_CLIENT_KEY` e `wrangler secret put TIKTOK_CLIENT_SECRET` (Worker).
 3. Preencher `TIKTOK_CLIENT_KEY` no `.env` local.
 4. Conecte pelo app: header → **Conexões** → **Conectar**.
@@ -110,7 +118,7 @@ o poller publicando por um fantasma. O callback agora recusa conexão sem dono n
 
 ## Dashboard
 
-`https://social-scheduler.zona21.workers.dev/` serve o dashboard. É um app **React + Vite +
+`https://atenta.omangue.co/` serve o dashboard. É um app **React + Vite +
 TypeScript + Tailwind v4 + shadcn/ui** (preset Nova: Radix, Lucide, Geist) com animações via
 **motion** (motion.dev), em `web/`. O build sai em `dist/` e é servido pelos **static assets** do
 Cloudflare Worker (`[assets]` no `wrangler.toml`); o Worker continua dono de `/api/*`,
@@ -125,6 +133,14 @@ O que dá pra fazer:
   destino (uma ou várias, uma checkbox por conta autenticada), upload de mídia (um arquivo ou
   vários pra carrossel, reordenáveis com ↑/↓) e os campos específicos mais comuns
   (`privacyStatus` do YouTube, `board_id` do Pinterest, Story do Instagram).
+- **Sugerir legenda** — o botão ao lado do campo manda o que você já escreveu (o rascunho É o
+  briefing, não existe um segundo campo pra preencher) e devolve três opções. O prompt leva as
+  **suas** legendas que mais engajaram naquela rede, no mesmo pilar, então a saída sai no seu tom em
+  vez de genérica; quando ainda não há histórico, o popover avisa isso em vez de fingir. Teto de 20
+  por dia por dono (`ai_usage`, migração 0018), devolvido quando a geração falha. Roda no Workers AI
+  com dois modelos em ordem (Llama 4 Scout, e o 3.3 70B como reserva) — o fallback é entre modelos
+  da mesma conta, não entre fornecedores, porque um segundo fornecedor tiraria o dado da Cloudflare
+  e obrigaria a atualizar a declaração enviada à Meta.
 - **Rascunhos** — "Salvar como rascunho" grava com status `draft` (sem passar pela validação de
   mídia, já que a ideia é capturar antes de estar pronto); "Mover p/ fila" promove pra `queued`.
 - **Duplicar** — copia um post existente pro formulário reaproveitando a mídia já no R2 (sem
@@ -141,7 +157,8 @@ O que dá pra fazer:
   **arrastar e reordenar** antes de decidir a ordem final (ver abaixo). O status aparece na própria
   peça, não só na coluna de badge: borda tracejada = rascunho, ⚠ + fundo vermelho = falhou. Clicar
   num chip/tile abre o detalhe; clicar num dia vazio do calendário já pré-preenche a data no
-  formulário. Filtros por status, plataforma e conta. Atualiza sozinho a cada 30s.
+  formulário. Filtros por status, plataforma e conta. Atualiza sozinho a cada 60s (só com a aba
+  visível; ao voltar pra aba, atualiza na hora).
 - **Alerta no topo** — barra vermelha quando algum post falhou ou alguma conta precisa
   reautenticar; clicar nela filtra a lista pelas falhas. Compensa em parte a falta de e-mail
   automático dos Cron Triggers (ver Pendências), mas só enquanto o dashboard estiver aberto.
@@ -222,7 +239,7 @@ e nenhum endpoint os devolve.
 Pra religar (efeito imediato, sem redeploy) — este comando grava e já testa sozinho:
 
 ```bash
-printf 'Nova senha: ' && read -rs P && echo && printf '%s' "$P" | npx wrangler secret put DASHBOARD_PASSWORD && sleep 6 && curl -s -o /dev/null -w "login: HTTP %{http_code}\n" -u "almar:$P" https://social-scheduler.zona21.workers.dev/; unset P
+printf 'Nova senha: ' && read -rs P && echo && printf '%s' "$P" | npx wrangler secret put DASHBOARD_PASSWORD && sleep 6 && curl -s -o /dev/null -w "login: HTTP %{http_code}\n" -u "almar:$P" https://atenta.omangue.co/; unset P
 ```
 
 Pra desligar de novo: `npx wrangler secret delete DASHBOARD_PASSWORD`.
@@ -334,9 +351,47 @@ Todos os seis adapters (`src/adapters/*.ts`) têm integração real agora. O que
 
 ## Pendências
 
+- **Migrar para o domínio próprio `atenta.co`** (já registrado) — hoje o produto vive em
+  `atenta.omangue.co`, subdomínio do estúdio. Para quem chega, a diferença é entre "isso é uma
+  empresa" e "isso é o projeto paralelo de alguém", e o e-mail transacional herda o mesmo problema
+  (ver `EMAIL_FROM` em src/lib/email.ts: o remetente precisa ficar no MESMO domínio dos links do
+  corpo, senão filtro de spam trata como phishing).
+  **Só depois das revisões responderem.** Migrar mexe em: `redirect_uri` nos cinco consoles de
+  plataforma, o campo de site nos formulários da Meta e do TikTok, a verificação de marca do Google
+  (aprovada em 2026-08-05, seria refeita), o domínio verificado na Resend, o `MEDIA_PUBLIC_BASE_URL`
+  do R2 — e TODAS as contas conectadas precisam reconectar, porque o redirect mudou.
+  Fazer isso no meio de uma análise derruba a aprovação sem deixar rastro do porquê.
+- **Login com Google** — hoje só existe e-mail + senha, e **não há recuperação de senha**: esquecer
+  a senha é perder a conta. Login social resolve isso sem contratar serviço de envio de e-mail — o
+  que importa porque a declaração de tratamento de dados enviada à Meta diz que a **Cloudflare é a
+  única operadora**; adicionar Resend/SendGrid obrigaria a voltar lá e declarar um segundo.
+  Os escopos são `openid email profile`, que o Google classifica como não sensíveis, então não
+  passam por verificação nem afetam a pendência do YouTube. O `better-auth` (1.6) já traz
+  `socialProviders`, então é config + botão na `AuthView`.
+  **Só depois das revisões em andamento** (Meta, TikTok, Google): mexer em autenticação no meio
+  delas acrescenta variável, e uma recusa ficaria sem causa identificável.
+  O caso chato a não esquecer: quem já tem conta por senha e entra com Google pela primeira vez
+  precisa cair na MESMA conta, não criar uma segunda com o mesmo e-mail.
+- **Login com Facebook foi descartado de propósito** — não é esquecimento. Três razões: (1) mudaria
+  o caso de uso do Facebook Login declarado no App Review, que hoje é só conectar Páginas; (2) o
+  mesmo botão passaria a significar duas coisas ("entre" e "autorize sua Página"); (3) o público do
+  produto é justamente quem toma bloqueio no Facebook com frequência — amarrar o acesso ao
+  agendador na conta mais frágil faria a pessoa perder a ferramenta que usa pras outras cinco redes.
+- **Foto de perfil das contas conectadas** — o `PlatformAvatar` mostra o logo da rede tingido, não a
+  foto real do perfil. Todas as APIs já expõem esse dado nos escopos que JÁ pedimos (o
+  `user.info.basic` do TikTok inclui `avatar_url`; Instagram, Facebook e YouTube idem), então não
+  custa permissão nova nem passa por revisão. O TikTok já grava em `accounts.extra.avatar_url` desde
+  2026-08-05; as demais redes só passam a gravar quando a conta reconectar, porque o callback é quem
+  captura. Falta: buscar nos outros callbacks e usar no `PlatformAvatar` (front), com o logo da rede
+  como fallback quando a URL não resolver — as URLs de avatar da Meta expiram.
+- **TikTok não publica foto** — `src/adapters/tiktok.ts` exige vídeo (`media must be a video`), mas
+  a Content Posting API suporta o Photo Mode pelo endpoint `/post/publish/content/init/` com
+  `media_type: PHOTO`, no MESMO escopo `video.publish` (o nome do escopo engana). Não implementar
+  antes da auditoria aprovar: seria empilhar código não testável sobre o adapter de menor confiança
+  do projeto. Quando entrar, sai também o `PLATFORM_REQUIRES_MEDIA.tiktok: 'vídeo'` no front.
 - ~~**Domínio customizado pro R2**~~ ✅ resolvido — `https://scheduler-media.omangue.co` está de pé e servindo objetos do bucket (verificado com um PUT + GET + delete). É de lá que sai o `public_url` que Instagram, Facebook (posts com mídia) e Pinterest precisam pra buscar o arquivo; YouTube/LinkedIn/TikTok recebem os bytes direto e não dependem disso.
 - **Alerta de falha** — Cron Triggers não têm o e-mail automático que o GitHub Actions teria. Falhas só aparecem em `wrangler tail` / dashboard. TODO em `src/worker.ts` (`runPoller`).
-- **Upload em chunks do YouTube** — `youtube.ts` faz um PUT único (não o protocolo resumível de verdade com offset de 256KB). Funciona bem pra vídeos de tamanho normal; vídeos muito grandes podem estourar limite de CPU/memória do Worker.
+- ~~**Upload em chunks do YouTube**~~ ✅ resolvido em 13/08/2026 — era um PUT único, e um vídeo real de 126 MB derrubou a publicação com `Network connection lost` (conexão de saída aberta tempo demais; a memória já estava resolvida pelo streaming do R2). Agora vai em partes de 16 MB, cada uma lida do R2 por faixa e enviada com `Content-Range`. Fatiamento próprio, e não o `tiktokChunking`: o Google exige que todo pedaço menos o último seja múltiplo de 256 KB, e aquele divide em partes iguais. Entre pedaços o Google responde **308**, que não é erro e também não é `res.ok` — tratar isso antes da checagem de sucesso é o que impede o caminho feliz de parecer falha. Verificado publicando o vídeo de 126 MB que falhava.
 - **Meta assume uma Page só** — se `/me/accounts` retornar mais de uma Page concedida, o callback só usa a primeira. Ajustar `handleMetaCallback` em `src/worker.ts` se isso vier a ser necessário.
 - **Carrossel: nenhum foi testado contra a API real ainda** — o código dos quatro caminhos (ver seção Carrossel) foi escrito a partir da documentação oficial de cada plataforma, não de uma publicação real. O caminho do Instagram em particular cria os containers-filho e o container-pai numa tacada só, sem esperar o processamento de cada filho: pra carrossel de imagens isso é o que a doc da Meta mostra, mas carrossel com vídeo pode falhar na criação do pai e cair no retry do poller (que recria os filhos — os antigos expiram sozinhos). Testar com um post real de cada tipo antes de confiar.
 - **TikTok tem confiança menor** — nomes de campos vieram de padrões documentados, não de teste real contra a API (não dá pra testar de verdade até a auditoria da Content Posting API aprovar). Verificar contra a doc atual antes de confiar em produção.

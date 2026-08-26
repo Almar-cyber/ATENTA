@@ -43,6 +43,12 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
       u.searchParams.set('client_id', clientId);
       u.searchParams.set('redirect_uri', redirectUri);
       u.searchParams.set('state', state);
+      // Sem isto, reconectar uma conta que já autorizou antes pula direto pro login silencioso — o
+      // Facebook não mostra de novo a lista de Páginas nem as permissões, porque já foram concedidas
+      // numa sessão anterior. "Desvincular" no nosso app só apaga a linha em `accounts`; não revoga
+      // nada do lado do Facebook. `rerequest` é o parâmetro que a própria Meta documenta pra forçar
+      // o diálogo de consentimento a aparecer de novo mesmo com a permissão já concedida.
+      u.searchParams.set('auth_type', 'rerequest');
       u.searchParams.set(
         'scope',
         // Cada escopo aqui precisa ter uma chamada que o justifique — o App Review da Meta reprova
@@ -53,8 +59,17 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
         //   instagram_basic          → achar o instagram_business_account da Página e o @username
         //   instagram_content_publish→ POST /{ig}/media e /{ig}/media_publish
         //   instagram_manage_insights→ insights do post + followers_count
-        //   read_insights            → post_impressions da Página
         //   instagram_manage_comments→ GET /{ig-media}/comments com o campo `from` (quem comentou)
+        //
+        // read_insights SAIU (2026-08-05). Duas razões, nesta ordem: (1) ele nunca trouxe dado —
+        // `reach`/`impressions` da Página voltavam sempre null nas três Páginas conectadas, mesmo
+        // com o escopo concedido; (2) ao ser removido da submissão do App Review, a Meta passou a
+        // recusá-lo no consentimento com "Invalid Scopes: read_insights". Pedir escopo que a
+        // própria Meta rejeita só suja a tela de autorização.
+        //
+        // Nada quebra sem ele: em metrics/facebook.ts cada bloco de /insights vive no seu próprio
+        // try/catch, e curtidas/comentários/compartilhamentos vêm dos CAMPOS do post, não do
+        // /insights. O que se perde é alcance e demografia da Página, que já não vinham.
         //
         //   business_management    → GET /me/accounts ENXERGAR Página de Portfólio de Negócios
         //
@@ -73,7 +88,7 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
         //
         // Escopo novo só tem efeito ao (re)conectar: conta já conectada precisa passar pelo
         // consentimento de novo pra ganhá-lo.
-        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,instagram_manage_comments,read_insights,business_management'
+        'pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,instagram_manage_insights,instagram_manage_comments,business_management'
       );
       return u.toString();
     }
@@ -102,10 +117,19 @@ export function buildAuthUrl(platform: OAuthPlatform, { clientId, redirectUri, s
       const u = new URL('https://www.tiktok.com/v2/auth/authorize/');
       u.searchParams.set('client_key', clientId); // TikTok chama de client_key, mesmo valor
       u.searchParams.set('response_type', 'code');
-      // video.list é o escopo do endpoint /v2/video/query/ (métricas de post). Pedimos junto pra
-      // que, quando a auditoria da Content Posting API aprovar, o Insights do TikTok funcione
-      // reconectando 1x só — sem esse escopo o coletor bate em 401 mesmo aprovado.
-      u.searchParams.set('scope', 'user.info.basic,video.publish,video.upload,video.list');
+      // `video.list` é o escopo do /v2/video/query/, único endpoint de métrica do TikTok que
+      // usamos (src/metrics/tiktok.ts). Ele precisa estar HABILITADO no painel do app, em Scopes —
+      // o TikTok recusa a autorização INTEIRA se um escopo pedido não estiver lá, com um erro
+      // genérico na tela ("corrija o seguinte: scope") que não diz qual. Foi o que aconteceu em
+      // 2026-08-05 na primeira tentativa de conectar.
+      //
+      // `user.info.stats` traz follower_count, que alimenta o gráfico de seguidores do Insights —
+      // o mesmo que Instagram e YouTube já fazem. Sem ele o TikTok apareceria com métrica de post e
+      // um buraco onde as outras redes mostram crescimento de audiência.
+      //
+      // NÃO pedimos `user.info.profile` (link da bio, selo de verificado): nada no produto usa
+      // esses campos, e pedir escopo sem uso é o que o App Review reprova.
+      u.searchParams.set('scope', 'user.info.basic,user.info.stats,video.publish,video.upload,video.list');
       u.searchParams.set('redirect_uri', redirectUri);
       u.searchParams.set('state', state);
       // TikTok exige vírgula literal no scope, não %2C — URLSearchParams codifica por padrão.

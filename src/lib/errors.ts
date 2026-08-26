@@ -126,3 +126,87 @@ export function safeParseJson(text: string): unknown {
     return undefined;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Mensagem para a PESSOA, não para o log
+//
+// O que era gravado em `last_error` (e mostrado na tela) vinha cru da API:
+//
+//   tiktok: video/init failed: 400 {"error":{"code":"invalid_params",
+//   "message":"The chunk size is invalid","log_id":"20260805...F3C"}}
+//
+// Isso não é mensagem, é despejo de JSON. Quem lê não descobre nem o que houve nem o que fazer, e
+// `log_id` só serve pro suporte da plataforma. O texto técnico continua existindo (é o que permite
+// depurar), mas deixa de ser a primeira coisa que a pessoa vê.
+//
+// A regra é a mesma dos avisos do compositor (design.md §7): diga O QUE FAZER, não o que quebrou.
+
+interface Traducao {
+  /** Trecho que identifica o erro dentro da mensagem técnica. */
+  quando: RegExp;
+  /** O que a pessoa lê. Imperativo, sem jargão, sem id de suporte. */
+  texto: string;
+}
+
+const TRADUCOES: Traducao[] = [
+  // TikTok
+  {
+    quando: /chunk size is invalid/i,
+    texto: 'O vídeo é grande demais para o envio em uma etapa. Tente um arquivo menor ou mais curto.',
+  },
+  {
+    quando: /privacy_level_option_mismatch/i,
+    texto: 'O nível de privacidade escolhido não está disponível nesta conta do TikTok. Escolha outro.',
+  },
+  {
+    quando: /spam_risk|reached_active_user_cap/i,
+    texto: 'O TikTok limitou publicações desta conta por enquanto. Tente de novo mais tarde.',
+  },
+  {
+    quando: /url_ownership_unverified/i,
+    texto: 'O TikTok não reconheceu o domínio de onde o vídeo é servido. Verifique o domínio no painel do TikTok.',
+  },
+  // Precisa vir ANTES da regra genérica de 401/403 lá embaixo: este erro é 403, e a genérica dizia
+  // "a conexão expirou, reconecte" — mandando reconectar uma conta que estava perfeitamente
+  // conectada. Foi exatamente o que aconteceu na primeira publicação real do TikTok: reconectar não
+  // resolvia nada e o motivo verdadeiro ficava escondido.
+  {
+    quando: /unaudited_client_can_only_post_to_private_accounts/i,
+    texto:
+      'Enquanto o app não passa pela auditoria do TikTok, só dá para publicar em conta com perfil PRIVADO. Deixe a conta privada no app do TikTok e tente de novo, ou espere a aprovação.',
+  },
+  // Meta (Instagram e Facebook)
+  {
+    quando: /Missing Permissions|#200/i,
+    texto: 'A rede social ainda não liberou esta permissão para o app. Nada a fazer aqui — depende da análise da plataforma.',
+  },
+  {
+    quando: /nonexisting field/i,
+    texto: 'A rede social não reconheceu um dos campos pedidos. Já registramos; nenhuma ação sua é necessária.',
+  },
+  {
+    quando: /aspect ratio|proporção/i,
+    texto: 'A proporção da imagem não é aceita nesta rede. Use o recorte antes de agendar.',
+  },
+  // Genéricos, por classe
+  {
+    quando: /\b(401|403)\b|OAuthException|invalid_token|token.*expired/i,
+    texto: 'A conexão com esta rede expirou. Reconecte a conta em Conexões.',
+  },
+  { quando: /\b429\b|rate.?limit|quota/i, texto: 'A rede social limitou o volume de chamadas. Vamos tentar de novo sozinhos.' },
+  { quando: /\b5\d\d\b|timed out|timeout/i, texto: 'A rede social não respondeu a tempo. Vamos tentar de novo sozinhos.' },
+];
+
+/**
+ * Frase curta e acionável para o erro; `null` quando não sabemos traduzir.
+ *
+ * Devolver `null` (em vez de um genérico do tipo "algo deu errado") é de propósito: um erro que não
+ * reconhecemos precisa chegar íntegro a quem for investigar. Esconder atrás de texto bonito foi
+ * exatamente o que fez a coleta do Facebook falhar em silêncio por semanas.
+ */
+export function mensagemAmigavel(erroTecnico: string): string | null {
+  for (const { quando, texto } of TRADUCOES) {
+    if (quando.test(erroTecnico)) return texto;
+  }
+  return null;
+}

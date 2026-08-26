@@ -67,7 +67,7 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
     const local = new Date(daqui.getTime() - daqui.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     return (
       <EmptyState
-        art="comecando"
+        art="agendando"
         title="Nada agendado ainda"
         action={
           <Button size="lg" onClick={() => requestPrefillDate(local)}>
@@ -117,9 +117,19 @@ export function ListView({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogS
             {/* Badge + ações num grupo: no mobile ocupa a largura toda (desce pra 2ª linha) e o
                 conjunto flui/quebra alinhado à direita; no desktop fica inline à direita como antes. */}
             <div className="flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:w-auto">
-            <Badge className={`${STATUS_META[target.status].className} shrink-0`} variant="secondary">
-              {STATUS_META[target.status].label}
-            </Badge>
+            {/* "Na fila" depois de uma falha é o estado mais enganoso do app: o post JÁ tentou
+                publicar, deu erro, e volta pra fila pro retry — visualmente idêntico a um que só
+                está esperando a hora. O motivo ficava escondido no modal de detalhe, então a pessoa
+                só descobria se clicasse. Este selo é o que faz a falha existir na lista. */}
+            {target.status === 'queued' && target.attempt_count > 0 ? (
+              <Badge className="shrink-0 border-destructive/40 bg-destructive/10 text-destructive" variant="secondary">
+                Tentando de novo
+              </Badge>
+            ) : (
+              <Badge className={`${STATUS_META[target.status].className} shrink-0`} variant="secondary">
+                {STATUS_META[target.status].label}
+              </Badge>
+            )}
             {/* Ações são terciárias: no desktop ficam discretas e só ganham cor no hover da linha;
                 no mobile ficam sempre visíveis (não há hover no touch). Antes o "Cancelar"
                 (destrutivo, raro) era o mais pesado da linha e o "Duplicar" quase sumia. */}

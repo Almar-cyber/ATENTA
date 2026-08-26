@@ -5,6 +5,7 @@ import {
   PLATFORM_CAPTION_LIMITS,
   PLATFORM_COLORS,
   PLATFORM_LABELS,
+  PLATFORM_ASPECT_RANGE,
   PLATFORM_PREVIEW_SHAPE,
   PLATFORM_RECOMMENDED_MEDIA,
   findFormat,
@@ -27,12 +28,32 @@ export interface PreviewInput {
   cover?: File;
 }
 
-const SHAPE_ASPECT: Record<string, string> = {
-  square: '1 / 1',
-  story: '9 / 16',
-  wide: '16 / 9',
-  tall: '3 / 4',
+/** Largura / altura de cada forma, em número — o `aspect-ratio` do CSS aceita número direto. */
+const SHAPE_RATIO: Record<string, number> = {
+  square: 1,
+  story: 9 / 16,
+  wide: 16 / 9,
+  tall: 3 / 4,
 };
+
+/** Teto de altura da mídia. O preview vive numa coluna com scroll, e 9:16 em largura cheia estoura. */
+const MEDIA_MAX_H = 340;
+/** Largura do card. A mídia nunca passa disso, mesmo quando a altura permitiria. */
+const CARD_MAX_W = 300;
+
+/**
+ * A largura que faz a mídia caber no teto de altura SEM mentir sobre a proporção.
+ *
+ * Antes o teto era aplicado como `maxHeight`, e isso não encolhe a largura junto: a caixa ficava
+ * 300x340 tanto pro 9:16 quanto pro 3:4, ou seja, Reel, Story, TikTok e Pinterest apareciam todos
+ * na MESMA proporção (0,88) e nenhum na sua. Numa tela cujo trabalho é dizer "é assim que vai
+ * ficar", errar a proporção é errar a única coisa que ela promete.
+ *
+ * Limitando a LARGURA, o `aspect-ratio` continua valendo e cada formato aparece no que é de fato.
+ */
+function larguraDaMidia(ratio: number): number {
+  return Math.min(CARD_MAX_W, Math.round(MEDIA_MAX_H * ratio));
+}
 
 function MediaFrame({ item, cover }: { item: QueuedMedia | undefined; cover?: File }) {
   const url = useMediaUrl(item);
@@ -127,6 +148,26 @@ export function PostPreview({ input }: { input: PreviewInput }) {
   const label = spec && spec.id !== 'post' && spec.id !== 'video' ? `${PLATFORM_LABELS[platform]} · ${spec.label}` : PLATFORM_LABELS[platform];
   const shape = spec?.shape ?? PLATFORM_PREVIEW_SHAPE[platform];
   const recommended = spec?.recommended ?? PLATFORM_RECOMMENDED_MEDIA[platform];
+
+  /**
+   * A proporção que a mídia vai ter DE VERDADE nesta rede.
+   *
+   * Regra: no feed quem manda é o arquivo (uma foto deitada sai deitada no Facebook), limitado ao
+   * que a rede aceita; nos formatos de proporção cravada (Reel, Story, Short, TikTok) quem manda é
+   * o formato, e a pré-visualização mostra o recorte que a rede vai aplicar.
+   *
+   * Sem formato definido a rede tem um só, então a faixa vale direto — é o caso de Facebook,
+   * LinkedIn e Pinterest.
+   */
+  const aspecto = useMemo(() => {
+    const doFormato = SHAPE_RATIO[shape] ?? 1;
+    const segueArquivo = spec ? spec.seguirArquivo === true : true;
+    const faixa = PLATFORM_ASPECT_RANGE[platform];
+    if (!segueArquivo || !faixa || !current?.width || !current?.height) return doFormato;
+    const real = current.width / current.height;
+    return Math.min(faixa.max, Math.max(faixa.min, real));
+  }, [shape, spec, platform, current?.width, current?.height]);
+
   const willCrop = useMemo(() => {
     if (!current?.width || !current?.height) return false;
     const fileRatio = current.width / current.height;
@@ -156,8 +197,8 @@ export function PostPreview({ input }: { input: PreviewInput }) {
 
       {media.length > 0 ? (
         <div
-          className="group/carousel relative w-full overflow-hidden bg-muted"
-          style={{ aspectRatio: SHAPE_ASPECT[shape], maxHeight: 340 }}
+          className="group/carousel relative mx-auto w-full overflow-hidden bg-muted"
+          style={{ aspectRatio: aspecto, maxWidth: larguraDaMidia(aspecto) }}
         >
           <MediaFrame item={media[safeIndex]} cover={cover} />
           {media.length > 1 && (

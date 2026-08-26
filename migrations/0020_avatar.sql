@@ -1,0 +1,15 @@
+-- Foto de perfil vira AVATAR GERADO, não arquivo guardado.
+--
+-- Antes a foto vivia no R2 (chave `avatars/<dono>`) e o `user.image` apontava pra ela. Isso custava
+-- armazenamento, cota, um endpoint de upload e um caminho de purge — tudo pra mostrar uma bolinha
+-- de 20px no cabeçalho.
+--
+-- Aqui a coluna guarda só as ESCOLHAS (~140 bytes de JSON): qual cabeça, qual expressão, qual barba,
+-- qual acessório e as três cores. O desenho é montado no navegador pelo Open Peeps (CC0, do Pablo
+-- Stanley — o mesmo autor dos doodles que a landing já usa), via DiceBear. Nada trafega, nada fica
+-- guardado, e a pessoa ganha personalização que uma foto não dava.
+--
+-- Nulo é um estado VÁLIDO e comum: quem nunca personalizou recebe um peep derivado do próprio id,
+-- sempre o mesmo, sempre diferente do peep de outra pessoa. Ou seja, ninguém fica sem rosto — o
+-- padrão é um avatar de verdade, não a inicial cinza que havia antes.
+alter table user add column avatar text;

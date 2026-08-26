@@ -18,14 +18,42 @@ import { cn } from '@/lib/utils';
 // limite, a descrição atravessava a tela inteira num monitor largo, e linha longa demais é o
 // jeito mais fácil de tornar um texto curto cansativo de ler.
 
-/** Qual doodle, nomeado pelo MOMENTO e não pelo desenho — o desenho pode ser trocado depois. */
-export type EmptyArt = 'comecando' | 'esperando' | 'conectar' | 'comemorando';
+/**
+ * Qual doodle, nomeado pelo MOMENTO e não pelo desenho — o desenho pode ser trocado depois.
+ *
+ * UM MOMENTO, UMA ARTE. Antes eram quatro chaves para nove telas, e `comecando` sozinho respondia
+ * por quatro coisas sem relação: importar histórico, agenda vazia, fila vazia e nenhuma ideia. O
+ * efeito era o oposto do que a ilustração existe para fazer — se a mesma figura aparece em toda
+ * tela vazia, ela deixa de dizer ONDE você está e vira papel de parede. Cada momento abaixo tem um
+ * desenho que só ele usa.
+ */
+export type EmptyArt =
+  | 'conectar'
+  | 'bloqueado'
+  | 'comecando'
+  | 'esperando'
+  | 'comemorando'
+  | 'agendando'
+  | 'tranquilo'
+  | 'pensando';
 
 const ART_FILE: Record<EmptyArt, string> = {
-  comecando: '/doodles/unboxing.svg',
-  esperando: '/doodles/sitting-reading.svg',
+  /** Nenhuma rede ligada ainda. Selfie: é sobre perfil, sobre você aparecer. */
   conectar: '/doodles/selfie.svg',
+  /** Conectou, mas falta permissão. Travado, e não recém-chegado — por isso não é o `conectar`. */
+  bloqueado: '/doodles/zombieing.svg',
+  /** Trazer para dentro o que já existe lá fora (importar histórico). Desencaixotar. */
+  comecando: '/doodles/unboxing.svg',
+  /** O trabalho já foi feito, os números é que ainda não chegaram. */
+  esperando: '/doodles/sitting-reading.svg',
+  /** Nada pendente, e isso é bom. */
   comemorando: '/doodles/dancing.svg',
+  /** Agenda vazia: não é problema, é só cedo. */
+  agendando: '/doodles/chilling.svg',
+  /** Fila vazia: leveza, nada puxando você. */
+  tranquilo: '/doodles/levitate.svg',
+  /** Antes de existir peça, existe ideia. */
+  pensando: '/doodles/meditating.svg',
 };
 
 export function EmptyState({

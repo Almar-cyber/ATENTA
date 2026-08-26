@@ -114,6 +114,58 @@ describe('publish outcomes', () => {
     expect(row.status).toBe('processing');
     expect(JSON.parse(row.adapter_state)).toEqual({ creation_id: 'c1' });
   });
+
+  // O erro pertence à tentativa que falhou. Quem publica na retentativa seguinte não tem erro —
+  // e sem limpar, o post saía de verdade e seguia exibindo faixa vermelha pra sempre. Aconteceu
+  // com um vídeo de 126 MB no YouTube: publicou e continuou mostrando "Network connection lost".
+  it('limpa o erro anterior ao publicar na retentativa', async () => {
+    let tentativa = 0;
+    fake('facebook', {
+      onPublish: () => {
+        tentativa++;
+        if (tentativa === 1) throw new Error('Network connection lost.');
+        return { state: 'published', externalId: 'post-9', externalUrl: 'https://fb.test/post-9' };
+      },
+    });
+    const accountId = await insertAccount({ platform: 'facebook' });
+    const targetId = await insertPost({ accountId, body: 'oi' });
+
+    await runPoller();
+    const aposFalha = await getTarget(targetId);
+    expect(aposFalha.last_error).toContain('Network connection lost');
+
+    // O backoff empurra a próxima tentativa pra frente; antecipa pra ela caber nesta varredura.
+    await env.DB.prepare(`update post_targets set next_attempt_at = null where id = ?`).bind(targetId).run();
+    await runPoller();
+
+    const publicado = await getTarget(targetId);
+    expect(publicado.status).toBe('published');
+    expect(publicado.last_error).toBeNull();
+  });
+
+  it('limpa o erro anterior ao entrar em processing', async () => {
+    let tentativa = 0;
+    fake('instagram', {
+      onPublish: () => {
+        tentativa++;
+        if (tentativa === 1) throw new Error('Network connection lost.');
+        return { state: 'processing', adapterState: { creation_id: 'c1' } };
+      },
+      onCheckStatus: () => ({ state: 'processing', adapterState: { creation_id: 'c1' } }),
+    });
+    const accountId = await insertAccount({ platform: 'instagram' });
+    const targetId = await insertPost({ accountId, platform: 'instagram', body: 'oi' });
+
+    await runPoller();
+    expect((await getTarget(targetId)).last_error).toContain('Network connection lost');
+
+    await env.DB.prepare(`update post_targets set next_attempt_at = null where id = ?`).bind(targetId).run();
+    await runPoller();
+
+    const row = await getTarget(targetId);
+    expect(row.status).toBe('processing');
+    expect(row.last_error).toBeNull();
+  });
 });
 
 describe('retry backoff', () => {

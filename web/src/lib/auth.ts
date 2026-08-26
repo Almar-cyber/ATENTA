@@ -14,6 +14,8 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
+  /** URL da foto de perfil (coluna `image` do better-auth), ou null pra cair na inicial do nome. */
+  image?: string | null;
 }
 
 async function post(path: string, body: unknown): Promise<unknown> {
@@ -54,6 +56,15 @@ export const signOut = () => post('/sign-out', {});
 // o better-auth responde INVALID_REDIRECT_URL.
 export const requestPasswordReset = (email: string) =>
   post('/request-password-reset', { email, redirectTo: '/app?redefinir=1' });
+
+/**
+ * Grava a senha nova. O `token` vem na URL do link do e-mail.
+ *
+ * Sem isto o fluxo terminava no vazio: o e-mail chegava, a pessoa clicava e caía na tela de entrar
+ * comum, sem nenhum campo pra definir a senha — o token na URL era ignorado.
+ */
+export const resetPassword = (newPassword: string, token: string) =>
+  post('/reset-password', { newPassword, token });
 
 export type SessionState = { status: 'loading' } | { status: 'out' } | { status: 'in'; user: SessionUser };
 

@@ -21,25 +21,56 @@ interface InsightsResponse {
   data?: Array<{ name: string; values?: Array<{ value?: number }> }>;
 }
 
-// Facebook: engajamento (likes/comments/shares) sai dos campos do próprio post; alcance/impressões
-// vêm de /insights, que exige `read_insights` (adicionado em oauth-urls.ts). Duas chamadas, e a de
-// insights é tolerante — se o escopo ainda não foi concedido, ainda voltamos likes/comments/shares.
+// Facebook: engajamento (likes/comments/shares) sai dos CAMPOS do próprio post, sem escopo de
+// insights. As chamadas a /insights (alcance, impressões, demografia) continuam no código, cada uma
+// no seu try/catch, mas hoje não trazem nada: `read_insights` saiu do pedido de escopo em
+// 2026-08-05 porque nunca devolveu dado e a Meta passou a recusá-lo (ver oauth-urls.ts). Elas ficam
+// como caminho pronto caso a permissão volte a valer a pena; a coleta não depende delas.
 export const facebookMetrics: MetricsFetcher = {
   async fetchPostMetrics(target: PostTarget, account: Account, env: Env): Promise<PostMetricsSnapshot | null> {
-    if (!target.external_post_id) return null;
+    // Os três `return null` desta função eram todos mudos, e por isso a coleta do Facebook ficou
+    // falhando sem deixar rastro. Cada um agora diz QUAL foi o motivo: sem isso, "nenhuma métrica"
+    // é indistinguível de "post sem engajamento" (o mesmo incidente descrito em lib/scopes.ts).
+    if (!target.external_post_id) {
+      console.error(`[metrics] facebook target ${target.id}: sem external_post_id`);
+      return null;
+    }
     const tokens = await getAccountTokens<MetaTokens>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
-    if (!tokens?.access_token) return null;
+    if (!tokens?.access_token) {
+      console.error(`[metrics] facebook conta ${account.id} (${account.display_name}): sem access_token`);
+      return null;
+    }
     const token = encodeURIComponent(tokens.access_token);
     const id = target.external_post_id;
 
-    const fieldsRes = await fetchWithRetry(
-      `https://graph.facebook.com/${GRAPH_VERSION}/${id}?fields=likes.summary(true),comments.summary(true),shares&access_token=${token}`,
-      { method: 'GET' }
-    );
-    const fieldsBody = await fieldsRes.text();
-    if (!fieldsRes.ok) return null;
+    // `shares` só existe em POST de Página. Quando publicamos uma foto, a Meta devolve o id da FOTO
+    // (o `post_id` nem sempre vem), e foto não tem esse campo — a Graph API então recusa a chamada
+    // INTEIRA com "(#100) Tried accessing nonexisting field (shares)", levando junto curtidas e
+    // comentários, que funcionariam. Por isso a segunda tentativa sem `shares`: melhor perder um
+    // número que perder os três.
+    const base = `https://graph.facebook.com/${GRAPH_VERSION}/${id}`;
+    const comShares = 'likes.summary(true),comments.summary(true),shares';
+    const semShares = 'likes.summary(true),comments.summary(true)';
+
+    let fieldsRes = await fetchWithRetry(`${base}?fields=${comShares}&access_token=${token}`, { method: 'GET' });
+    let fieldsBody = await fieldsRes.text();
+    if (!fieldsRes.ok && fieldsBody.includes('nonexisting field')) {
+      fieldsRes = await fetchWithRetry(`${base}?fields=${semShares}&access_token=${token}`, { method: 'GET' });
+      fieldsBody = await fieldsRes.text();
+    }
+    if (!fieldsRes.ok) {
+      // Antes isto era um `return null` mudo, e foi exatamente o que escondeu o defeito do id: a
+      // coleta falhava a cada varredura, `next_metrics_at` avançava como se tivesse dado certo, e a
+      // tela ficava vazia sem nenhum erro em lugar nenhum. Mesmo motivo do incidente registrado em
+      // lib/scopes.ts — "vazio" e "quebrado" precisam ser distinguíveis.
+      console.error(`[metrics] facebook post ${id}: ${fieldsRes.status} ${fieldsBody}`);
+      return null;
+    }
     const fields = safeParseJson(fieldsBody) as PostFields | undefined;
-    if (!fields) return null;
+    if (!fields) {
+      console.error(`[metrics] facebook post ${id}: resposta 200 mas não é JSON: ${fieldsBody.slice(0, 300)}`);
+      return null;
+    }
 
     const snapshot: PostMetricsSnapshot = {
       likes: fields.likes?.summary?.total_count,

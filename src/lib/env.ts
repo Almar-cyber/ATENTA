@@ -4,6 +4,20 @@ export interface Env {
   DB: D1Database;
   MEDIA: R2Bucket;
 
+  // Workers AI (wrangler.toml [ai]) — geração de legenda, src/lib/legenda.ts. Opcional no tipo
+  // porque os testes montam Env sem ele: sem o binding, a rota responde "indisponível" em vez de
+  // estourar, e todo o resto do app segue igual.
+  AI?: Ai;
+
+  // Limite por IP do atendente público da landing (wrangler.toml [[ratelimits]]). Opcional pelo
+  // mesmo motivo do AI: os testes montam Env sem ele, e ausente o endpoint segue funcionando com
+  // o teto global do D1 como única defesa.
+  ATENDENTE_LIMITE?: RateLimit;
+
+  // Limite por IP das rotas de credencial (/api/auth/sign-in, sign-up, forget-password). Opcional
+  // pelo mesmo motivo dos outros bindings: os testes montam Env sem ele.
+  LOGIN_LIMITE?: RateLimit;
+
   // Static-assets binding (wrangler.toml [assets]) serving the built React SPA from ./dist.
   // The Worker owns /api, /oauth and /privacy and delegates everything else to this.
   ASSETS: Fetcher;
@@ -18,6 +32,14 @@ export interface Env {
   // depois do App Review. O padrão restritivo é de propósito: esquecer de configurar deve travar
   // o cadastro, não escancarar.
   SIGNUP_MODE?: 'open' | string;
+
+  // Envio de e-mail transacional (redefinição de senha, vaga da lista de espera) pela Resend.
+  // Ausente = envio desligado, e os fluxos que dependem dele apenas registram no log em vez de
+  // falhar. Ver src/lib/email.ts, inclusive a nota sobre a Resend virar operadora de dados.
+  RESEND_API_KEY?: string;
+  // Remetente. Precisa ser de um domínio VERIFICADO na Resend, senão ela recusa o envio.
+  EMAIL_FROM?: string;
+
 
   // Wrangler secrets (`wrangler secret put NAME`) — never committed, never in .env.
   TOKEN_ENCRYPTION_KEY: string;
@@ -46,4 +68,16 @@ export interface Env {
 
   TIKTOK_CLIENT_KEY: string;
   TIKTOK_CLIENT_SECRET: string;
+}
+
+/**
+ * O cadastro está aberto pra qualquer um?
+ *
+ * Mora aqui, junto da variável, porque três lugares precisam da MESMA resposta e divergir entre eles
+ * é o bug caro: o portão real (`canSignUp`, em auth-server.ts), a landing (que promete "comece
+ * grátis") e a tela de entrar (que escolhe entre criar conta e lista de espera). Se a landing
+ * convidasse e o portão recusasse, a pessoa descobriria depois de digitar tudo.
+ */
+export function signupIsOpen(env: Env): boolean {
+  return env.SIGNUP_MODE === 'open';
 }

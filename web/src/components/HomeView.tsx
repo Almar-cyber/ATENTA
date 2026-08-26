@@ -140,7 +140,7 @@ export function HomeView({
             <Secao titulo="Sai a seguir">
               {resumo.proximos.length === 0 ? (
                 <EmptyState
-                  art="comecando"
+                  art="tranquilo"
                   size="sm"
                   title="Nada na fila"
                   action={

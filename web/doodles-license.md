@@ -1,6 +1,26 @@
-# Doodles da landing
+# Doodles da landing e dos estados vazios
 
 Ilustrações do **[Open Doodles](https://www.opendoodles.com/)**, de Pablo Stanley.
+
+## Onde cada uma é usada
+
+Os cinco primeiros são os passos de "Como funciona" na landing (`STEPS`, em `src/landingPage.ts`).
+Os três últimos existem só para os estados vazios do app (`EmptyArt`, em `ui/empty-state.tsx`).
+
+| Arquivo | Momento |
+| --- | --- |
+| `unboxing` | passo 1 · e "traga o que já está publicado" (importar histórico) |
+| `sitting-reading` | passo 2 · e "coletando os primeiros números" |
+| `selfie` | passo 3 · e "conecte uma rede" |
+| `levitate` | passo 4 · e "nada na fila" |
+| `dancing` | passo 5 · e "tudo em dia" |
+| `chilling` | "nada agendado ainda" |
+| `meditating` | "nenhuma ideia ainda" |
+| `zombieing` | "falta permissão para ler as métricas" |
+
+**Um momento, uma arte.** Antes havia quatro chaves para nove telas, e uma delas (`comecando`)
+respondia sozinha por quatro situações sem relação. Ilustração repetida em toda tela vazia para de
+dizer ONDE você está e vira papel de parede — que é o contrário do motivo de ela existir.
 
 **Licença: CC0 (domínio público).** "Free for Commercial and Personal Use. No need to credit,
 license, or anything." Não precisamos creditar — o arquivo existe só para registrar de onde vieram,

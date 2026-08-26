@@ -207,10 +207,29 @@ describe('GET /api/summary', () => {
     expect(r.proximos[1].media).toBeNull();
   });
 
+  // O estado mais enganoso do app: o post JÁ tentou publicar, falhou, e voltou pra fila pro retry.
+  // Sem contá-lo separado, ele fica idêntico a um post esperando a hora — a falha só apareceria
+  // 30min depois (virando "atrasado") ou horas depois (esgotando as tentativas e virando "falhou").
+  // Foi assim que uma falha real do TikTok passou despercebida até alguém abrir o post.
+  it('conta separado o que falhou e está retentando, mesmo dentro da tolerância de atraso', async () => {
+    // Agendado pro FUTURO de propósito: assim não é "atrasado" por nenhum critério, e o único
+    // motivo de aparecer é ter falhado.
+    await criarPost({ owner: alice.id, accountId: contaAlice, tag: 'retry', status: 'queued', quando: emMinutos(60) });
+    await env.DB.prepare(`update post_targets set attempt_count = 2, last_error = 'erro qualquer' where id = 'pt-retry'`).run();
+    // Um segundo post na fila, sem nenhuma tentativa: não pode ser contado.
+    await criarPost({ owner: alice.id, accountId: contaAlice, tag: 'limpo', status: 'queued', quando: emMinutos(70) });
+
+    const r = await resumoDe(alice);
+    expect(r.atencao.retentando).toBe(1);
+    expect(r.atencao.atrasados).toBe(0);
+    // Continua sendo 'queued' pro resto do app — retentando é uma LEITURA do estado, não um novo.
+    expect(r.por_status.queued).toBe(2);
+  });
+
   it('banco vazio devolve estrutura completa, não erro', async () => {
     const r = await resumoDe(alice);
     expect(r.por_status).toEqual({});
-    expect(r.atencao).toEqual({ rascunhos_vencidos: 0, atrasados: 0 });
+    expect(r.atencao).toEqual({ rascunhos_vencidos: 0, atrasados: 0, retentando: 0 });
     expect(r.proximos).toEqual([]);
   });
 });

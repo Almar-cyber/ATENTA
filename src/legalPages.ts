@@ -5,6 +5,7 @@
 // is pulled once from the ASSETS binding (bypasses the dashboard auth gate entirely, since this
 // is a direct binding call, not a routed fetch()) and inlined as a data: URI.
 import type { Env } from './lib/env.js';
+import { hashCsp } from './lib/csp.js';
 
 const STYLE = `
   :root { --brand: #52277F; --primary: #FCEC0E; --fg: #111111; --muted: #6b6270; }
@@ -45,7 +46,7 @@ const STYLE = `
 
 async function logoDataUri(env: Env): Promise<string | null> {
   try {
-    const res = await env.ASSETS.fetch(new Request('https://assets.local/atenta-wordmark.png'));
+    const res = await env.ASSETS.fetch(new Request('https://assets.local/atenta-logoetipo.png'));
     if (!res.ok) return null;
     const bytes = new Uint8Array(await res.arrayBuffer());
     let bin = '';
@@ -65,6 +66,12 @@ async function renderLegalPage(env: Env, title: string, badge: string, bodyHtml:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} — ATENTA!</title>
+<!-- Mesma lacuna e mesmo motivo da landing (ver o comentário em landingPage.ts): esta função
+     também tem <head> próprio, e sem estas tags o revisor/crawler que abre /privacy, /terms ou
+     /data-deletion via um link externo (não pelo app) cai no favicon padrão do navegador. -->
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/svg+xml" href="/atenta-icon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>${STYLE}</style>
 </head>
 <body>
@@ -91,6 +98,14 @@ ${bodyHtml}
 // operada exclusivamente por ALMAR, sem outros usuários" enquanto a landing vendia plano grátis e
 // pago — contradição que reprova submissão. Se o produto mudar de natureza, os dois arquivos mudam
 // juntos.
+
+/**
+ * Hash do único bloco embutido das páginas legais (o <style> compartilhado pelas três). Ver
+ * src/lib/csp.ts.
+ */
+export async function hashesDasPaginasLegais(): Promise<string[]> {
+  return [await hashCsp(STYLE)];
+}
 
 export function renderPrivacyPolicy(env: Env): Promise<string> {
   return renderLegalPage(
@@ -123,10 +138,48 @@ publicações no seu painel. Não usamos seus dados para publicidade, nem para t
 para qualquer finalidade que você não tenha solicitado.</p>
 
 <h2>Como armazenamos</h2>
-<p>Os tokens OAuth são criptografados com <b>AES-256-GCM</b> antes de gravados; a chave existe
-apenas como secret do servidor e nunca é devolvida por nenhum endpoint da API. Os dados ficam na
-infraestrutura da <b>Cloudflare</b> (banco D1 e armazenamento de arquivos R2), nosso único
-subprocessador de infraestrutura. Cada conta só enxerga os próprios dados.</p>
+<p>Os dados ficam na infraestrutura da <b>Cloudflare</b> (banco D1 e armazenamento de arquivos R2),
+nosso único subprocessador de infraestrutura. Cada conta só enxerga os próprios dados.</p>
+
+<h2>Como protegemos seus dados</h2>
+<p>Tratamos como <b>dado sensível</b> os tokens de acesso às suas redes sociais, as credenciais da
+sua conta e o conteúdo ainda não publicado. Estes são os mecanismos técnicos e organizacionais que
+aplicamos a eles:</p>
+<ul>
+<li><b>Criptografia em trânsito:</b> todo tráfego entre o seu navegador, o ATENTA! e as APIs das
+redes sociais passa por <b>HTTPS com TLS 1.3</b>. O servidor envia <i>HTTP Strict Transport
+Security</i>, então o navegador recusa qualquer conexão sem criptografia com este domínio.</li>
+<li><b>Criptografia em repouso:</b> os tokens OAuth são cifrados com <b>AES-256-GCM</b> na camada
+da aplicação, <i>antes</i> de chegarem ao banco. A chave existe apenas como secret do servidor, não
+está no código nem no repositório, e nenhum endpoint da API devolve token, cifrado ou não. Por
+baixo disso, o banco D1 e o armazenamento R2 da Cloudflare também são cifrados em repouso pela
+própria infraestrutura.</li>
+<li><b>Senhas:</b> nunca são guardadas em texto legível. Só o resultado de uma função de derivação
+com sal, que não permite recuperar a senha original.</li>
+<li><b>Isolamento entre contas:</b> toda consulta ao banco é filtrada pelo identificador do dono do
+dado, sem exceção, e essa regra é coberta por testes automatizados que rodam a cada alteração.
+Ninguém consegue ler o conteúdo, a mídia ou as métricas de outra pessoa, mesmo conhecendo o
+identificador do recurso.</li>
+<li><b>Acesso restrito:</b> o acesso administrativo à infraestrutura de produção é limitado às
+pessoas responsáveis pela operação do serviço, protegido por autenticação em duas etapas, e é
+concedido apenas quando necessário para manter o serviço no ar.</li>
+<li><b>Defesa da autenticação:</b> tentativas repetidas de login com senha errada são limitadas, o
+que barra ataques de força bruta. As sessões usam cookies restritos ao domínio, inacessíveis a
+scripts da página.</li>
+<li><b>Endurecimento da aplicação:</b> todas as consultas ao banco usam parâmetros vinculados
+(nunca concatenação de texto), o que elimina injeção de SQL; os arquivos enviados passam por uma
+lista de tipos permitidos; e as respostas trazem <i>Content-Security-Policy</i>,
+<i>X-Frame-Options</i>, <i>X-Content-Type-Options</i> e <i>Referrer-Policy</i>, que contêm
+execução de script indevido e incorporação da interface em sites de terceiros.</li>
+<li><b>Minimização:</b> pedimos a cada rede social o menor conjunto de permissões que permite
+publicar e ler o desempenho das <i>suas próprias</i> publicações. Não lemos mensagens privadas, não
+acessamos dados de terceiros e não guardamos o texto dos comentários que lemos, apenas quem
+comentou e quando.</li>
+<li><b>Revisão e resposta a incidentes:</b> as dependências do projeto são auditadas contra falhas
+conhecidas e o código passa por revisão de segurança periódica. Se houver um incidente que exponha
+seus dados, avisamos as pessoas afetadas e a Autoridade Nacional de Proteção de Dados nos prazos
+previstos na LGPD, com a descrição do que aconteceu e do que fazer.</li>
+</ul>
 
 <h2>Com quem compartilhamos</h2>
 <ul>
@@ -142,6 +195,15 @@ conectar sua conta do YouTube, você concorda com os
 <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">Termos de Serviço do YouTube</a>,
 e o tratamento dos seus dados pelo Google segue a
 <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Política de Privacidade do Google</a>.</p>
+<p>O uso e a transferência de informações recebidas das APIs do Google pelo ATENTA! obedecem à
+<a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Política de Dados do Usuário dos Serviços de API do Google</a>,
+inclusive aos requisitos de <b>Uso Limitado</b>. Na prática: os dados obtidos da sua Conta Google
+servem apenas para publicar o que você agendou e mostrar o desempenho dessas publicações no seu
+painel; não são vendidos, não alimentam publicidade, não são usados para treinar modelos de
+inteligência artificial e não são lidos por pessoas, salvo com a sua autorização expressa, para
+resolver um problema de suporte que você tenha relatado, por exigência legal, ou de forma agregada
+e anônima. Os dados vindos do YouTube recebem os mesmos mecanismos de proteção descritos na seção
+<i>Como protegemos seus dados</i> acima.</p>
 <p>Você pode revogar o acesso do ATENTA! aos seus dados do YouTube a qualquer momento na
 <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">página de permissões da sua Conta Google</a>
 (Segurança → Apps de terceiros com acesso à conta).</p>

@@ -3,7 +3,7 @@ import type { Env } from '../lib/env.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { safeParseJson } from '../lib/errors.js';
-import type { MetricsFetcher, PostMetricsSnapshot } from './index.js';
+import type { AccountMetricsSnapshot, MetricsFetcher, PostMetricsSnapshot } from './index.js';
 
 interface TikTokTokens {
   access_token: string;
@@ -18,6 +18,16 @@ interface VideoQueryResponse {
       comment_count?: number;
       share_count?: number;
     }>;
+  };
+}
+
+interface UserInfoResponse {
+  data?: {
+    user?: {
+      follower_count?: number;
+      likes_count?: number;
+      video_count?: number;
+    };
   };
 }
 
@@ -38,10 +48,22 @@ export const tiktokMetrics: MetricsFetcher = {
       headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ filters: { video_ids: [target.external_post_id] } }),
     });
-    if (!res.ok) return null; // sem escopo/aprovação ainda — pula sem derrubar a varredura
+    if (!res.ok) {
+      // Log em vez de null mudo: foi esse padrão que escondeu a coleta quebrada do Facebook por
+      // semanas (ver metrics/facebook.ts). "Vazio" e "quebrado" precisam ser distinguíveis.
+      console.error(`[metrics] tiktok post ${target.external_post_id}: ${res.status} ${(await res.text()).slice(0, 300)}`);
+      return null;
+    }
     const parsed = safeParseJson(await res.text()) as VideoQueryResponse | undefined;
     const video = parsed?.data?.videos?.[0];
-    if (!video) return null;
+    if (!video) {
+      // Caso NORMAL enquanto a auditoria não aprova, não um defeito: post SELF_ONLY não tem
+      // `publicaly_available_post_id`, então o adapter guardou o publish_id como external_post_id
+      // (ver checkStatus) — e /v2/video/query/ só enxerga vídeo PÚBLICO. Resolve-se sozinho quando
+      // a aprovação permitir publicar público: aí o id certo é gravado e a consulta acha.
+      console.warn(`[metrics] tiktok: nenhum vídeo público para ${target.external_post_id} (post privado?)`);
+      return null;
+    }
 
     return {
       video_views: video.view_count,
@@ -50,5 +72,37 @@ export const tiktokMetrics: MetricsFetcher = {
       shares: video.share_count,
       raw: video,
     };
+  },
+
+  /**
+   * Métricas da CONTA: quantos seguidores o perfil tem. Exige o escopo `user.info.stats`.
+   *
+   * Existe pelo mesmo motivo das outras redes: o gráfico de seguidores ao longo do tempo no
+   * Insights só tem série se alguém tirar a foto todo dia. Sem isso o TikTok apareceria no painel
+   * com métrica de post e um buraco onde as outras redes mostram crescimento de audiência.
+   *
+   * `likes_count` é o total de curtidas acumuladas do PERFIL (não de um post) e `video_count` o
+   * total de vídeos. Nenhum dos dois tem coluna própria em account_metrics, então vão no `raw` —
+   * ficam gravados para um gráfico futuro sem custar uma migração agora.
+   */
+  async fetchAccountMetrics(account: Account, env: Env): Promise<AccountMetricsSnapshot | null> {
+    const tokens = await getAccountTokens<TikTokTokens>(env.DB, account.id, env.TOKEN_ENCRYPTION_KEY);
+    if (!tokens?.access_token) return null;
+
+    const res = await fetchWithRetry(
+      'https://open.tiktokapis.com/v2/user/info/?fields=follower_count,likes_count,video_count',
+      { method: 'GET', headers: { Authorization: `Bearer ${tokens.access_token}` } }
+    );
+    if (!res.ok) {
+      // Sem log mudo: foi exatamente esse padrão que escondeu a coleta quebrada do Facebook por
+      // semanas (ver src/metrics/facebook.ts). "Vazio" e "quebrado" precisam ser distinguíveis.
+      console.error(`[metrics] tiktok conta ${account.display_name}: ${res.status} ${(await res.text()).slice(0, 300)}`);
+      return null;
+    }
+    const parsed = safeParseJson(await res.text()) as UserInfoResponse | undefined;
+    const user = parsed?.data?.user;
+    if (!user) return null;
+
+    return { followers: user.follower_count, raw: user };
   },
 };

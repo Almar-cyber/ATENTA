@@ -56,12 +56,13 @@ function asUser(user: { cookie: string }, path: string, init: RequestInit = {}):
 /** Cria uma conta + um post publicado pertencentes a `owner`. Devolve os ids. */
 async function seedOwner(owner: string, tag: string) {
   const accountId = `acc-${tag}`;
-  // media_assets não tem dono (é conteúdo endereçado por uuid opaco) — cada seed cria o seu pra
-  // satisfazer a FK de grid_previews.
+  // media_assets TEM dono desde a migração 0007 (é o que sustenta a cota por dono). O owner_id
+  // precisa ser gravado aqui: sem ele a coluna cai no default 'owner' e as mídias dos dois donos
+  // ficam indistinguíveis, o que faria os testes de mídia abaixo passarem sem provar nada.
   await env.DB.prepare(
-    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes) values (?, ?, '', 'image/jpeg', 1)`
+    `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, owner_id) values (?, ?, '', 'image/jpeg', 1, ?)`
   )
-    .bind(`md-${tag}`, `k-${tag}`)
+    .bind(`md-${tag}`, `k-${tag}`, owner)
     .run();
   const postId = `sp-${tag}`;
   const targetId = `pt-${tag}`;
@@ -93,12 +94,15 @@ async function seedOwner(owner: string, tag: string) {
 describe('isolação entre donos', () => {
   let alice: Awaited<ReturnType<typeof register>>;
   let bob: Awaited<ReturnType<typeof seedOwner>>;
+  // O user.id do Bob, pra semear registros que precisam do dono direto (ex.: media_uploads).
+  let bobUserId: string;
 
   beforeEach(async () => {
     await resetDb();
     // Duas contas de verdade; o owner_id de cada uma é o user.id que o better-auth gerou.
     alice = await register('alice@exemplo.com');
     const bobUser = await register('bob@exemplo.com');
+    bobUserId = bobUser.id;
     await seedOwner(alice.id, 'alice');
     bob = await seedOwner(bobUser.id, 'bob');
   });
@@ -252,5 +256,94 @@ describe('isolação entre donos', () => {
   it('GET /api/feed/:accountId de conta de outro dono é 404', async () => {
     const res = await call(asUser(alice, `/api/feed/${bob.accountId}`));
     expect(res.status).toBe(404);
+  });
+
+  // MÍDIA. media_assets ganhou owner_id na migração 0007 (é ele que sustenta a cota por dono), mas
+  // os dois caminhos abaixo nunca passaram a filtrar por ele.
+  //
+  // Os bytes REAIS vão pro bucket antes de cada teste, de propósito: sem o objeto no R2 a rota
+  // devolveria 404 por "arquivo não está no bucket" e o teste passaria pelo motivo errado, sem
+  // provar nada sobre autorização. Com o objeto presente, um 404 só pode vir do filtro por dono.
+  describe('mídia de outro dono', () => {
+    beforeEach(async () => {
+      await env.MEDIA.put('k-bob', 'conteudo-secreto-do-bob');
+    });
+
+    it('GET /api/media/:id/bytes de outro dono é 404 e NÃO devolve os bytes', async () => {
+      const res = await call(asUser(alice, '/api/media/md-bob/bytes'));
+      expect(res.status).toBe(404);
+      expect(await res.text()).not.toContain('conteudo-secreto-do-bob');
+    });
+
+    // Upload em partes: só `start` e `complete` recebiam o dono; `part` recebia key+upload_id pela
+    // query string e escrevia no bucket sem conferir nada. A tabela media_uploads (migração 0019)
+    // é o que liga cada upload em andamento a quem o iniciou.
+    it('PUT multipart/part num upload de outro dono é 404', async () => {
+      await env.DB.prepare(
+        `insert into media_uploads (storage_key, upload_id, owner_id, created_at) values ('k-do-bob', 'up-bob', ?, '2026-01-01T00:00:00Z')`
+      )
+        .bind(bobUserId)
+        .run();
+
+      const res = await call(
+        asUser(alice, '/api/media/multipart/part?key=k-do-bob&upload_id=up-bob&part=1', {
+          method: 'PUT',
+          body: 'bytes da alice no upload do bob',
+        })
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it('POST multipart/complete num upload de outro dono é 404 e não cria media_asset', async () => {
+      await env.DB.prepare(
+        `insert into media_uploads (storage_key, upload_id, owner_id, created_at) values ('k-do-bob2', 'up-bob2', ?, '2026-01-01T00:00:00Z')`
+      )
+        .bind(bobUserId)
+        .run();
+
+      const res = await call(
+        asUser(alice, '/api/media/multipart/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: 'md-roubada',
+            storage_key: 'k-do-bob2',
+            upload_id: 'up-bob2',
+            parts: [{ part_number: 1, etag: 'x' }],
+          }),
+        })
+      );
+      expect(res.status).toBe(404);
+
+      const criada = await env.DB.prepare(`select count(*) as n from media_assets where id = 'md-roubada'`).first<{ n: number }>();
+      expect(criada?.n ?? 0).toBe(0);
+    });
+
+    it('POST /api/posts com media_asset_id de outro dono é recusado', async () => {
+      // O campo é target_account_ids (não account_ids) e a mídia precisa de public_url: com
+      // qualquer um dos dois errado a rota recusa ANTES de resolver a mídia, e o teste passaria
+      // sem nunca ter exercitado a autorização. Já aconteceu ao escrever este próprio teste.
+      await env.DB.prepare(`update media_assets set public_url = 'https://cdn.test/bob.jpg' where id = 'md-bob'`).run();
+
+      const res = await call(
+        asUser(alice, '/api/posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target_account_ids: ['acc-alice'],
+            body: 'usando a arte do bob',
+            scheduled_for: '2030-01-01T12:00:00Z',
+            media_asset_ids: ['md-bob'],
+          }),
+        })
+      );
+      expect(res.status).toBe(400);
+
+      // E o vínculo não pode ter sido gravado: um 400 que já inseriu não protege nada.
+      const vinculo = await env.DB.prepare(
+        `select count(*) as n from post_target_media where media_asset_id = 'md-bob'`
+      ).first<{ n: number }>();
+      expect(vinculo?.n ?? 0).toBe(0);
+    });
   });
 });

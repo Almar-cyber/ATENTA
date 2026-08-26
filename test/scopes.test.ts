@@ -40,7 +40,34 @@ describe('metricsReady', () => {
 
   it('cada rede com coleta exige exatamente o escopo que a coleta usa', () => {
     expect(METRICS_SCOPES.instagram).toContain('instagram_manage_insights');
-    expect(METRICS_SCOPES.facebook).toContain('read_insights');
     expect(METRICS_SCOPES.tiktok).toContain('video.list');
+    expect(METRICS_SCOPES.youtube).toContain('https://www.googleapis.com/auth/youtube.readonly');
+  });
+
+  // Três redes ficam com a lista VAZIA, e nenhuma por esquecimento.
+  //
+  // Facebook: a métrica funciona SEM escopo de insights (curtidas, comentários e compartilhamentos
+  // vêm dos campos do post). Exigir `read_insights` aqui — como era até 2026-08-05 — marcaria toda
+  // conta como quebrada sendo que ela não está.
+  //
+  // LinkedIn e Pinterest: não há coleta possível (o LinkedIn não expõe analytics de post orgânico
+  // fora do programa de parceiros; a do Pinterest nunca foi implementada). Sem promessa, sem
+  // cobrança.
+  it('redes sem coleta possível não marcam conta nenhuma como incompleta', () => {
+    for (const rede of ['facebook', 'linkedin', 'pinterest'] as const) {
+      expect(METRICS_SCOPES[rede], `${rede} deveria ter lista vazia`).toEqual([]);
+      expect(metricsReady(rede, 'qualquer,escopo,concedido'), `${rede} não pode ser marcada`).toBe(true);
+      expect(missingMetricsScopes(rede, 'qualquer')).toEqual([]);
+    }
+  });
+
+  // O Facebook não exige escopo nenhum pra métrica: curtidas, comentários e compartilhamentos vêm
+  // dos CAMPOS do post. Exigir `read_insights` aqui (como era até 2026-08-05) marcaria toda conta
+  // como "não traz métrica" e mostraria um aviso insolúvel — o escopo saiu do pedido porque nunca
+  // devolveu dado e a Meta passou a recusá-lo (ver oauth-urls.ts).
+  it('Facebook não exige escopo pra métrica, então conta nenhuma é marcada como incompleta', () => {
+    expect(METRICS_SCOPES.facebook).toEqual([]);
+    expect(metricsReady('facebook', 'pages_show_list,pages_manage_posts')).toBe(true);
+    expect(missingMetricsScopes('facebook', 'pages_show_list')).toEqual([]);
   });
 });

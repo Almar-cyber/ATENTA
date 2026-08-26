@@ -12,6 +12,8 @@
 // lembrar: D1 não tem transação interativa, então a lib usa batch() para atomicidade.
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
+import { signupIsOpen } from './env.js';
+import { emailRedefinirSenha, enviarEmail } from './email.js';
 import type { Env } from './env.js';
 
 /**
@@ -22,7 +24,7 @@ import type { Env } from './env.js';
  * de configurar deve travar o cadastro, não escancará-lo.
  */
 async function canSignUp(email: string, env: Env): Promise<boolean> {
-  if (env.SIGNUP_MODE === 'open') return true;
+  if (signupIsOpen(env)) return true;
   const row = await env.DB.prepare(`select email from signup_invites where email = ?`)
     .bind(email.toLowerCase())
     .first<{ email: string }>();
@@ -50,15 +52,46 @@ export function createAuth(request: Request, env: Env) {
 
     emailAndPassword: {
       enabled: true,
-      // Verificação de e-mail entra junto com o envio (tarefa do Cloudflare Email Service). Ligar
-      // antes disso trancaria todo mundo do lado de fora, inclusive a operadora.
+      // Continua desligada mesmo com o envio funcionando. Ligar transformaria toda conta nova em
+      // refém da entrega do e-mail — e o cadastro hoje é por convite, então quem chega já foi
+      // conferido por outro caminho. Quando o cadastro abrir, aí sim vale reavaliar.
       requireEmailVerification: false,
       minPasswordLength: 8,
+
+      /**
+       * O e-mail de "esqueci minha senha".
+       *
+       * Sem isto, o better-auth gerava o token e não mandava nada: a tela dizia "o link chega em
+       * instantes" e não chegava nunca — pior que não ter o recurso, porque a pessoa espera. Era a
+       * pendência mais antiga do projeto, e a que fazia esquecer a senha significar perder a conta.
+       *
+       * Falha de envio NÃO derruba a requisição: a resposta ao cliente é a mesma exista ou não a
+       * conta (ver o toast em AuthView), então lançar aqui vazaria, pelo erro HTTP, quais e-mails
+       * têm cadastro.
+       */
+      sendResetPassword: async ({ user, url }) => {
+        const { assunto, html } = emailRedefinirSenha(url);
+        await enviarEmail(env, { para: user.email, assunto, html });
+      },
     },
 
     session: {
       expiresIn: 60 * 60 * 24 * 30, // 30 dias
       updateAge: 60 * 60 * 24, // renova a sessão no máximo 1x/dia
+    },
+
+    user: {
+      additionalFields: {
+        // As escolhas do avatar (Open Peeps) em JSON — ver migração 0020.
+        //
+        // Declarado aqui pra viajar junto do `get-session`: o cabeçalho já lê o usuário de lá, e
+        // sem isto precisaria de uma segunda chamada só pra saber que cara desenhar.
+        //
+        // `input: false` é o que importa em segurança: sem ele o campo entraria pelo corpo do
+        // sign-up e do update-user, e qualquer um gravaria string arbitrária no lugar. Quem escreve
+        // é só o nosso PUT /api/profile/avatar, que valida variante por variante.
+        avatar: { type: 'string', required: false, input: false },
+      },
     },
 
     databaseHooks: {

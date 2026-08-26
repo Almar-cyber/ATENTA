@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, CalendarClock, Clock, FileText, Link2 } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Clock, FileText, Link2, RotateCcw } from 'lucide-react';
 import type { Summary } from './api';
+import type { Platform } from './types';
+import { PLATFORM_LABELS } from './platforms';
 
 /**
  * O que uma pendência faz ao ser clicada — leva a outra tela, já filtrada quando for o caso.
@@ -29,6 +31,20 @@ export interface Pendencia {
 const plural = (q: number, um: string, muitos: string) => (q === 1 ? um : muitos);
 
 /**
+ * "YouTube", "YouTube e Instagram", "YouTube, Instagram e TikTok".
+ *
+ * Nomes REPETIDOS somem (duas contas do mesmo Instagram viram "Instagram", não "Instagram e
+ * Instagram"), e acima de três a lista para de crescer: o card tem uma linha, e a partir daí a
+ * quantidade já diz mais que a enumeração.
+ */
+function listar(nomes: string[]): string {
+  const unicos = [...new Set(nomes)];
+  if (unicos.length > 3) return `${unicos.length} redes`;
+  if (unicos.length === 1) return unicos[0];
+  return `${unicos.slice(0, -1).join(', ')} e ${unicos[unicos.length - 1]}`;
+}
+
+/**
  * As pendências, da mais urgente pra menos.
  *
  * A ordem é deliberada: primeiro o que já quebrou (falha, conta caída), depois o que vai quebrar se
@@ -38,7 +54,11 @@ const plural = (q: number, um: string, muitos: string) => (q === 1 ? um : muitos
  * Painel e o sino de notificações reusam esta mesma função, pra nunca discordar sobre o que é
  * pendência.
  */
-export function construirPendencias(summary: Summary | null, accounts: { status: string }[]): Pendencia[] {
+export function construirPendencias(
+  summary: Summary | null,
+  // `platform` entra junto porque o aviso de conta caída diz QUAL rede caiu, não só quantas.
+  accounts: { status: string; platform: Platform }[]
+): Pendencia[] {
   if (!summary) return [];
   const out: Pendencia[] = [];
   const s = summary.por_status;
@@ -59,12 +79,33 @@ export function construirPendencias(summary: Summary | null, accounts: { status:
     });
   }
 
-  const reauth = accounts.filter((a) => a.status === 'needs_reauth').length;
-  if (reauth > 0) {
+  // Já tentou publicar e falhou, mas segue na fila pro retry automático. Entra ANTES de "conta
+  // caiu" e de "atrasados" porque é o único estado do app que engana: na lista é idêntico a um post
+  // que só está esperando a hora, e o erro fica escondido no detalhe. Sem esta linha, a pessoa só
+  // ficaria sabendo 30min depois (quando vira "atrasado") ou horas depois (quando as tentativas
+  // esgotam e vira "falhou").
+  const retentando = summary.atencao.retentando ?? 0;
+  if (retentando > 0) {
+    out.push({
+      id: 'retentando',
+      quantidade: retentando,
+      titulo: plural(retentando, 'publicação falhou e vai tentar de novo', 'publicações falharam e vão tentar de novo'),
+      detalhe: 'ver o motivo',
+      icone: <RotateCcw className="size-4" />,
+      grave: true,
+      destino: { tipo: 'agenda', status: 'queued' },
+    });
+  }
+
+  const caidas = accounts.filter((a) => a.status === 'needs_reauth');
+  if (caidas.length > 0) {
     out.push({
       id: 'reauth',
-      quantidade: reauth,
-      titulo: plural(reauth, 'conta caiu', 'contas caíram'),
+      quantidade: caidas.length,
+      // Diz QUAL rede caiu, não só quantas. "1 conta caiu" obriga a abrir Conexões pra descobrir o
+      // que já dava pra ler aqui — e é justamente a informação que decide se você larga o que está
+      // fazendo agora (o Instagram que publica hoje) ou deixa pra depois (o Pinterest parado).
+      titulo: `${plural(caidas.length, 'conta', 'contas')} do ${listar(caidas.map((a) => PLATFORM_LABELS[a.platform]))} ${plural(caidas.length, 'caiu', 'caíram')}`,
       detalhe: 'reconectar',
       icone: <Link2 className="size-4" />,
       grave: true,

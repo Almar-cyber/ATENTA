@@ -86,6 +86,8 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `PostHoverCard` | Cartão que aparece ao passar o mouse num chip do calendário (Mês e Semana): thumbnail da peça na proporção do formato, legenda/título, conta, horário e status. Substitui o `title=` do navegador — o chip só cabe o nome da conta, e é a imagem que faz reconhecer o post. |
 | `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). |
 | `ConnectionsView` | Tela "Conexões" (botão no header): grid de cards por rede com as contas conectadas + status e botão "Conectar" que navega pra `/api/connect/:rede` (OAuth). Várias contas por rede aparecem como linhas separadas. |
+| `LegendaIA` | Botão "Sugerir legenda" ao lado do rótulo do campo. **O campo de legenda É o briefing**: a pessoa escreve uma linha do que quer dizer e gera, em vez de preencher um segundo campo com a mesma coisa. Por isso o botão nasce desabilitado, com o motivo no `Tooltip` (princípio 3: o aviso diz o que fazer). A sugestão SUBSTITUI o rascunho, então o texto anterior fica guardado e o botão vira "Desfazer a sugestão" (mesmo padrão do `GridPlanner`). O rodapé do popover diz se o histórico entrou; é o que explica por que a sugestão melhora conforme a pessoa publica. |
+| `UsoIA` | Quanto sobrou da cota diária de IA. **Só aparece nas últimas 5**: mostrar "20 de 20" em toda geração transforma uma funcionalidade generosa numa medida, e aviso que aparece sempre é aviso que ninguém lê no dia em que importa (mesma régua do ponto vermelho do `NotificationsBell`). Sempre com o teto junto ("restam 4 de 20"), porque número solto não tem escala. Componente próprio e não uma linha dentro do `LegendaIA`: a IA não para na legenda, e o segundo consumidor da cota tem que herdar esta régua em vez de inventar outra. |
 | `TagPicker` / `TagChip` | Escolher (ou **criar na hora**) o pilar de conteúdo. Criar no mesmo lugar de escolher é o que faz isto ser usado: uma tela separada de "gerenciar pilares" custaria sair do fluxo, e pilar que ninguém marca não vira insight. A cor vem de `proximaCor` (a primeira não usada), nunca sorteada — sortear repetiria tons no terceiro pilar. |
 | `PlatformIcon` | Logo oficial de cada rede (SVG inline), colorido por `PLATFORM_COLORS`. Use onde a rede precisa ficar clara (lista, semana, chips, header, preview, dialog). |
 | `AlertBanner` | Card recuado de falhas/reautenticação no topo. |
@@ -94,14 +96,18 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 ## Padrões
 
 - **Estado global**: `SchedulerProvider` (`src/store.tsx`) expõe `accounts`, `posts`, `filters`,
-  `reload`. Poll de 30s. Componentes chamam `reload()` após mutações.
+  `reload`. Poll de 60s via `GET /api/state` (uma requisição com contas+agenda+pilares+resumo, não
+  quatro), pausado enquanto a aba está oculta e disparado na hora ao voltar — requisição é o recurso
+  contado do plano grátis do Workers, e a aba de fundo era quem mais gastava. Componentes chamam
+  `reload()` após mutações.
 - **Comunicação composer ⇄ views**: bus pub-sub minúsculo (`src/lib/composer-bus.ts`) —
   `requestPrefill` (duplicar), `requestEdit` (editar o post inteiro), `requestPrefillDate` (clicar
   num dia/slot vazio) e `requestPrefillMedia` (agendar uma prévia do grid — só a mídia). O modal do
   composer fica sempre montado (translate/opacity, não desmonta) pra
   manter as assinaturas vivas e abrir já com o payload aplicado. Evita prop-drilling.
 - **Modais em split**: prefira layout horizontal (dados/form à esquerda, preview à direita) a scroll
-  vertical longo; limite a altura de mídia/preview (`PostPreview` corta em ~340px e mostra faixa
+  vertical longo; limite a altura de mídia/preview (`PostPreview` cabe em ~340px de altura — pela
+  largura, ver "Aspects do preview" — e mostra faixa
   "sem mídia" em vez de estourar formatos verticais). Ver `PostDialog` e `PostComposer`.
 - **Padrão de tamanho de botão** — três níveis, e nada fora deles:
   - `size="lg"` (h-11, uppercase): **CTA primário** de fluxo — "Novo post", "Agendar post", "Usar
@@ -143,7 +149,17 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   `richColors` fica só no ícone e no texto (verde/vermelho); o bloco pastel de fundo foi trocado
   por `var(--card)`. As classes precisam de `!`: o sonner traz o próprio `box-shadow` difuso na
   folha de estilo dele, com especificidade maior que a das utilitárias.
-- **Aspects do preview**: quem manda é o **formato** (`PLATFORM_FORMATS[p].shape`) — Reel/Story/Short são 9:16, post de feed é 4:5. `PLATFORM_PREVIEW_SHAPE` é só o fallback de quem não tem formatos.
+- **Aspects do preview**: no **feed** quem manda é o ARQUIVO, limitado à faixa que a rede aceita
+  (`PLATFORM_ASPECT_RANGE`) — uma foto deitada no Facebook aparece deitada, porque é assim que ela
+  vai sair; uma panorâmica 5:1 aparece em 1.91:1, que é o recorte que a Meta vai aplicar. Nos
+  formatos de proporção **cravada** (Reel, Story, Short, TikTok) o arquivo não tem voz e quem manda é
+  o `shape` do formato. O que separa os dois é `seguirArquivo` em `PLATFORM_FORMATS`;
+  `PLATFORM_PREVIEW_SHAPE` é o fallback de quem não tem formatos.
+  O teto de altura se aplica limitando a **largura** (`larguraDaMidia`), nunca com `max-height`:
+  `max-height` não encolhe a largura junto, então a caixa virava 300×340 tanto pro 9:16 quanto pro
+  3:4 e **Reel, Story, TikTok e Pinterest apareciam todos na mesma proporção** (0,88), nenhum na sua.
+  Numa tela cujo trabalho é dizer "é assim que vai ficar", errar a proporção é errar a única coisa
+  que ela promete. A mídia fica centralizada (`mx-auto`) quando é mais estreita que o card.
 - **Motion**: entradas de lista com stagger sutil (`delay: i*0.015`, teto 0.3s); troca de view com
   fade+slide de 150ms (evite `AnimatePresence mode="wait"` numa view que também sofre poll —
   já causou um freeze real, ver `App.tsx`: prefira remount-and-fade via `key`); itens da fila de

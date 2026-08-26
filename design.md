@@ -145,6 +145,7 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | --- | --- | --- |
 | GET | `/api/accounts` | contas conectadas (nunca devolve token) |
 | GET | `/api/summary` | o Painel: destinos por status, o que travou, e os 5 próximos a sair. Existe no servidor porque `/api/posts` é filtrada e paginada — um painel não pode mudar de número por causa de um filtro ligado noutra tela, nem contar "publicados" até o teto da página |
+| GET | `/api/state` | contas + agenda + pilares + resumo numa resposta só — é o que o poll do dashboard chama. Composição dos quatro handlers acima, não uma quinta query: requisição é o recurso contado do plano grátis do Workers, e o poll era quem mais gastava (4 por ciclo) |
 | GET | `/api/connect/:rede` | 302 pro consentimento, com nonce CSRF em cookie |
 | GET | `/api/posts` | agenda, com filtro de status/plataforma |
 | POST | `/api/posts` | cria; roda o `validate()` de cada adapter na entrada |
@@ -153,12 +154,14 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | POST | `/api/post-targets/:id/queue` · `/cancel` · `/reactivate` | transições de status |
 | DELETE | `/api/post-targets/:id` | apaga o destino, e o post junto se era o último |
 | POST | `/api/media` | upload direto (≤60MB) |
+| PUT/DELETE | `/api/profile/avatar` | avatar do usuário: guarda as ESCOLHAS (~140 bytes de JSON), não uma imagem. O desenho é montado no navegador pelo Open Peeps (CC0), então não há upload, cota nem purge. Toda variante passa por allowlist (`src/lib/avatar.ts`) porque o valor volta pra dentro de um `<svg>`. Nulo = usa o padrão derivado do id, ninguém fica sem rosto |
 | POST/PUT | `/api/media/multipart/*` | upload em partes — acima de 60MB estoura o limite de corpo (100MB) e de memória (128MB) do Worker |
 | GET | `/api/media/:id/bytes` | os bytes pela nossa origem, pro recorte no navegador não sujar o canvas |
 | GET | `/api/feed/:accountId` | feed real da conta, ao vivo (Instagram e YouTube) |
 | GET | `/api/accounts/:id/commenters` | "quem comenta com você" — agregado de `post_comments` (não busca ao vivo; comentário não expira como URL de mídia) |
 | GET/POST/PATCH/DELETE | `/api/grid-previews` | ideias: texto e/ou imagem, sem data. Recusa as duas vazias |
 | GET/POST/PATCH/DELETE | `/api/tags` | pilares de conteúdo. Nome repetido devolve o existente; apagar o pilar não apaga as peças |
+| POST | `/api/legenda` | três sugestões de legenda pelo Workers AI, no tom dos posts do próprio dono que mais engajaram naquele pilar. Teto de 20 por dono por dia (`ai_usage`), devolvido quando o modelo falha |
 
 ## 7. Princípios
 
@@ -182,7 +185,9 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | Endpoints do dashboard | `src/api.ts` |
 | Regra de cada rede (autoridade) | `src/adapters/<rede>.ts` |
 | Cifragem de token | `src/lib/crypto.ts` |
+| Content-Security-Policy (hashes dos blocos embutidos) | `src/lib/csp.ts` |
 | URLs de consentimento (Worker + CLIs) | `src/lib/oauth-urls.ts` |
+| Prompt e teto da legenda por IA | `src/lib/legenda.ts` |
 | Espelho das regras no cliente | `web/src/lib/platforms.ts` |
 | Matemática de reordenação da grade | `web/src/lib/gridOrder.ts` |
 | Design system visual | [`web/design.md`](web/design.md) |

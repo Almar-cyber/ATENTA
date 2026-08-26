@@ -1,10 +1,12 @@
 import { adapters } from './adapters/index.js';
-import { handleApiRequest } from './api.js';
-import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
-import { renderLandingPage } from './landingPage.js';
+import { handleApiRequest, handlePublicApiRequest } from './api.js';
+import { hashesDasPaginasLegais, renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
+import { hashesDaLanding, renderLandingPage } from './landingPage.js';
+import { CSP_APP, cspPaginaServida } from './lib/csp.js';
 import { nowIso, rowToAccount, rowToMediaAsset, rowToPostTarget } from './lib/db.js';
 import { createAuth } from './lib/auth-server.js';
 import { encryptJSON } from './lib/crypto.js';
+import { mensagemAmigavel } from './lib/errors.js';
 import { fetchWithRetry } from './lib/http.js';
 import { notify } from './lib/notify.js';
 import { metricsFetchers } from './metrics/index.js';
@@ -18,18 +20,24 @@ import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTa
 // Arquivos que a landing pública usa. Lista explícita em vez de liberar tudo em /assets: o resto
 // do bundle é do painel, que continua atrás do gate.
 const LANDING_PUBLIC_ASSETS = new Set([
-  '/hero.webp',
-  '/hero.png',
+  '/heroi-3d.webp',
+  '/heroi-3d.png',
   '/atenta-wordmark.png',
+  '/atenta-logoetipo.png',
   '/favicon-32.png',
   '/apple-touch-icon.png',
   '/atenta-icon.svg',
-  // Doodles dos passos (Open Doodles, CC0, recoloridos — ver web/doodles-license.md).
+  // Doodles (Open Doodles, CC0, recoloridos — ver web/doodles-license.md). Os cinco primeiros são
+  // os passos da landing; os três últimos só aparecem nos estados vazios do app, mas ficam aqui
+  // pela mesma regra — asset que o navegador busca sozinho não pode depender de sessão.
   '/doodles/unboxing.svg',
   '/doodles/sitting-reading.svg',
   '/doodles/selfie.svg',
   '/doodles/levitate.svg',
   '/doodles/dancing.svg',
+  '/doodles/chilling.svg',
+  '/doodles/meditating.svg',
+  '/doodles/zombieing.svg',
 ]);
 
 const CLAIM_BATCH_SIZE = 5;
@@ -44,6 +52,52 @@ export default {
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
+    return comCabecalhosDeSeguranca(await roteia(request, env));
+  },
+};
+
+/**
+ * Cabeçalhos de segurança em TODA resposta.
+ *
+ * Auditoria de 2026-08-06: nenhum deles existia. Aplicados no ponto único de saída porque o
+ * handler tem uma dúzia de returns — pendurar em cada um garantiria esquecer no próximo.
+ *
+ * A CSP tem tratamento próprio: as páginas que renderizamos (landing e legais) definem a delas com
+ * o hash dos blocos embutidos que servem, e o que não trouxer política cai na do app. Ver
+ * src/lib/csp.ts.
+ */
+function comCabecalhosDeSeguranca(res: Response): Response {
+  // Headers de uma Response já construída são imutáveis — daí a cópia.
+  const out = new Response(res.body, res);
+  // As páginas que renderizamos definem a própria CSP (com os hashes dos blocos embutidos delas);
+  // todo o resto — SPA, assets, respostas de API — cai na política do app.
+  if (!out.headers.has('Content-Security-Policy')) {
+    out.headers.set('Content-Security-Policy', CSP_APP);
+  }
+  // Impede o navegador de "adivinhar" o tipo de um arquivo do R2 e executá-lo como outra coisa.
+  out.headers.set('X-Content-Type-Options', 'nosniff');
+  // SAMEORIGIN e não DENY: o app não é embutido em lugar nenhum hoje, mas DENY também bloquearia
+  // um preview interno no futuro sem ganho de segurança real sobre o ataque que importa (o
+  // clickjacking vem de outra origem).
+  out.headers.set('X-Frame-Options', 'SAMEORIGIN');
+  // Não vaza o caminho interno (ex.: /app?connected=instagram) pra sites de terceiros.
+  out.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // O redirect pra HTTPS vive no toggle da zona (ver nota abaixo); o HSTS é o que impede a PRIMEIRA
+  // requisição em HTTP de existir nas visitas seguintes.
+  out.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  return out;
+}
+
+/** Cabeçalhos de uma página HTML nossa, já com a CSP que autoriza os blocos embutidos dela. */
+function htmlComCsp(hashes: string[]): Record<string, string> {
+  return {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Security-Policy': cspPaginaServida(hashes),
+  };
+}
+
+async function roteia(request: Request, env: Env): Promise<Response> {
+  {
     const url = new URL(request.url);
 
     // NOTA: forçar HTTPS fica no toggle "Always Use HTTPS" da zona (SSL/TLS → Edge Certificates no
@@ -63,22 +117,22 @@ export default {
     // segment (e.g. /privacy/almar) — some app-review forms require the company/app name to
     // literally appear in the URL to prove ownership; the suffix is otherwise ignored.
     if (/^\/privacy(\/.*)?$/.test(url.pathname)) {
-      return new Response(await renderPrivacyPolicy(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      return new Response(await renderPrivacyPolicy(env), { headers: htmlComCsp(await hashesDasPaginasLegais()) });
     }
     if (/^\/terms(\/.*)?$/.test(url.pathname)) {
-      return new Response(await renderTermsOfService(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      return new Response(await renderTermsOfService(env), { headers: htmlComCsp(await hashesDasPaginasLegais()) });
     }
     // Exigida pelo Meta no campo "Exclusão de dados do usuário" — sem uma URL de instruções (ou um
     // callback de exclusão), o app fica inelegível para submissão.
     if (/^\/data-deletion(\/.*)?$/.test(url.pathname)) {
-      return new Response(await renderDataDeletion(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      return new Response(await renderDataDeletion(env), { headers: htmlComCsp(await hashesDasPaginasLegais()) });
     }
 
     // Página pública do produto na raiz, ANTES do gate: o App Review de cada plataforma exige um
     // site que mostre o serviço, e o dashboard fica atrás de senha — um revisor batia em 401 e
     // reprovava sem ver o que o app faz. O painel em si mora em /app pra baixo.
     if (url.pathname === '/' && !url.searchParams.has('connected') && !url.searchParams.has('connect_error')) {
-      return new Response(await renderLandingPage(env), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      return new Response(await renderLandingPage(env), { headers: htmlComCsp(await hashesDaLanding()) });
     }
 
     // Assets que a landing referencia precisam ser públicos junto com ela — senão a página abre
@@ -90,6 +144,29 @@ export default {
     // Rotas de autenticação (entrar, criar conta, sair, recuperar senha). Públicas por definição —
     // é por elas que se obtém a credencial, então não podem ficar atrás do gate que elas destravam.
     if (url.pathname.startsWith('/api/auth/')) {
+      // Freio de força bruta ANTES do better-auth. Ele tem rate limit próprio, mas inerte aqui:
+      // só liga com NODE_ENV=production (que não existe no Worker) e guarda o contador em memória
+      // do isolate. Ver o comentário do LOGIN_LIMITE em wrangler.toml.
+      //
+      // Só nas rotas que gastam ou entregam credencial — /get-session é chamada em toda navegação
+      // do SPA e limitá-la derrubaria uso normal.
+      const gastaCredencial =
+        url.pathname.includes('/sign-in') ||
+        url.pathname.includes('/sign-up') ||
+        url.pathname.includes('/forget-password') ||
+        url.pathname.includes('/reset-password');
+      if (gastaCredencial && env.LOGIN_LIMITE) {
+        // CF-Connecting-IP é preenchido pela Cloudflare e o cliente não consegue forjar; o
+        // X-Forwarded-For, que seria o palpite óbvio, é cabeçalho de request e aceita qualquer coisa.
+        const ip = request.headers.get('CF-Connecting-IP') ?? 'sem-ip';
+        const { success } = await env.LOGIN_LIMITE.limit({ key: `auth:${ip}` });
+        if (!success) {
+          return new Response(
+            JSON.stringify({ message: 'Muitas tentativas seguidas. Espere um minuto e tente de novo.' }),
+            { status: 429, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+      }
       return createAuth(request, env).handler(request);
     }
 
@@ -100,6 +177,11 @@ export default {
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS.fetch(request);
     }
+
+    // Duas rotas de API que precisam viver antes do gate: quem pergunta se o cadastro está aberto,
+    // ou pede pra entrar na lista de espera, por definição ainda não tem sessão.
+    const publica = await handlePublicApiRequest(request, url, env);
+    if (publica) return publica;
 
     // Daqui pra baixo é API, e API exige sessão. 401 em JSON e SEM WWW-Authenticate de propósito:
     // aquele header é o que faz o navegador abrir a caixa de senha dele por cima do app.
@@ -112,8 +194,8 @@ export default {
     }
 
     return handleApiRequest(request, url, env, user.id);
-  },
-};
+  }
+}
 
 // Cron entrypoint. NOTE: unlike the original GitHub Actions design, Cron Triggers have no
 // built-in "run failed" email — failures here only show up in `wrangler tail` / the dashboard
@@ -531,8 +613,13 @@ async function applyPublishResult(env: Env, target: PostTarget, result: PublishR
   const ts = nowIso();
 
   if (result.state === 'published') {
+    // `last_error = null` junto: o erro é da tentativa que FALHOU, e quem publicou na retentativa
+    // seguinte não tem erro nenhum. Sem limpar, o post saía de verdade e continuava exibindo uma
+    // faixa vermelha pra sempre — foi o que aconteceu com o vídeo de 126 MB do YouTube, que
+    // publicou mas seguiu mostrando "Network connection lost". Estado que sobrevive à própria causa
+    // é pior que estado nenhum: ensina a pessoa a ignorar o vermelho.
     await env.DB.prepare(
-      `update post_targets set status = 'published', external_post_id = ?, external_url = ?, published_at = ?, updated_at = ? where id = ?`
+      `update post_targets set status = 'published', external_post_id = ?, external_url = ?, published_at = ?, last_error = null, updated_at = ? where id = ?`
     )
       .bind(result.externalId, result.externalUrl ?? null, ts, ts, target.id)
       .run();
@@ -545,7 +632,7 @@ async function applyPublishResult(env: Env, target: PostTarget, result: PublishR
     // empurraria o prazo pra sempre e o sweep nunca dispararia justamente no caso que ele existe
     // pra pegar (um container que travou no processamento da plataforma).
     await env.DB.prepare(
-      `update post_targets set status = 'processing', adapter_state = ?,
+      `update post_targets set status = 'processing', adapter_state = ?, last_error = null,
          updated_at = case when status = 'processing' then updated_at else ? end
        where id = ?`
     )
@@ -567,6 +654,18 @@ async function handlePublishError(env: Env, target: PostTarget, adapter: Platfor
 async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClass, message: string): Promise<void> {
   const ts = nowIso();
 
+  // O que vai pro `last_error` é o que a PESSOA lê no detalhe do post. Antes ia o texto cru da API,
+  // que na prática era um despejo de JSON com log_id de suporte dentro — sem dizer nem o que houve
+  // nem o que fazer. Traduzimos quando reconhecemos o erro; quando não, o técnico segue íntegro, de
+  // propósito: erro desconhecido escondido atrás de um "algo deu errado" é como a coleta do Facebook
+  // ficou quebrada em silêncio por semanas.
+  //
+  // A mensagem técnica não se perde nos casos traduzidos: ela continua indo pro notify() e pro log
+  // do Worker, que é onde se depura.
+  const amigavel = mensagemAmigavel(message);
+  const paraPessoa = amigavel ?? message;
+  if (amigavel) console.error(`[publish] ${target.platform}/${target.id}: ${message}`);
+
   if (errorClass === 'auth') {
     // Flip the account directly rather than relying on Step 0 to catch it next run: some
     // adapters (e.g. Meta page tokens, which don't track an expiry) never trip needsRefresh()
@@ -579,7 +678,7 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
     await env.DB.prepare(
       `update post_targets set status = 'queued', last_error = ?, next_attempt_at = null, updated_at = ? where id = ?`
     )
-      .bind(message, ts, target.id)
+      .bind(paraPessoa, ts, target.id)
       .run();
     await notify(env, `🔑 ${target.platform} precisa de reauth (falha na publicação): ${message}`);
     return;
@@ -587,7 +686,7 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
 
   if (errorClass === 'ambiguous') {
     await env.DB.prepare(`update post_targets set status = 'ambiguous', last_error = ?, updated_at = ? where id = ?`)
-      .bind(message, ts, target.id)
+      .bind(paraPessoa, ts, target.id)
       .run();
     await notify(env, `⚠️ ${target.platform}: publicação AMBÍGUA, confira na plataforma se saiu. ${message}`);
     return;
@@ -595,7 +694,7 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
 
   if (errorClass === 'permanent') {
     await env.DB.prepare(`update post_targets set status = 'failed', last_error = ?, updated_at = ? where id = ?`)
-      .bind(message, ts, target.id)
+      .bind(paraPessoa, ts, target.id)
       .run();
     await notify(env, `❌ ${target.platform}: falhou definitivamente. ${message}`);
     return;
@@ -605,7 +704,7 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
   const attemptCount = target.attempt_count + 1;
   if (attemptCount >= MAX_ATTEMPTS) {
     await env.DB.prepare(`update post_targets set status = 'failed', last_error = ?, attempt_count = ?, updated_at = ? where id = ?`)
-      .bind(message, attemptCount, ts, target.id)
+      .bind(paraPessoa, attemptCount, ts, target.id)
       .run();
     await notify(env, `❌ ${target.platform}: desistiu após ${attemptCount} tentativas. ${message}`);
     return;
@@ -622,7 +721,7 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
   await env.DB.prepare(
     `update post_targets set status = 'queued', last_error = ?, attempt_count = ?, next_attempt_at = ?, updated_at = ? where id = ?`
   )
-    .bind(message, attemptCount, nextAttemptAt, ts, target.id)
+    .bind(paraPessoa, attemptCount, nextAttemptAt, ts, target.id)
     .run();
 }
 
@@ -746,10 +845,13 @@ function checkState(request: Request, url: URL): { owner: string } | Response {
 
 // Sucesso: volta pro SPA (`/?connected=<plataforma>`), que abre o modal de "conta conectada".
 // Limpa o cookie de state de quebra.
+// Volta pra /app, não pra raiz. A raiz é a LANDING pública (ver o handler de fetch): mandar o
+// retorno do OAuth pra lá deixava a pessoa numa URL que, no primeiro F5, servia a página de vendas
+// em vez do painel — o app seguia funcionando até alguém recarregar, e aí "sumia".
 function connectedRedirect(url: URL, platform: string): Response {
   return new Response(null, {
     status: 302,
-    headers: { Location: `${url.origin}/?connected=${encodeURIComponent(platform)}`, 'Set-Cookie': clearStateCookie() },
+    headers: { Location: `${url.origin}/app?connected=${encodeURIComponent(platform)}`, 'Set-Cookie': clearStateCookie() },
   });
 }
 
@@ -938,9 +1040,17 @@ async function upsertAccount(
   const extraJson = JSON.stringify(extra);
   if (existing) {
     await env.DB.prepare(
-      // coalesce no scope: uma reconexão que não conseguiu descobrir o escopo (grantedScope null)
-      // não deve APAGAR o que já se sabia da conexão anterior.
-      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, extra = ?, access_token_expires_at = ?, scope = coalesce(?, scope), status = 'active', updated_at = ? where id = ?`
+      // Dois cuidados aqui, pelo MESMO motivo: reconectar não pode apagar o que já se sabia.
+      //
+      // `coalesce` no scope: reconexão que não conseguiu descobrir o escopo (grantedScope null) não
+      // deve zerar o da conexão anterior.
+      //
+      // `json_patch` no extra (em vez de sobrescrever): o extra acumula coisas descobertas em
+      // chamadas SEPARADAS e falíveis — `default_board_id` do Pinterest, `avatar_url` do TikTok. Com
+      // `extra = ?`, uma reconexão em que a busca de boards falhasse gravaria `{}` e apagaria o
+      // board padrão, sem erro nenhum. json_patch mescla: chave nova entra, chave existente é
+      // preservada quando não vem no payload, e `{}` não mexe em nada.
+      `update accounts set display_name = ?, token_ciphertext = ?, token_iv = ?, extra = json_patch(extra, ?), access_token_expires_at = ?, scope = coalesce(?, scope), status = 'active', updated_at = ? where id = ?`
     )
       .bind(displayName, ciphertext, iv, extraJson, expiresAt, grantedScope, ts, existing.id)
       .run();
@@ -1031,18 +1141,37 @@ async function handleTiktokCallback(code: string, request: Request, url: URL, en
     scope?: string;
   };
 
-  const infoRes = await fetchWithRetry('https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name', {
-    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
-  });
-  const infoJson = infoRes.ok ? ((await infoRes.json()) as { data?: { user?: { display_name?: string } } }) : {};
+  // `avatar_url` vem junto no MESMO escopo `user.info.basic` que já pedíamos — não custa permissão
+  // nova. Capturamos aqui, na conexão, porque um campo novo depois obrigaria a reconectar a conta
+  // só pra buscá-lo. Guardado em `extra`, ainda sem tela que o exiba (ver Pendências no README).
+  const infoRes = await fetchWithRetry(
+    'https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url',
+    { headers: { Authorization: `Bearer ${tokenJson.access_token}` } }
+  );
+  const infoJson = infoRes.ok
+    ? ((await infoRes.json()) as { data?: { user?: { display_name?: string; avatar_url?: string } } })
+    : {};
   const displayName = infoJson.data?.user?.display_name || 'TikTok';
+  const avatarUrl = infoJson.data?.user?.avatar_url;
 
   const { ciphertext, iv } = await encryptJSON(
     { access_token: tokenJson.access_token, refresh_token: tokenJson.refresh_token },
     env.TOKEN_ENCRYPTION_KEY
   );
   const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
-  await upsertAccount(env, 'tiktok', displayName, tokenJson.open_id, ciphertext, iv, nowIso(), {}, expiresAt, checked.owner, tokenJson.scope ?? null);
+  await upsertAccount(
+    env,
+    'tiktok',
+    displayName,
+    tokenJson.open_id,
+    ciphertext,
+    iv,
+    nowIso(),
+    avatarUrl ? { avatar_url: avatarUrl } : {},
+    expiresAt,
+    checked.owner,
+    tokenJson.scope ?? null
+  );
 
   return connectedRedirect(url, 'tiktok');
 }

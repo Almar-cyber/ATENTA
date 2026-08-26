@@ -55,6 +55,29 @@ export const PLATFORM_MULTI_IMAGE_ONLY: Partial<Record<Platform, boolean>> = {
 };
 
 export type PreviewShape = 'square' | 'story' | 'wide' | 'tall';
+/**
+ * A faixa de proporção que o FEED da rede aceita (largura ÷ altura).
+ *
+ * Serve pra pré-visualização seguir o arquivo de verdade em vez de encaixá-lo numa forma fixa: uma
+ * foto deitada publicada no Facebook aparece deitada, que é como ela vai sair. Sem isto, todo post
+ * de feed era desenhado quadrado e a tela mentia sobre o resultado.
+ *
+ * Quem NÃO está aqui tem proporção cravada pela própria rede (Reel, Story, Short, TikTok são 9:16;
+ * vídeo do YouTube é 16:9) — ali o arquivo não manda, o formato manda.
+ *
+ * A faixa da Meta (4:5 a 1.91:1) é regra dura de API, não estética: fora dela o container é
+ * RECUSADO (design.md §5). Este mapa é espelho de cliente, como os outros PLATFORM_* — quem decide
+ * de verdade continua sendo o `validate()` do adapter.
+ */
+export const PLATFORM_ASPECT_RANGE: Partial<Record<Platform, { min: number; max: number }>> = {
+  instagram: { min: 4 / 5, max: 1.91 },
+  facebook: { min: 4 / 5, max: 1.91 },
+  linkedin: { min: 4 / 5, max: 1.91 },
+  // Pinterest é uma rede vertical: deitado cabe, mas some no feed. O teto em 1:1 evita prometer um
+  // enquadramento que a rede não vai favorecer.
+  pinterest: { min: 0.5, max: 1 },
+};
+
 export const PLATFORM_PREVIEW_SHAPE: Record<Platform, PreviewShape> = {
   instagram: 'square',
   facebook: 'square',
@@ -173,6 +196,13 @@ export interface PostFormat {
   multiple: boolean;
   /** Aceita imagem de capa própria. */
   coverImage: boolean;
+  /**
+   * A proporção segue o ARQUIVO (dentro de `PLATFORM_ASPECT_RANGE`) em vez do `shape`.
+   *
+   * Só vale pro feed: Reel, Story e Short saem 9:16 doa a quem doer, então neles o arquivo não tem
+   * voz e a pré-visualização mostra o recorte que a rede vai aplicar.
+   */
+  seguirArquivo?: boolean;
 }
 
 export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
@@ -186,6 +216,7 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
       media: 'any',
       multiple: true,
       coverImage: false,
+      seguirArquivo: true,
     },
     {
       id: 'reel',

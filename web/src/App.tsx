@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, CalendarDays, CheckCircle2, LayoutDashboard, Link2, LogOut, Plus } from 'lucide-react';
+import { BarChart3, CalendarDays, CheckCircle2, LayoutDashboard, Link2, LogOut, Plus, Smile } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
@@ -33,6 +33,8 @@ import { FilterMenu } from '@/components/FilterMenu';
 import { PostDialog } from '@/components/PostDialog';
 import { AuthView } from '@/components/AuthView';
 import { useSession, signOut, type SessionUser } from '@/lib/auth';
+import { AvatarUsuario } from '@/components/AvatarUsuario';
+import { AvatarDialog } from '@/components/AvatarDialog';
 import type { DialogSelection } from '@/components/PostDialog';
 
 /**
@@ -62,6 +64,7 @@ function Header({
   onIr,
   user,
   onSignedOut,
+  onProfileChanged,
 }: {
   screen: Screen;
   onNavigate: (s: Screen) => void;
@@ -70,15 +73,18 @@ function Header({
   onIr: (destino: PainelDestino) => void;
   user: SessionUser;
   onSignedOut: () => void;
+  /** Revalida a sessão — é o que faz o avatar novo aparecer sem recarregar a página. */
+  onProfileChanged: () => void;
 }) {
   const { accounts } = useScheduler();
+  const [avatarAberto, setAvatarAberto] = useState(false);
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 px-3 pb-2 pt-4 sm:gap-4 sm:px-6 sm:pt-6">
       {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores. */}
       <button type="button" onClick={() => onNavigate('home')} aria-label="Ir para o Painel" className="cursor-pointer">
         {/* Menor no celular: a 375px o wordmark em h-10 sozinho já não deixava o "Novo post" caber
             na mesma fileira, e o cabeçalho quebrava numa terceira linha. */}
-        <img src="/atenta-wordmark.png" alt="ATENTA!" className="h-8 w-auto sm:h-10" />
+        <img src="/atenta-logoetipo.png" alt="ATENTA!" className="h-8 w-auto sm:h-10" />
       </button>
       {/* No desktop largo a navegação senta ao lado do wordmark. Em qualquer largura menor — do
           celular até uma janela estreita de desktop — ela desce pra própria fileira, e fica
@@ -158,12 +164,20 @@ function Header({
         {/* Num app multi-conta, saber EM QUAL conta você está deixou de ser detalhe: o mesmo
             navegador pode ter entrado com outro e-mail. Por isso o e-mail aparece no menu, e não
             só um botão "Sair" solto. O menu também afasta o Sair do CTA primário ao lado. */}
+        <AvatarDialog user={user} open={avatarAberto} onClose={() => setAvatarAberto(false)} onSaved={onProfileChanged} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="lg" variant="outline" aria-label="Sua conta" className="px-3">
-              <span className="grid size-5 place-items-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-                {(user.name || user.email).trim().charAt(0).toUpperCase()}
-              </span>
+            {/* Botão redondo em que o avatar OCUPA tudo: com o padding padrão sobrava o desenho em
+                20px dentro de 44px (45% de ocupação), e o rosto ficava ilegível no meio do vazio.
+                `p-0` + `size-11` transformam o próprio botão na moldura do avatar. */}
+            <Button
+              size="lg"
+              variant="outline"
+              aria-label="Sua conta"
+              className="size-11 overflow-hidden rounded-full p-0"
+            >
+              {/* 40 = 44 do botão menos os 2px de borda de cada lado. */}
+              <AvatarUsuario user={user} size={40} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
@@ -171,6 +185,11 @@ function Header({
               <span className="block text-xs text-muted-foreground">Conectado como</span>
               <span className="block truncate font-medium">{user.email}</span>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setAvatarAberto(true)}>
+              <Smile className="size-4" />
+              Personalizar avatar
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onOpenConnections}>
               <Link2 className="size-4" />
@@ -235,7 +254,15 @@ function accountFilter(posts: Post[], accountId: string): Post[] {
   return out;
 }
 
-function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () => void }) {
+function Dashboard({
+  user,
+  onSignedOut,
+  onProfileChanged,
+}: {
+  user: SessionUser;
+  onSignedOut: () => void;
+  onProfileChanged: () => void;
+}) {
   const { posts, accounts, filters, setFilters, reload } = useScheduler();
   const [view, setView] = useState<View>('list');
   // O Painel é a tela inicial: o app não tinha porta de entrada, você caía direto numa lista sem
@@ -276,11 +303,19 @@ function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =
       toast.error(
         missing
           ? `${err} ainda não está configurado — falta definir o secret ${missing} no Worker (wrangler secret put ${missing}).`
-          : 'Não foi possível conectar a conta. Tente de novo.'
+          : // O texto do limite vem daqui e não do servidor porque a resposta é um REDIRECT 302 pro
+            // app, não um JSON: não há corpo onde carregar a mensagem. O motivo viaja no query
+            // string e a frase mora no cliente.
+            reason === 'limite_contas'
+            ? 'Você já conectou o número de contas do plano gratuito. A assinatura que amplia esse limite ainda não está disponível. Estamos liberando o acesso aos poucos.'
+            : 'Não foi possível conectar a conta. Tente de novo.'
       );
     }
     if (connected || err) {
-      window.history.replaceState({}, '', window.location.pathname);
+      // Sempre '/app', não `window.location.pathname`. Usar o pathname recebido só reproduzia o
+      // endereço em que a pessoa caiu — e o callback antigo mandava pra raiz, que é a LANDING. A
+      // URL ficava em '/', o app seguia funcionando, e no primeiro F5 aparecia a página de vendas.
+      window.history.replaceState({}, '', '/app');
     }
   }, [reload]);
 
@@ -334,6 +369,7 @@ function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =
         onIr={irPara}
         user={user}
         onSignedOut={onSignedOut}
+        onProfileChanged={onProfileChanged}
       />
       <main className="min-h-0 flex-1 px-3 pb-3 pt-2 sm:px-6 sm:pb-6">
         {screen === 'home' ? (
@@ -388,7 +424,7 @@ function Dashboard({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =
       </main>
 
       <ComposerModal open={composerOpen} onClose={closeComposer}>
-        <PostComposer onRequestOpen={openComposer} onDone={closeComposer} />
+        <PostComposer aberto={composerOpen} onRequestOpen={openComposer} onDone={closeComposer} />
       </ComposerModal>
 
       <Dialog open={justConnected} onOpenChange={(v) => !v && setJustConnected(false)}>
@@ -434,7 +470,7 @@ export default function App() {
   // posts no mount, e sem sessão essas chamadas voltariam vazias e ficariam em cache no estado.
   return (
     <SchedulerProvider>
-      <Dashboard user={session.user} onSignedOut={() => void refresh()} />
+      <Dashboard user={session.user} onSignedOut={() => void refresh()} onProfileChanged={() => void refresh()} />
     </SchedulerProvider>
   );
 }

@@ -1,4 +1,4 @@
-name = "social-scheduler"
+name = "atenta"
 main = "src/worker.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
@@ -23,6 +23,13 @@ database_id = "ae4c3e52-8249-4007-a2fe-e1c1a871d80f"
 binding = "MEDIA"
 bucket_name = "social-scheduler-media"
 
+# Persiste os logs do Worker no painel da Cloudflare (busca e filtro depois do fato). Sem isso, a
+# única forma de ver o que aconteceu é `wrangler tail` com o terminal aberto na hora — uma falha às
+# 3h da manhã não deixa rastro. É o que falta pro TODO de alerta de falha em runPoller().
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # The built React app (web/ → dist/) is served from here. run_worker_first = true means the Worker's
 # fetch() runs for every request; it handles /api, /oauth and /privacy and calls env.ASSETS.fetch()
 # for everything else. not_found_handling serves index.html for unknown paths (SPA behaviour).
@@ -32,13 +39,91 @@ directory = "./dist"
 not_found_handling = "single-page-application"
 run_worker_first = true
 
+# Workers AI: a geração de legenda (src/lib/legenda.ts).
+#
+# É a MESMA Cloudflare, e essa é a razão de não ser a API da Anthropic nem da OpenAI. A declaração
+# de tratamento de dados enviada à Meta diz que a Cloudflare é a ÚNICA operadora; mandar a legenda
+# de um cliente pra um terceiro obriga a voltar lá e declarar um segundo operador (foi o que o
+# Resend já custou). Aqui o dado não sai de onde já estava.
+#
+# Custo: 10.000 Neurons/dia de graça, e uma legenda gasta ~28 (ver o cálculo em legenda.ts). Não
+# precisa de conta nova nem de secret.
+[ai]
+binding = "AI"
+# Não existe Workers AI local: mesmo em `wrangler dev` a chamada sai pra infra da Cloudflare. Marcar
+# explícito silencia o aviso a cada reload e deixa claro que testar aqui consome a MESMA cota do
+# ambiente publicado.
+remote = true
+
+# Limite por IP do atendente da landing (/api/atendente).
+#
+# Ele é o ÚNICO endpoint de IA sem sessão, então é o único que qualquer um na internet alcança. Sem
+# isto, um laço de shell queima os 10.000 Neurons do dia e derruba junto a sugestão de legenda de
+# quem paga.
+#
+# ATENÇÃO ao que este binding NÃO faz: ele conta por localização da Cloudflare, não globalmente.
+# Serve contra um abusador só; contra tráfego distribuído quem segura é o TETO_ATENDENTE em
+# atendente.ts, que é global porque vive no D1. Os dois juntos, nenhum sozinho.
+[[ratelimits]]
+name = "ATENDENTE_LIMITE"
+namespace_id = "2001"
+  [ratelimits.simple]
+  # 5 perguntas por minuto: conversa real não passa disso, e o período só aceita 10 ou 60.
+  limit = 5
+  period = 60
+
+# Limite das rotas de CREDENCIAL (entrar, criar conta, recuperar senha), por IP.
+#
+# POR QUE PRECISA EXISTIR: o better-auth traz rate limit próprio, mas ele só liga quando
+# `NODE_ENV === "production"` — variável que não existe dentro do Worker — e, mesmo ligado, guarda o
+# contador em MEMÓRIA, que num Worker é por isolate e some a cada reciclagem. Auditoria de
+# 2026-08-06 confirmou na prática: 8 tentativas seguidas de senha errada em produção, oito 401,
+# nenhum 429. Ou seja, força bruta de senha não tinha nenhum freio.
+#
+# 8 por minuto: erro de digitação de quem sabe a senha cabe folgado; varredura de dicionário, não.
+# Mesma ressalva do ATENDENTE_LIMITE: o contador é por localização da Cloudflare, então segura o
+# atacante único e não um ataque distribuído. Contra o distribuído o que vale é senha forte e, mais
+# à frente, 2FA — mas "não segura tudo" não é motivo pra não segurar o caso comum.
+[[ratelimits]]
+name = "LOGIN_LIMITE"
+namespace_id = "2002"
+  [ratelimits.simple]
+  limit = 8
+  period = 60
+
 [triggers]
-crons = ["*/10 * * * *"]
+# De minuto em minuto, não de 10 em 10.
+#
+# O motivo não é precisão de horário (embora resolva: agendar 12:07 saía às 12:10). É VAZÃO. Cada
+# varredura publica no máximo CLAIM_BATCH_SIZE destinos, então o cron multiplica o teto do sistema
+# inteiro: a cada 10min o app publica no máximo 720 posts/dia somando todas as contas; a cada 1min,
+# 7.200. O sintoma de bater nesse teto seria péssimo de diagnosticar — posts saindo com atraso
+# crescente, sem erro nenhum, porque a fila anda 5 por vez.
+#
+# Custo: 1.440 invocações/dia contra o limite de 100.000/dia do plano free (1,4%). O que vai apertar
+# quando houver usuários de verdade é o tráfego do próprio dashboard, não isto.
+# Forma canônica "* * * * *", não "*/1 * * * *": as duas são equivalentes em cron padrão, mas com a
+# segunda a Cloudflare seguiu disparando de 10 em 10 minutos (o ritmo anterior) mesmo depois do
+# deploy reportar o novo schedule.
+crons = ["* * * * *"]
 
 [vars]
 # Custom R2 domain (see README) — used to build media_assets.public_url when a file is uploaded
 # through the dashboard. Not secret, just config; leave empty to skip public_url resolution.
 MEDIA_PUBLIC_BASE_URL = "https://scheduler-media.omangue.co"
+
+# Cadastro ABERTO. Aberto em 13/08/2026 pelas revisões de plataforma: com convite, quem analisa o
+# app cai na lista de espera e reprova por acesso — foi o risco que o funcionalidades.md §6.2 já
+# apontava. Uma conta de revisor pronta resolveria só metade, porque ela está vazia (nenhuma rede
+# conectada), e o revisor precisa percorrer o fluxo inteiro, do cadastro à publicação.
+#
+# A MESMA chave governa os três lugares que precisam concordar: o portão de verdade
+# (`signupIsOpen`), a frase da landing ("hoje o acesso é por convite" some sozinha) e a tela de
+# entrar, que deixa de oferecer a lista de espera. Ausente = fechado, que é o padrão restritivo de
+# propósito: esquecer de configurar trava o cadastro em vez de escancarar.
+#
+# Pra fechar de novo depois das aprovações: apague esta linha e `npm run deploy`.
+SIGNUP_MODE = "open"
 
 # Secrets — set with `wrangler secret put NAME`, never committed here:
 #   TOKEN_ENCRYPTION_KEY   (openssl rand -base64 32)

@@ -21,6 +21,25 @@ export function getAccounts(): Promise<{ accounts: Account[] }> {
 }
 
 /**
+ * Estado do cadastro, perguntado ANTES de a pessoa digitar qualquer coisa.
+ *
+ * Enquanto o App Review da Meta não aprova, o cadastro é só por convite (SIGNUP_MODE em
+ * src/lib/env.ts) — e a tela precisa saber disso pra oferecer a lista de espera em vez de deixar
+ * alguém preencher nome, e-mail e senha pra só então tomar um "cadastro fechado".
+ */
+export function getPublicConfig(): Promise<{ signup_open: boolean }> {
+  return req('/api/config');
+}
+
+export function joinWaitlist(email: string, name?: string): Promise<{ ok: true }> {
+  return req('/api/waitlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, name }),
+  });
+}
+
+/**
  * Um pilar de conteúdo ("bastidores", "produto", "viagem").
  *
  * Tabela própria e não texto livre: o destino delas é um agrupamento no Insights, e agrupar por
@@ -89,12 +108,41 @@ export interface Summary {
     rascunhos_vencidos: number;
     /** Na fila e já passou da tolerância: a varredura devia ter pego. */
     atrasados: number;
+    /**
+     * Na fila, mas JÁ tentou publicar e falhou (volta pro retry automático).
+     *
+     * Separado de `atrasados` porque é o estado mais enganoso do app: na lista fica idêntico a um
+     * post que só está esperando a hora, e o erro só aparece abrindo o detalhe. Sem contar isto, a
+     * pessoa só descobriria a falha 30min depois (a tolerância de `atrasados`) ou quando as
+     * tentativas esgotassem e virasse `failed`, o que leva horas.
+     */
+    retentando: number;
   };
   proximos: ProximoPost[];
 }
 
 export function getSummary(): Promise<Summary> {
   return req('/api/summary');
+}
+
+/**
+ * As quatro leituras do poll (contas, agenda, pilares e resumo) numa requisição só.
+ *
+ * É o que o store usa em vez de quatro chamadas paralelas: requisição é o recurso contado do
+ * plano gratuito do Workers, e o poll é de longe quem mais gasta. Os filtros valem como em
+ * getPosts.
+ */
+export function getState(params: { status?: string; platform?: string } = {}): Promise<{
+  accounts: Account[];
+  posts: Post[];
+  tags: Tag[];
+  summary: Summary;
+}> {
+  const q = new URLSearchParams();
+  if (params.status) q.set('status', params.status);
+  if (params.platform) q.set('platform', params.platform);
+  q.set('limit', '300');
+  return req(`/api/state?${q.toString()}`);
 }
 
 // Métricas coletadas (Fase A). `null` = a rede não expõe aquela métrica pra esse post.
@@ -234,22 +282,47 @@ export async function uploadMedia(
     }
   );
 
-  const parts: Array<{ part_number: number; etag: string }> = [];
   const total = Math.ceil(file.size / PART_SIZE_BYTES);
-  for (let i = 0; i < total; i++) {
-    const chunk = file.slice(i * PART_SIZE_BYTES, (i + 1) * PART_SIZE_BYTES);
-    const query = new URLSearchParams({
-      key: started.storage_key,
-      upload_id: started.upload_id,
-      part: String(i + 1),
-    });
-    const part = await req<{ part_number: number; etag: string }>(`/api/media/multipart/part?${query}`, {
-      method: 'PUT',
-      body: chunk,
-    });
-    parts.push(part);
-    onProgress?.((i + 1) / total);
+  const parts: Array<{ part_number: number; etag: string }> = new Array(total);
+
+  // Partes sobem EM PARALELO, não uma esperando a outra.
+  //
+  // O R2 aceita as partes em qualquer ordem (a ordem final vem do part_number que mandamos junto),
+  // então serializar era desperdício puro: um vídeo de 1min sobe em 10-20 partes, e sequencialmente
+  // isso vira minutos de espera com a tela parada em "Agendando...". Com 4 em voo o tempo cai perto
+  // de um quarto — o teto real passa a ser a banda de subida, não a latência somada.
+  //
+  // Por que 4 e não "todas de uma vez": o navegador já limita conexões por host (6 no Chrome), e
+  // estourar esse limite só enfileira no nível do socket, sem ganho — e ainda concorre com as outras
+  // chamadas do app. 4 deixa folga.
+  const EM_PARALELO = 4;
+  let concluidas = 0;
+  let proxima = 0;
+
+  async function trabalhador(): Promise<void> {
+    for (;;) {
+      const i = proxima++;
+      if (i >= total) return;
+      const chunk = file.slice(i * PART_SIZE_BYTES, (i + 1) * PART_SIZE_BYTES);
+      const query = new URLSearchParams({
+        key: started.storage_key,
+        upload_id: started.upload_id,
+        part: String(i + 1),
+      });
+      parts[i] = await req<{ part_number: number; etag: string }>(`/api/media/multipart/part?${query}`, {
+        method: 'PUT',
+        body: chunk,
+      });
+      // Progresso por partes CONCLUÍDAS, não pelo índice: em paralelo elas terminam fora de ordem, e
+      // usar o índice faria a barra pular pra frente e voltar.
+      concluidas++;
+      onProgress?.(concluidas / total);
+    }
   }
+
+  // Se uma parte falhar, o Promise.all rejeita e o erro sobe — o upload inteiro é abortado em vez de
+  // completar com um buraco no meio do arquivo.
+  await Promise.all(Array.from({ length: Math.min(EM_PARALELO, total) }, () => trabalhador()));
 
   return req<UploadedMedia>('/api/media/multipart/complete', {
     method: 'POST',
@@ -369,5 +442,19 @@ export function reschedule(orderedPostIds: string[]): Promise<{ ok: true; reorde
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ordered_post_ids: orderedPostIds }),
+  });
+}
+
+// Sugestão de legenda pelo Workers AI. `assunto` é o que a pessoa já digitou no campo — o rascunho
+// dela É o briefing, então não existe um segundo campo pra preencher.
+export function sugerirLegenda(input: {
+  assunto: string;
+  plataforma: string;
+  tag_id?: string | null;
+}): Promise<{ sugestoes: string[]; restam: number; teto: number; usou_historico: boolean }> {
+  return req('/api/legenda', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
   });
 }

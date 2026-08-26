@@ -89,4 +89,19 @@ describe('OAuth callback error surfacing', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/html');
   });
+  // O retorno do OAuth precisa cair no PAINEL, não na raiz — a raiz é a landing pública, e uma URL
+  // "/" no navegador significa que o primeiro F5 troca o painel pela página de vendas. O app seguia
+  // funcionando até alguém recarregar, e aí "sumia": foi assim que o defeito passou despercebido.
+  it('erro de configuração redireciona para /app, nunca para a raiz', async () => {
+    // Sem o secret configurado, /api/connect/:rede redireciona com connect_error. Não precisa de
+    // sessão válida pra checar o DESTINO do redirect quando o erro é de configuração.
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(new Request(`${ORIGIN}/api/connect/pinterest`), env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    const destino = res.headers.get('Location');
+    if (destino && destino.includes('connect_error')) {
+      expect(new URL(destino).pathname, 'redirect do OAuth não pode cair na landing').toBe('/app');
+    }
+  });
 });

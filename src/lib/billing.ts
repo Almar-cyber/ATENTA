@@ -8,15 +8,66 @@ import type { Env } from './env.js';
 // (pesquisa 02/08/2026 — nenhuma ferramenta BR com preço público tem grátis de verdade), e o custo
 // de infra por usuário é irrisório. O free é a porta de entrada; o PRO vende quem cresceu.
 
-export const TRIAL_DAYS = 14; // padrão do mercado (mLabs, KingHost, Zoho, Buffer, Later)
+// 7, não os 14 do padrão de mercado: o produto entrega o valor central (planejar o feed e ver a
+// peça antes de publicar) na primeira sessão, não na terceira semana. Trial longo demais só adia a
+// decisão de quem já se convenceu, e dá tempo de esfriar pra quem não.
+//
+// Este número é PROMETIDO na landing ("Testar 7 dias grátis"): mudar aqui sem mudar lá é vender uma
+// coisa e entregar outra.
+export const TRIAL_DAYS = 7;
 
 /** Limites do plano gratuito. Passar deles é o que motiva o upgrade. */
 export const FREE_LIMITS = {
   connections: 1,
-  postsPerMonth: 10,
+  // 5, não 10: com 10 dá pra manter um perfil pequeno indefinidamente de graça, e a decisão de
+  // assinar nunca chega. Cinco cobre experimentar o produto de verdade (planejar uma semana de
+  // feed) sem virar o plano definitivo de ninguém.
+  //
+  // Este número aparece em QUATRO lugares na landing (hero, FAQ, CTA final) e é o que a pessoa lê
+  // antes de criar conta — mudar aqui sem mudar lá é prometer uma coisa e entregar outra.
+  postsPerMonth: 5,
   /** Dias de histórico de métricas visíveis. */
   metricsHistoryDays: 30,
 } as const;
+
+/**
+ * A partir de quando os limites do plano gratuito passam a valer.
+ *
+ * POR QUE UM CORTE POR DATA, e não simplesmente aplicar a todos: no dia em que o cadastro abriu
+ * (13/08/2026), as duas contas reais já usavam MUITO acima do que a landing anuncia — 5 e 4 redes
+ * conectadas, 63 e 234 posts no mês. Ligar os limites de uma vez as travaria na hora, e limite que
+ * quebra quem já usa não é limite, é incidente.
+ *
+ * Com o corte, a promessa da landing ("1 conta e 5 posts por mês") passa a ser verdade pra quem
+ * chega — inclusive pra quem analisa o app — sem derrubar quem já estava dentro.
+ *
+ * QUANDO A COBRANÇA ENTRAR: esta constante deixa de fazer sentido, porque aí o que decide o limite
+ * é o plano da pessoa, não a data em que ela chegou. Apagar junto com a virada.
+ */
+export const LIMITES_DESDE = '2026-08-13T00:00:00.000Z';
+
+/**
+ * Os limites valem pra esta conta?
+ *
+ * Sem data conhecida devolve `true` (restritivo): uma linha de usuário sem `createdAt` é anomalia,
+ * e na dúvida é melhor barrar de mais que liberar de mais.
+ */
+export function limitesValemPara(userCreatedAt: string | null | undefined): boolean {
+  if (!userCreatedAt) return true;
+  return userCreatedAt >= LIMITES_DESDE;
+}
+
+/**
+ * O aviso que a pessoa lê ao bater num limite.
+ *
+ * NÃO diz "assine para liberar": a assinatura não existe — o `billing.ts` não é importado por
+ * ninguém e a tabela `subscriptions` nem foi criada. Mandar assinar seria vender uma porta que não
+ * abre, que é pior que o limite em si. O texto assume a verdade: o teto é este por enquanto, e o
+ * plano que amplia ainda não saiu.
+ */
+export function avisoDeLimite(oQueAcabou: string): string {
+  return `${oQueAcabou} A assinatura que amplia esse limite ainda não está disponível. Estamos liberando o acesso aos poucos.`;
+}
 
 export type Plan = 'free' | 'trialing' | 'active' | 'past_due' | 'canceled';
 

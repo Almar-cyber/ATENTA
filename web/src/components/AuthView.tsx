@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
-import { requestPasswordReset, signIn, signUp } from '@/lib/auth';
+import { requestPasswordReset, resetPassword, signIn, signUp } from '@/lib/auth';
+import { getPublicConfig, joinWaitlist } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,29 +14,43 @@ import { Label } from '@/components/ui/label';
 // é um campo, e quem erra o modo (o caso comum é tentar entrar sem ter conta) muda com um clique
 // sem perder o que já digitou — os campos são os mesmos, o estado é o mesmo.
 
-type Mode = 'in' | 'up' | 'forgot';
+// 'wait' = lista de espera. Existe porque o cadastro fica fechado até o App Review da Meta aprovar
+// (SIGNUP_MODE), e a landing convida qualquer um a "começar grátis": sem ela, quem chegava de fora
+// preenchia tudo pra tomar um "cadastro fechado" no fim — beco sem saída (design.md, princípio 4).
+// A tela pergunta o estado ao /api/config ANTES de a pessoa digitar, e oferece o caminho certo.
+type Mode = 'in' | 'up' | 'forgot' | 'wait' | 'redefinir';
 
-// Fundo em vídeo desta tela.
+// Fundo em vídeo desta tela. Servido pela NOSSA origem (web/public), não por CDN de terceiro: a
+// versão anterior apontava pra fora, e o `media-src` da CSP nunca liberou aquele domínio — o vídeo
+// nunca tocou, pra ninguém, desde que a CSP entrou. Same-origin já cai dentro de `media-src 'self'`,
+// sem precisar abrir a política pra um host novo.
 //
 // `muted` e `playsInline` não são enfeite — são o que TORNA o autoplay possível: navegador nenhum
 // inicia vídeo com som sozinho, e no iOS, sem playsInline, o vídeo sequestra a tela cheia em vez de
 // ficar no fundo. `loop` fecha a emenda; `aria-hidden` tira do leitor de tela, porque é decoração e
 // anunciá-lo só atrapalharia quem está tentando entrar.
-//
-// O arquivo está numa CDN de terceiro que não controlamos: se sumir de lá, o fundo simplesmente não
-// pinta (o container já tem a cor de fundo por baixo) e a tela continua utilizável. Valeria hospedar
-// no nosso R2 se ele virar permanente.
-const BACKGROUND_VIDEO =
-  'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260314_131748_f2ca2a28-fed7-44c8-b9a9-bd9acdd5ec31.mp4';
+const BACKGROUND_VIDEO = '/auth-video.mp4';
 
 const COPY: Record<Mode, { title: string; cta: string; alt: Mode; altLabel: string }> = {
   in: { title: 'Entrar', cta: 'Entrar', alt: 'up', altLabel: 'Não tenho conta' },
   up: { title: 'Criar conta', cta: 'Criar conta', alt: 'in', altLabel: 'Já tenho conta' },
   forgot: { title: 'Recuperar senha', cta: 'Enviar link', alt: 'in', altLabel: 'Voltar para entrar' },
+  wait: { title: 'Acesso antecipado', cta: 'Entrar na lista', alt: 'in', altLabel: 'Já tenho conta' },
+  redefinir: { title: 'Criar senha nova', cta: 'Salvar senha', alt: 'in', altLabel: 'Voltar para entrar' },
 };
 
 export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [mode, setMode] = useState<Mode>('in');
+  // `null` = ainda perguntando. Começa otimista só depois da resposta: enquanto não sabe, o botão
+  // de criar conta fica quieto, em vez de piscar de "Criar conta" pra "Entrar na lista".
+  const [signupOpen, setSignupOpen] = useState<boolean | null>(null);
+  // Token do link do e-mail de redefinição. Lido UMA vez, no primeiro render, e a URL é limpa logo
+  // em seguida: token de redefinição em barra de endereço vaza por histórico, por print e por
+  // "compartilhar esta página".
+  const [tokenReset] = useState<string | null>(() => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('redefinir') === '1' ? p.get('token') : null;
+  });
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -77,6 +92,21 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
     };
   }, [motionOk]);
 
+  // Chegou pelo link do e-mail: abre direto no formulário de senha nova e tira o token da URL.
+  useEffect(() => {
+    if (!tokenReset) return;
+    setMode('redefinir');
+    window.history.replaceState({}, '', '/app');
+  }, [tokenReset]);
+
+  // Falha aqui não trava a tela: sem resposta, assume fechado — que é o padrão do servidor. O erro
+  // oposto seria pior (oferecer "criar conta" e a pessoa levar a recusa depois de digitar tudo).
+  useEffect(() => {
+    getPublicConfig()
+      .then((c) => setSignupOpen(c.signup_open))
+      .catch(() => setSignupOpen(false));
+  }, []);
+
   const copy = COPY[mode];
 
   async function submit(e: React.FormEvent) {
@@ -84,7 +114,17 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
     if (busy) return;
     setBusy(true);
     try {
-      if (mode === 'forgot') {
+      if (mode === 'redefinir') {
+        if (!tokenReset) throw new Error('Link inválido ou expirado. Peça um novo em "Esqueci minha senha".');
+        await resetPassword(password, tokenReset);
+        toast.success('Senha alterada. Entre com ela.');
+        setPassword('');
+        setMode('in');
+      } else if (mode === 'wait') {
+        await joinWaitlist(email, name);
+        toast.success('Pronto! Avisamos assim que abrir uma vaga.');
+        setMode('in');
+      } else if (mode === 'forgot') {
         await requestPasswordReset(email);
         // Mensagem igual exista ou não a conta: dizer "esse e-mail não está cadastrado" entrega a
         // quem tentar adivinhar quais e-mails têm conta aqui.
@@ -116,7 +156,7 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
           transition={{ duration: 0.25, ease: [0.2, 0.7, 0.3, 1] }}
           className="w-full max-w-sm"
         >
-        <img src="/atenta-wordmark.png" alt="ATENTA!" className="mx-auto mb-8 h-11 w-auto" />
+        <img src="/atenta-logoetipo.png" alt="ATENTA!" className="mx-auto mb-8 h-11 w-auto" />
 
         <form
           onSubmit={submit}
@@ -126,32 +166,42 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
           <p className="mb-5 text-sm text-muted-foreground">
             {mode === 'forgot'
               ? 'Informe o e-mail da sua conta e mandamos um link para criar uma senha nova.'
-              : 'Agende seus posts e planeje o feed em todas as redes.'}
+              : mode === 'redefinir'
+                ? 'Escolha a senha nova da sua conta. Pelo menos 8 caracteres.'
+                : mode === 'wait'
+                  ? 'O ATENTA! ainda está aberto por convite enquanto passamos pela análise das redes sociais. Deixe seu e-mail e avisamos assim que abrir uma vaga.'
+                  : 'Agende seus posts e planeje o feed em todas as redes.'}
           </p>
 
-          {mode === 'up' && (
+          {(mode === 'up' || mode === 'wait') && (
             <div className="mb-4">
               <Label htmlFor="nome">Seu nome</Label>
               <Input id="nome" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" className="mt-1.5" />
             </div>
           )}
 
-          <div className="mb-4">
-            <Label htmlFor="email">E-mail</Label>
-            <Input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              className="mt-1.5"
-            />
-          </div>
+          {/* Sem campo de e-mail ao redefinir: quem chega pelo link já provou quem é (o token diz
+              de qual conta se trata). Pedir o e-mail de novo seria perguntar algo que o sistema já
+              sabe — e abriria a porta pra pessoa digitar outro endereço e não entender por que
+              "não funcionou". */}
+          {mode !== 'redefinir' && (
+            <div className="mb-4">
+              <Label htmlFor="email">E-mail</Label>
+              <Input
+                id="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                className="mt-1.5"
+              />
+            </div>
+          )}
 
-          {mode !== 'forgot' && (
+          {mode !== 'forgot' && mode !== 'wait' && (
             <div className="mb-2">
-              <Label htmlFor="senha">Senha</Label>
+              <Label htmlFor="senha">{mode === 'redefinir' ? 'Senha nova' : 'Senha'}</Label>
               <Input
                 id="senha"
                 type="password"
@@ -161,7 +211,7 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
                 onChange={(e) => setPassword(e.target.value)}
                 // Diz ao gerenciador de senhas se ele deve OFERECER uma senha nova ou preencher a
                 // existente. Com o valor errado, ele preenche a antiga na tela de criar conta.
-                autoComplete={mode === 'up' ? 'new-password' : 'current-password'}
+                autoComplete={mode === 'up' || mode === 'redefinir' ? 'new-password' : 'current-password'}
                 className="mt-1.5"
               />
               {mode === 'up' && <p className="mt-1.5 text-xs text-muted-foreground">Pelo menos 8 caracteres.</p>}
@@ -184,11 +234,26 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
 
           <button
             type="button"
-            onClick={() => setMode(copy.alt)}
+            // Com o cadastro fechado, "Não tenho conta" leva à LISTA, não ao formulário que vai
+            // recusar. Enquanto a resposta do /api/config não chegou (null), segue o caminho
+            // fechado — errar pro lado da lista custa um clique; errar pro outro custa o beco.
+            onClick={() => setMode(copy.alt === 'up' && signupOpen !== true ? 'wait' : copy.alt)}
             className="mt-4 w-full text-sm font-medium text-accent-foreground underline-offset-4 hover:underline"
           >
             {copy.altLabel}
           </button>
+
+          {/* Quem FOI convidado precisa continuar chegando ao cadastro de verdade — a lista não pode
+              engolir o caminho de quem já tem convite na mão. */}
+          {mode === 'wait' && (
+            <button
+              type="button"
+              onClick={() => setMode('up')}
+              className="mt-2 w-full text-sm text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Recebi um convite
+            </button>
+          )}
         </form>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
@@ -231,8 +296,6 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: () => void }) {
             loop
             muted
             playsInline
-            // O arquivo tem 14 MB. Sem isto o navegador busca só os metadados e o painel fica
-            // parado esperando, o que se confunde com "não está tocando".
             preload="auto"
             aria-hidden
           />

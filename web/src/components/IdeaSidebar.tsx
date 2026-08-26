@@ -178,7 +178,7 @@ export function IdeaSidebar({
       />
 
       {ideias.length === 0 ? (
-        <EmptyState art="comecando" size="sm" title="Nenhuma ideia ainda">
+        <EmptyState art="pensando" size="sm" title="Nenhuma ideia ainda">
           Anote aqui o que você quer postar, sem precisar decidir a data. Quando a arte existir, a
           ideia aparece na grade — e o <b>Agendar</b> a transforma em post.
         </EmptyState>

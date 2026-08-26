@@ -91,7 +91,9 @@ describe('trialDaysLeft', () => {
     expect(trialDaysLeft(sub({ plan: 'active' }))).toBe(0);
   });
 
-  it('TRIAL_DAYS é o padrão do mercado que a UI promete', () => {
-    expect(TRIAL_DAYS).toBe(14);
+  // O valor exato importa porque a landing PROMETE ele por extenso ("Testar 7 dias grátis"). Este
+  // teste é o que faz alguém lembrar de mudar os dois juntos.
+  it('TRIAL_DAYS é o que a landing promete', () => {
+    expect(TRIAL_DAYS).toBe(7);
   });
 });

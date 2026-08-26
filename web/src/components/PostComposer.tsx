@@ -11,7 +11,7 @@ import { useScheduler } from '@/store';
 import { onPrefill, onPrefillDate, onEdit, onPrefillMedia } from '@/lib/composer-bus';
 import { createPost, fetchMediaFile, updatePost, uploadMedia } from '@/lib/api';
 import type { CreatePostPayload } from '@/lib/api';
-import { fmtBytes, fmtDuration, isoToLocalInput, localToIso } from '@/lib/format';
+import { fmtBytes, fmtDateTime, fmtDuration, isoToLocalInput, localToIso } from '@/lib/format';
 import { readMediaMetadata } from '@/lib/mediaMetadata';
 import { useMediaUrl } from '@/lib/useMediaUrl';
 import type { QueuedMedia } from '@/lib/types';
@@ -37,6 +37,7 @@ import type { PreviewInput } from './PostPreview';
 import { PostPreview } from './PostPreview';
 import { MediaQueueGrid } from './MediaQueueGrid';
 import { AccountPicker } from './AccountPicker';
+import { LegendaIA } from './LegendaIA';
 import { SchedulePicker } from './SchedulePicker';
 import { ComposerHints } from './ComposerHints';
 import type { Hint } from './ComposerHints';
@@ -79,9 +80,16 @@ export interface KeyedPreviewInput {
 }
 
 export function PostComposer({
+  aberto,
   onRequestOpen,
   onDone,
 }: {
+  /** O modal está aberto? Precisa entrar aqui porque o compositor NÃO desmonta ao fechar (ver
+   *  ComposerModal em App.tsx): sem isso, fechar no X durante uma edição deixaria `editingPostId`
+   *  vivo, e o próximo "Novo post" abriria com os dados do post anterior e o botão dizendo "Salvar
+   *  alterações". Antes existia um "Cancelar edição" numa faixa pra isso; a faixa saiu porque
+   *  repetia o título do modal e o X, então o reset passou a ser responsabilidade do fechamento. */
+  aberto?: boolean;
   onRequestOpen?: () => void;
   onDone?: () => void;
 }) {
@@ -103,6 +111,9 @@ export function PostComposer({
   // mostre esse seletor sem nada pré-selecionado (ver src/adapters/tiktok.ts).
   const [tiktokPrivacy, setTiktokPrivacy] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Progresso do upload de mídia. `null` = não está enviando arquivo (ou já terminou e agora é a
+  // criação do post em si, que é rápida).
+  const [uploadProgresso, setUploadProgresso] = useState<{ atual: number; total: number; fracao: number } | null>(null);
   /** Pilar de conteúdo da PEÇA — um só, compartilhado por todos os destinos: o assunto é do
    *  conteúdo, não da rede onde ele sai. */
   const [tagId, setTagId] = useState<string | null>(null);
@@ -149,6 +160,21 @@ export function PostComposer({
       onRequestOpen?.();
     });
   }, []);
+
+  // Fechar o modal encerra a edição. O compositor fica MONTADO quando fecha (pra manter as
+  // assinaturas do bus vivas), então sem isto o `editingPostId` sobreviveria: abrir "Novo post"
+  // depois de fechar uma edição no X traria os dados do post anterior e o botão "Salvar alterações".
+  //
+  // Só reseta quando estava editando: um rascunho meio preenchido que a pessoa fechou sem querer
+  // continua lá quando ela reabrir, que é o comportamento esperado de um compositor que não desmonta.
+  const estavaAberto = useRef(false);
+  useEffect(() => {
+    if (estavaAberto.current && !aberto && editingPostId) {
+      setEditingPostId(null);
+      resetForm();
+    }
+    estavaAberto.current = !!aberto;
+  }, [aberto, editingPostId]);
 
   // Load an existing post into the form for in-place editing ("editar"), across ALL its targets
   // — unlike onPrefill (duplicar) above, which only prefills from the single target clicked.
@@ -538,13 +564,28 @@ export function PostComposer({
     setSubmitting(true);
     try {
       const mediaIds: string[] = [];
+      // Quantos arquivos ainda precisam SUBIR (os que já têm assetId vieram de um post duplicado e
+      // não sobem de novo) — é o denominador de "arquivo 2 de 3" no botão.
+      const aEnviar = queue.filter((i) => !i.assetId && i.file).length;
+      let enviados = 0;
       for (const item of queue) {
         if (item.assetId) mediaIds.push(item.assetId);
         else if (item.file) {
           const meta = { duration_seconds: item.duration_seconds, width: item.width, height: item.height };
-          mediaIds.push((await uploadMedia(item.file, meta)).id);
+          // Sem isso o botão ficava em "Agendando..." parado durante todo o upload. Num vídeo de um
+          // minuto isso é tempo suficiente pra parecer travado e a pessoa recarregar a página — o
+          // que aí sim aborta o envio. O callback já existia em uploadMedia e ninguém passava.
+          mediaIds.push(
+            (
+              await uploadMedia(item.file, meta, (fracao) =>
+                setUploadProgresso({ atual: enviados + 1, total: aEnviar, fracao })
+              )
+            ).id
+          );
+          enviados++;
         }
       }
+      setUploadProgresso(null);
       // A capa é um upload próprio (não entra no carrossel do post).
       let coverMediaId: string | undefined;
       if (coverFile) coverMediaId = (await uploadMedia(coverFile)).id;
@@ -618,6 +659,9 @@ export function PostComposer({
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
+      // No finally, não só no caminho de sucesso: upload que falha no meio deixaria o botão preso
+      // exibindo a porcentagem em que parou.
+      setUploadProgresso(null);
     }
   }
 
@@ -636,21 +680,27 @@ export function PostComposer({
             fosse flex-1, ela encolheria abaixo do conteúdo e a mídia transbordava por cima da
             pré-visualização (visível com muitos arquivos). No desktop volta a flex-1 com scroll próprio. */}
         <div className="shrink-0 space-y-4 px-5 py-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
-        {editingPostId && (
-          <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted px-3 py-2 text-sm">
-            <span>Editando post agendado</span>
-            <Button
+        {/* Sem faixa "Editando post agendado" com um "Cancelar edição" dentro: o título do modal já
+            diz "Editar post", e o X do canto já é o cancelar. Eram três elementos diferentes pra
+            uma informação e uma ação que já existiam. */}
+        {/* Quando publicar, no TOPO e como campo — não no rodapé.
+            A data existia só como estado interno, revelada pelo seletor que abre ao clicar no botão
+            de agendar. Ao EDITAR isso virava um beco: o botão dizia "Salvar alterações", nada na
+            tela mostrava a data atual, e não havia como adivinhar que salvar era também remarcar.
+            A primeira tentativa foi mostrá-la no rodapé, mas ali ela ficava espremida entre duas
+            ações ("Salvar como rascunho" e "Salvar alterações") e confundia mais do que resolvia:
+            informação e ação disputando a mesma linha. Como campo, no topo, ela é o que é. */}
+        {scheduledLocal && (
+          <div className="space-y-2">
+            <Label>Quando publicar</Label>
+            <button
               type="button"
-              variant="link"
-              size="xs"
-              className="h-auto p-0"
-              onClick={() => {
-                setEditingPostId(null);
-                resetForm();
-              }}
+              onClick={() => setPickerOpen(true)}
+              className="flex w-full items-center justify-between rounded-lg border-2 border-brand bg-card px-3 py-2 text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[3px_3px_0_0_var(--brand)]"
             >
-              Cancelar edição
-            </Button>
+              <span className="font-semibold">{fmtDateTime(localToIso(scheduledLocal))}</span>
+              <span className="text-sm font-medium text-accent-foreground">Alterar</span>
+            </button>
           </div>
         )}
 
@@ -794,6 +844,7 @@ export function PostComposer({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="f-body-account">Legenda de {activeAccount.display_name}</Label>
+              <div className="flex items-center gap-2">
               {captionOverrides[activeAccount.id] !== undefined ? (
                 <Button
                   type="button"
@@ -813,6 +864,13 @@ export function PostComposer({
               ) : (
                 <span className="text-xs text-muted-foreground">usando a legenda padrão</span>
               )}
+                <LegendaIA
+                  valor={captionOverrides[activeAccount.id] ?? body}
+                  onEscolher={(t) => setCaptionOverrides((prev) => ({ ...prev, [activeAccount.id]: t }))}
+                  plataforma={activeAccount.platform}
+                  tagId={tagId}
+                />
+              </div>
             </div>
             <Textarea
               id="f-body-account"
@@ -824,7 +882,18 @@ export function PostComposer({
           </div>
         ) : (
         <div className="space-y-1.5">
-          <Label htmlFor="f-body">Legenda</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="f-body">Legenda</Label>
+            {/* A rede é a da PRIMEIRA conta escolhida. Com contas de redes diferentes, o tom e o
+                limite mudam por rede, e escolher a primeira é o mesmo critério que a
+                pré-visualização já usa; quem quiser afinar por rede abre a aba daquela conta. */}
+            <LegendaIA
+              valor={body}
+              onEscolher={setBody}
+              plataforma={selectedAccounts[0]?.platform ?? null}
+              tagId={tagId}
+            />
+          </div>
           <Textarea id="f-body" value={body} onChange={(e) => setBody(e.target.value)} className="min-h-24" />
           <ComposerHints hints={hints} field="caption" />
         </div>
@@ -955,7 +1024,17 @@ export function PostComposer({
           onClick={() => setPickerOpen(true)}
           disabled={submitting || !canSchedule}
         >
-          {submitting ? (editingPostId ? 'Salvando…' : 'Agendando…') : editingPostId ? 'Salvar alterações' : 'Agendar post'}
+          {uploadProgresso
+            ? // Porcentagem real do arquivo, e "2 de 3" só quando há mais de um: com um arquivo só,
+              // "arquivo 1 de 1" é ruído.
+              `Enviando ${uploadProgresso.total > 1 ? `${uploadProgresso.atual} de ${uploadProgresso.total} · ` : ''}${Math.round(uploadProgresso.fracao * 100)}%`
+            : submitting
+              ? editingPostId
+                ? 'Salvando…'
+                : 'Agendando…'
+              : editingPostId
+                ? 'Salvar alterações'
+                : 'Agendar post'}
         </Button>
         <Button
           size="lg"

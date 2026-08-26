@@ -20,9 +20,16 @@ import type { Platform } from './types.js';
  */
 export const METRICS_SCOPES: Record<Platform, string[]> = {
   instagram: ['instagram_manage_insights'],
-  facebook: ['read_insights'],
+  // Vazio desde que read_insights saiu do pedido (ver oauth-urls.ts): curtidas, comentários e
+  // compartilhamentos do Facebook vêm dos CAMPOS do post, que não exigem escopo de insights. Deixar
+  // 'read_insights' aqui marcaria toda conta como "não traz métrica" e mostraria um aviso que a
+  // pessoa não teria como resolver — exatamente o oposto do propósito deste arquivo.
+  facebook: [],
   youtube: ['https://www.googleapis.com/auth/youtube.readonly'],
-  tiktok: ['video.list'],
+  // `video.list` = métrica de post; `user.info.stats` = seguidores da conta. Os dois são exigidos
+  // porque o TikTok é a única rede em que faltar UM deles ainda deixa metade do Insights de pé, e
+  // meia tela funcionando é pior que um aviso dizendo o que reconectar.
+  tiktok: ['video.list', 'user.info.stats'],
   // O LinkedIn não expõe analytics de post orgânico fora do programa de parceiros — não é falta de
   // escopo, é ausência de API. Exigir algo aqui viraria um aviso que a pessoa não tem como resolver.
   linkedin: [],

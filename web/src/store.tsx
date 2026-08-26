@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { ReactNode } from 'react';
 import type { Account, Post } from './lib/types';
 import type { Summary, Tag } from './lib/api';
-import { getAccounts, getPosts, getSummary, getTags } from './lib/api';
+import { getState } from './lib/api';
 
 export type View = 'list' | 'week' | 'calendar' | 'grid';
 
@@ -46,16 +46,13 @@ export function SchedulerProvider({ children }: { children: ReactNode }) {
 
   const reload = useCallback(async () => {
     const f = filtersRef.current;
-    const [acc, pst, tgs, sum] = await Promise.all([
-      getAccounts(),
-      getPosts({ status: f.status || undefined, platform: f.platform || undefined }),
-      getTags(),
-      getSummary(),
-    ]);
-    setAccounts(acc.accounts);
-    setPosts(pst.posts);
-    setTags(tgs.tags);
-    setSummary(sum);
+    // Uma requisição, não quatro: /api/state devolve contas+agenda+pilares+resumo juntos. O poll
+    // é quem mais consome requisição do Worker, e requisição é o recurso contado do plano grátis.
+    const s = await getState({ status: f.status || undefined, platform: f.platform || undefined });
+    setAccounts(s.accounts);
+    setPosts(s.posts);
+    setTags(s.tags);
+    setSummary(s.summary);
     setLoading(false);
   }, []);
 
@@ -71,10 +68,20 @@ export function SchedulerProvider({ children }: { children: ReactNode }) {
     reload().catch((e) => console.error(e));
   }, [reload, filters.status, filters.platform]);
 
-  // Poll every 30s.
+  // Poll a cada 60s, e só com a aba visível. Ferramenta de agendamento vive em aba de fundo, e
+  // era de lá que vinha a maior parte das requisições: uma aba esquecida por 8h gerava milhares
+  // sem ninguém olhando. Ao voltar pra aba, recarrega na hora em vez de esperar o próximo ciclo,
+  // então quem está olhando nunca vê dado mais velho que 60s.
   useEffect(() => {
-    const id = setInterval(() => reload().catch((e) => console.error(e)), 30000);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (!document.hidden) reload().catch((e) => console.error(e));
+    };
+    const id = setInterval(tick, 60000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [reload]);
 
   const accountsById: Record<string, Account> = {};

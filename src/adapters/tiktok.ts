@@ -11,6 +11,33 @@ const API_BASE = 'https://open.tiktokapis.com/v2';
 // limit is live data from creator_info/query, checked in publish() below before upload.
 const MAX_VIDEO_DURATION_SECONDS = 600;
 
+// Fatiamento do upload. O TikTok recusa o init com "The chunk size is invalid" fora desta faixa —
+// foi o que derrubou a PRIMEIRA publicação real deste adapter (vídeo de 126 MB indo como um pedaço
+// só, 2× o teto). Regras do /post/publish/video/init/:
+//   - chunk entre 5 MB e 64 MB;
+//   - arquivo abaixo de 5 MB vai inteiro, em UM chunk (o mínimo não se aplica ao arquivo todo);
+//   - todos os chunks têm o mesmo tamanho, menos o último, que leva o resto;
+//   - e o ÚLTIMO chunk também tem que caber em 64 MB.
+//
+// Essa última regra derrubou a primeira correção: com "chunk de 64 MB, arredondando a contagem pra
+// baixo", 126 MB viravam chunk_size 64 MB e total_chunk_count 1 — um pedaço só, que teria de
+// carregar os 126 MB inteiros. O TikTok recusou de novo, com a mesma mensagem.
+//
+// O certo é decidir primeiro QUANTOS pedaços, depois o tamanho: N = teto(tamanho / 64 MB), e cada
+// pedaço vira tamanho/N. Assim nenhum chunk passa de 64 MB, inclusive o último com o resto.
+const MIN_CHUNK_BYTES = 5 * 1024 * 1024;
+const MAX_CHUNK_BYTES = 64 * 1024 * 1024;
+
+/** Como fatiar este arquivo pro TikTok: tamanho do pedaço e quantos pedaços. */
+export function tiktokChunking(sizeBytes: number): { chunkSize: number; totalChunks: number } {
+  if (sizeBytes <= MIN_CHUNK_BYTES) return { chunkSize: sizeBytes, totalChunks: 1 };
+  const totalChunks = Math.ceil(sizeBytes / MAX_CHUNK_BYTES);
+  // Chão na divisão: o resto vai pro último chunk, que por isso fica entre chunkSize e
+  // chunkSize + (totalChunks - 1) bytes — sempre abaixo do teto, já que chunkSize <= 64 MB.
+  const chunkSize = Math.floor(sizeBytes / totalChunks);
+  return { chunkSize, totalChunks };
+}
+
 interface TiktokTokens {
   access_token: string;
   refresh_token: string;
@@ -107,6 +134,8 @@ export const tiktokAdapter: PlatformAdapter = {
       );
     }
 
+    const { chunkSize, totalChunks } = tiktokChunking(asset.size_bytes);
+
     const initRes = await fetchWithRetry(`${API_BASE}/post/publish/video/init/`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json' },
@@ -123,8 +152,8 @@ export const tiktokAdapter: PlatformAdapter = {
         source_info: {
           source: 'FILE_UPLOAD',
           video_size: asset.size_bytes,
-          chunk_size: asset.size_bytes,
-          total_chunk_count: 1,
+          chunk_size: chunkSize,
+          total_chunk_count: totalChunks,
         },
       }),
     });
@@ -134,23 +163,36 @@ export const tiktokAdapter: PlatformAdapter = {
     }
     const initJson = (await initRes.json()) as { data: { publish_id: string; upload_url: string } };
 
-    // Single request (source_info above already told TikTok this is one chunk covering the whole
-    // file) — streamed from R2 rather than buffered, so the Worker never holds the whole video
-    // in memory at once. Uploads to a signed storage URL, not TikTok's own API, so there's no
-    // {error:{code,...}} envelope to parse here on failure (unlike the other throws in this file).
-    const uploadRes = await fetchWithRetry(initJson.data.upload_url, async () => {
-      const object = await env.MEDIA.get(asset.storage_key);
-      if (!object) throw new Error(`tiktok: media not found in R2: ${asset.storage_key}`);
-      return {
-        method: 'PUT',
-        headers: {
-          'Content-Type': asset.mime_type,
-          'Content-Range': `bytes 0-${asset.size_bytes - 1}/${asset.size_bytes}`,
-        },
-        body: toFixedLengthBody(object.body, asset.size_bytes),
-      };
-    });
-    if (!uploadRes.ok) throw new Error(`tiktok: chunk upload failed: ${uploadRes.status}`);
+    // Um PUT por chunk, na mesma upload_url, distinguidos pelo Content-Range. Cada pedaço é lido do
+    // R2 por FAIXA (`range`), não o arquivo inteiro — o Worker tem 128 MB de memória e este vídeo
+    // de teste sozinho tinha 126 MB. Sem o range, buffer e limite se encontram.
+    //
+    // O último chunk leva todo o resto (por isso `fim` é o fim do arquivo na última volta): é a
+    // contrapartida de total_chunk_count ser o chão da divisão, ver tiktokChunking acima.
+    for (let i = 0; i < totalChunks; i++) {
+      const inicio = i * chunkSize;
+      const ultimo = i === totalChunks - 1;
+      const fim = ultimo ? asset.size_bytes - 1 : inicio + chunkSize - 1;
+      const tamanho = fim - inicio + 1;
+
+      const uploadRes = await fetchWithRetry(initJson.data.upload_url, async () => {
+        const object = await env.MEDIA.get(asset.storage_key, { range: { offset: inicio, length: tamanho } });
+        if (!object) throw new Error(`tiktok: media not found in R2: ${asset.storage_key}`);
+        return {
+          method: 'PUT',
+          headers: {
+            'Content-Type': asset.mime_type,
+            'Content-Range': `bytes ${inicio}-${fim}/${asset.size_bytes}`,
+          },
+          body: toFixedLengthBody(object.body, tamanho),
+        };
+      });
+      // O upload vai pra uma URL de storage assinada, não pra API do TikTok, então não há envelope
+      // {error:{code}} pra interpretar aqui — diferente dos outros throws deste arquivo.
+      if (!uploadRes.ok) {
+        throw new Error(`tiktok: chunk ${i + 1}/${totalChunks} upload failed: ${uploadRes.status}`);
+      }
+    }
 
     return { state: 'processing', adapterState: { publish_id: initJson.data.publish_id } satisfies AdapterState };
   },

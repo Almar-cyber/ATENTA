@@ -16,11 +16,32 @@ interface YoutubeTokens {
 // it; that's a client-side-only hint (see web/src/lib/platforms.ts).
 const MAX_VIDEO_DURATION_SECONDS = 12 * 60 * 60;
 
-// NOTE: still a single PUT for the whole video (not the chunked 256KB-boundary resumable
-// protocol from the architecture doc) — the memory risk of that single PUT is fixed (it's
-// streamed from R2 via toFixedLengthBody, not buffered into one arrayBuffer), but this still
-// can't resume a crashed/interrupted upload mid-transfer the way true chunking would. Revisit if
-// that becomes a real problem for the video sizes actually in use — see README "Pendências".
+// Upload em PARTES, não num PUT único.
+//
+// O PUT único já streamava do R2 (sem estourar a memória do Worker), mas mesmo assim morria: um
+// vídeo real de 126 MB derrubou a publicação com "Network connection lost" — uma conexão de saída
+// aberta por tempo demais, carregando o arquivo inteiro de uma vez. Foi exatamente a falha que o
+// TikTok já tinha tido, com o mesmo arquivo, e que o upload em partes resolveu lá.
+//
+// A diferença pro TikTok é que o Google exige que TODO chunk, menos o último, seja múltiplo de
+// 256 KB — por isso este arquivo tem o próprio fatiamento em vez de reusar `tiktokChunking`, que
+// divide o tamanho em partes iguais e cairia fora dessa grade.
+const CHUNK_BYTES = 16 * 1024 * 1024; // 64 × 256 KB
+
+/**
+ * Onde cada pedaço começa e termina (índices inclusivos, como o `Content-Range` pede).
+ *
+ * Exportada por causa do teste: a aritmética de faixa é o tipo de coisa que erra por um byte e só
+ * aparece num vídeo cortado, muito depois — e num vídeo grande de verdade, que é caro de testar
+ * à mão.
+ */
+export function youtubeChunks(sizeBytes: number): { inicio: number; fim: number }[] {
+  const partes: { inicio: number; fim: number }[] = [];
+  for (let inicio = 0; inicio < sizeBytes; inicio += CHUNK_BYTES) {
+    partes.push({ inicio, fim: Math.min(inicio + CHUNK_BYTES, sizeBytes) - 1 });
+  }
+  return partes;
+}
 export const youtubeAdapter: PlatformAdapter = {
   platform: 'youtube',
 
@@ -109,20 +130,45 @@ export const youtubeAdapter: PlatformAdapter = {
     const uploadUrl = initRes.headers.get('Location');
     if (!uploadUrl) throw new Error('youtube: no resumable upload URL returned');
 
-    const uploadRes = await fetchWithRetry(uploadUrl, async () => {
-      const object = await env.MEDIA.get(video.storage_key);
-      if (!object) throw new Error(`youtube: media object not found in R2: ${video.storage_key}`);
-      return {
-        method: 'PUT',
-        headers: { 'Content-Type': video.mime_type, 'Content-Length': String(video.size_bytes) },
-        body: toFixedLengthBody(object.body, video.size_bytes),
-      };
-    });
-    if (!uploadRes.ok) {
-      const bodyText = await uploadRes.text();
-      throw Object.assign(new Error(`youtube: upload failed: ${uploadRes.status} ${bodyText}`), { code: googleErrorReason(bodyText) });
+    // Um PUT por pedaço, todos na MESMA upload_url, distinguidos pelo Content-Range. Cada pedaço é
+    // lido do R2 por FAIXA (`range`), então nem a memória nem a conexão veem o arquivo inteiro.
+    const partes = youtubeChunks(video.size_bytes);
+    let videoId: string | undefined;
+
+    for (const [i, { inicio, fim }] of partes.entries()) {
+      const tamanho = fim - inicio + 1;
+      const res = await fetchWithRetry(uploadUrl, async () => {
+        const object = await env.MEDIA.get(video.storage_key, { range: { offset: inicio, length: tamanho } });
+        if (!object) throw new Error(`youtube: media object not found in R2: ${video.storage_key}`);
+        return {
+          method: 'PUT',
+          headers: {
+            'Content-Type': video.mime_type,
+            'Content-Range': `bytes ${inicio}-${fim}/${video.size_bytes}`,
+          },
+          body: toFixedLengthBody(object.body, tamanho),
+        };
+      });
+
+      // 308 = "recebi este pedaço, manda o próximo". NÃO é erro, e também não é `res.ok` (308 está
+      // fora da faixa 2xx) — tratar antes de qualquer checagem de ok é o que impede o caminho feliz
+      // de ser lido como falha. O `fetchWithRetry` só repete em 5xx, então ele deixa o 308 passar.
+      if (res.status === 308) continue;
+      if (res.ok) {
+        videoId = ((await res.json()) as { id: string }).id;
+        break;
+      }
+      const bodyText = await res.text();
+      throw Object.assign(
+        new Error(`youtube: chunk ${i + 1}/${partes.length} upload failed: ${res.status} ${bodyText}`),
+        { code: googleErrorReason(bodyText) }
+      );
     }
-    const result = (await uploadRes.json()) as { id: string };
+
+    // Só acontece se o último pedaço voltar 308, o que significaria que o Google conta bytes
+    // diferente de nós — melhor falhar alto que devolver um id vazio como se tivesse publicado.
+    if (!videoId) throw new Error('youtube: upload terminou sem o id do vídeo (último chunk não fechou)');
+    const result = { id: videoId };
 
     // Capa personalizada (opcional). Falhar aqui não invalida o vídeo já publicado — canais sem
     // verificação não podem definir thumbnail, e isso não deve derrubar o post.

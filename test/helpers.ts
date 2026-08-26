@@ -22,6 +22,13 @@ import migration0014 from '../migrations/0014_tags.sql?raw';
 import migration0015 from '../migrations/0015_post_comments.sql?raw';
 // 0016 dá a next_comments_at, cadência própria de comentário.
 import migration0016 from '../migrations/0016_comments_cadence.sql?raw';
+// 0017 traz a lista de espera do cadastro fechado.
+import migration0017 from '../migrations/0017_waitlist.sql?raw';
+// 0018 traz o teto diário de geração de legenda (ai_usage).
+import migration0018 from '../migrations/0018_ai_usage.sql?raw';
+// 0019 traz media_uploads: o dono de cada upload em partes ainda em andamento.
+import migration0019 from '../migrations/0019_media_uploads.sql?raw';
+import migration0020 from '../migrations/0020_avatar.sql?raw';
 import { adapters } from '../src/adapters/index.js';
 import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTarget, PublishResult } from '../src/lib/types.js';
 
@@ -32,13 +39,13 @@ import type { Account, ErrorClass, MediaAsset, PlatformAdapter, Platform, PostTa
  */
 export async function resetDb(): Promise<void> {
   // Filhas (post_metrics, account_metrics) primeiro: elas referenciam post_targets/accounts.
-  for (const table of ['post_comments', 'tags', 'signup_invites', 'session', 'account', 'verification', 'user', 'post_metrics', 'account_metrics', 'grid_previews', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
+  for (const table of ['media_uploads', 'ai_usage', 'signup_waitlist', 'post_comments', 'tags', 'signup_invites', 'session', 'account', 'verification', 'user', 'post_metrics', 'account_metrics', 'grid_previews', 'post_target_media', 'post_targets', 'scheduled_posts', 'media_assets', 'accounts']) {
     await env.DB.prepare(`drop table if exists ${table}`).run();
   }
-  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics', 'grid_previews_platform_sort', 'idx_accounts_owner', 'idx_scheduled_posts_owner', 'idx_grid_previews_owner', 'session_userId_idx', 'account_userId_idx', 'verification_identifier_idx', 'idx_media_assets_owner', 'idx_tags_owner_name', 'idx_scheduled_posts_tag', 'idx_grid_previews_tag', 'idx_post_comments_account_user']) {
+  for (const index of ['idx_scheduled_posts_scheduled_for', 'idx_post_targets_status', 'idx_post_targets_status_updated', 'idx_post_targets_status_next_attempt', 'post_metrics_target_time', 'account_metrics_time', 'idx_post_targets_next_metrics', 'grid_previews_platform_sort', 'idx_accounts_owner', 'idx_scheduled_posts_owner', 'idx_grid_previews_owner', 'session_userId_idx', 'account_userId_idx', 'verification_identifier_idx', 'idx_media_assets_owner', 'idx_tags_owner_name', 'idx_scheduled_posts_tag', 'idx_grid_previews_tag', 'idx_post_comments_account_user', 'idx_signup_waitlist_espera', 'idx_ai_usage_dia', 'idx_media_uploads_owner', 'idx_media_uploads_idade']) {
     await env.DB.prepare(`drop index if exists ${index}`).run();
   }
-  for (const sql of splitStatements(`${migration0001}\n${migration0002}\n${migration0003}\n${migration0004}\n${migration0005}\n${migration0006}\n${migration0007}\n${migration0009}\n${migration0010}\n${migration0011}\n${migration0012}\n${migration0013}\n${migration0014}\n${migration0015}\n${migration0016}`)) {
+  for (const sql of splitStatements(`${migration0001}\n${migration0002}\n${migration0003}\n${migration0004}\n${migration0005}\n${migration0006}\n${migration0007}\n${migration0009}\n${migration0010}\n${migration0011}\n${migration0012}\n${migration0013}\n${migration0014}\n${migration0015}\n${migration0016}\n${migration0017}\n${migration0018}\n${migration0019}\n${migration0020}`)) {
     await env.DB.prepare(sql).run();
   }
 }

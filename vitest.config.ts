@@ -26,6 +26,9 @@ export default defineConfig({
           // Assina os cookies de sessão nos testes de isolação, que criam contas de verdade
           // pelo /api/auth. Valor fixo e público de propósito: é um banco em memória.
           AUTH_SECRET: 'chave-de-teste-nao-usar-em-producao-0000',
+          // A base pública do R2, que os testes de foto de perfil esperam ver dentro da URL
+          // gravada em user.image. O host não é consultado — só entra na string.
+          MEDIA_PUBLIC_BASE_URL: 'https://media.teste.local',
         },
       },
     }),

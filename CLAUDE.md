@@ -2,8 +2,9 @@
 
 Cloudflare Worker (poller + OAuth) + dashboard Vite/React em `web/`.
 Ver @README.md (setup e OAuth por plataforma), @design.md (specs do produto: modelo de dados,
-ciclo de vida, formatos e limites por rede, API) e @web/design.md (design system — leia antes de
-criar ou restilizar telas).
+ciclo de vida, formatos e limites por rede, API), @web/design.md (design system — leia antes de
+criar ou restilizar telas) e @funcionalidades.md (o que está pronto, o que é só código não testado
+e o que falta — consulte antes de prometer que algo funciona).
 
 ## Comandos
 

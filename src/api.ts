@@ -7,6 +7,11 @@ import { getAccountTokens } from './lib/tokens.js';
 import { fetchWithRetry } from './lib/http.js';
 import { buildAuthUrl, isOAuthPlatform, OAUTH_CLIENT_ID_ENV } from './lib/oauth-urls.js';
 import { encodeState, setStateCookie } from './lib/oauth-state.js';
+import { signupIsOpen } from './lib/env.js';
+import { AtendenteIndisponivel, MAX_PERGUNTA, responder } from './lib/atendente.js';
+import { buscarExemplos, consumirCota, devolverCota, gerarLegenda, SemIA, TETO_DIARIO } from './lib/legenda.js';
+import { validarAvatar } from './lib/avatar.js';
+import { avisoDeLimite, FREE_LIMITS, limitesValemPara } from './lib/billing.js';
 import type { Env } from './lib/env.js';
 import type { Account, MediaAsset, Platform, PostTarget } from './lib/types.js';
 
@@ -24,9 +29,13 @@ const ALLOWED_MIME_TYPES: readonly string[] = [
 ];
 
 // Cota de armazenamento por dono. O R2 é o único recurso que sai do free tier (10 GB) conforme
-// entram usuários — Workers e D1 têm folga de ordens de grandeza. 2 GB por dono deixa ~5 pessoas
-// no free tier; ajuste conforme a conta comporte.
-const MEDIA_QUOTA_BYTES = 2 * 1024 * 1024 * 1024;
+// entram usuários — Workers e D1 têm folga de ordens de grandeza.
+//
+// 5 GB desde 13/08/2026: com 2 GB a conta principal já estava em 1,71 GB e prestes a travar upload
+// no meio do uso normal. O purge de 30 dias (stepPurgeOldMedia) é quem devolve espaço, então a cota
+// precisa caber o TRÂNSITO de um mês, não o acervo inteiro. Vale lembrar que 5 GB por dono aperta
+// no free tier a partir da segunda pessoa que encher — o teto do bucket é 10 GB.
+const MEDIA_QUOTA_BYTES = 5 * 1024 * 1024 * 1024;
 
 /** Bytes já ocupados por este dono no R2. */
 async function usedBytes(owner: string, env: Env): Promise<number> {
@@ -43,12 +52,99 @@ async function checkQuota(owner: string, incoming: number, env: Env): Promise<Re
   const gb = (n: number) => (n / 1024 / 1024 / 1024).toFixed(1).replace('.', ',');
   return jsonResponse(
     {
-      error:
-        `sem espaço: você já usa ${gb(used)} GB dos ${gb(MEDIA_QUOTA_BYTES)} GB disponíveis. ` +
-        'Exclua posts antigos com mídia pesada pra liberar espaço.',
+      // Duas saídas na mesma frase, porque as duas existem de verdade: apagar mídia antiga libera
+      // agora, e o purge de 30 dias libera sozinho depois. Diferente do limite de contas e de
+      // posts, este não some com o tempo se a pessoa não fizer nada.
+      error: avisoDeLimite(
+        `Sem espaço: você já usa ${gb(used)} GB dos ${gb(MEDIA_QUOTA_BYTES)} GB disponíveis. ` +
+          'Exclua posts antigos com mídia pesada pra liberar espaço.'
+      ),
     },
     413
   );
+}
+
+/**
+ * Os limites do plano gratuito valem pra este dono?
+ *
+ * Contas anteriores ao corte (ver `LIMITES_DESDE`) ficam de fora — elas já usavam bem acima do
+ * anunciado quando o cadastro abriu, e travá-las de uma vez seria incidente, não limite.
+ */
+async function limitesValem(owner: string, env: Env): Promise<boolean> {
+  const row = await env.DB.prepare(`select createdAt from user where id = ?`)
+    .bind(owner)
+    .first<{ createdAt: string | null }>();
+  return limitesValemPara(row?.createdAt);
+}
+
+/** Quantos posts este dono criou no mês corrente — o que o teto mensal conta. */
+async function postsNoMes(owner: string, env: Env): Promise<number> {
+  const row = await env.DB.prepare(
+    // O corte é o primeiro dia do mês em UTC, o mesmo fuso em que `created_at` é gravado. Usar o
+    // fuso local do Worker faria a virada do mês acontecer em hora diferente da que a pessoa vê.
+    `select count(*) as total from scheduled_posts
+      where owner_id = ? and created_at >= strftime('%Y-%m-01T00:00:00.000Z', 'now')`
+  )
+    .bind(owner)
+    .first<{ total: number }>();
+  return row?.total ?? 0;
+}
+
+const MAX_WAITLIST_EMAIL = 254; // limite de e-mail do RFC 5321
+const MAX_WAITLIST_NAME = 80;
+
+/**
+ * API pública — roda ANTES do gate de sessão em worker.ts, porque quem chama ainda não tem conta.
+ * Mantida minúscula de propósito: só o que a landing e a tela de entrar precisam saber antes de
+ * existir um dono. Nada aqui lê nem devolve dado de ninguém.
+ *
+ * Devolve null quando a rota não é pública, e aí o worker segue pro caminho autenticado.
+ */
+export async function handlePublicApiRequest(request: Request, url: URL, env: Env): Promise<Response | null> {
+  const { pathname } = url;
+
+  // Estado do cadastro, pro front decidir entre "criar conta" e "entrar na lista de espera" em vez
+  // de descobrir pelo erro depois de a pessoa ter digitado tudo.
+  if (pathname === '/api/config' && request.method === 'GET') {
+    return jsonResponse({ signup_open: signupIsOpen(env) });
+  }
+
+  // Atendente da landing. Público de propósito: quem está decidindo se cria conta ainda não tem
+  // sessão, e é justamente essa pessoa que a dúvida faz ir embora.
+  if (pathname === '/api/atendente' && request.method === 'POST') {
+    return responderDuvida(request, env);
+  }
+
+  if (pathname === '/api/waitlist' && request.method === 'POST') {
+    // Com o cadastro aberto não existe fila — deixar o endpoint vivo aqui só acumularia linha que
+    // ninguém vai convidar, já que a pessoa pode criar conta direto.
+    if (signupIsOpen(env)) {
+      return jsonResponse({ error: 'O cadastro está aberto. Crie sua conta direto.' }, 400);
+    }
+    let payload: { email?: string; name?: string };
+    try {
+      payload = await request.json();
+    } catch {
+      return jsonResponse({ error: 'JSON inválido' }, 400);
+    }
+    const email = (payload.email ?? '').trim().toLowerCase();
+    // Validação deliberadamente frouxa: aqui o custo de recusar um e-mail válido esquisito é perder
+    // um interessado, e o de aceitar um inválido é uma linha morta na fila. Quem confere de verdade
+    // é o convite, que só chega se o endereço existir.
+    if (!email || email.length > MAX_WAITLIST_EMAIL || !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+      return jsonResponse({ error: 'Informe um e-mail válido' }, 400);
+    }
+    const name = (payload.name ?? '').trim().slice(0, MAX_WAITLIST_NAME) || null;
+    // `or ignore`: entrar de novo não duplica nem sobrescreve a data de entrada — quem chegou
+    // primeiro continua na frente da fila.
+    await env.DB.prepare(`insert or ignore into signup_waitlist (email, name, created_at) values (?, ?, ?)`)
+      .bind(email, name, nowIso())
+      .run();
+    // Mesma resposta pra e-mail novo e repetido: a mensagem não deve revelar quem já está na lista.
+    return jsonResponse({ ok: true });
+  }
+
+  return null;
 }
 
 /**
@@ -61,6 +157,11 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   const method = request.method;
 
   if (pathname === '/api/accounts' && method === 'GET') return listAccounts(owner, env);
+
+  // As quatro leituras do poll do dashboard numa resposta só (contas, agenda, pilares e resumo).
+  // Existe por economia de requisição: o poll fazia 4 chamadas por ciclo, e requisição é o recurso
+  // contado do plano gratuito do Workers. Os filtros de status/plataforma valem como em /api/posts.
+  if (pathname === '/api/state' && method === 'GET') return getState(url, owner, env);
 
   const importMatch = /^\/api\/accounts\/([^/]+)\/import-history$/.exec(pathname);
   if (importMatch && method === 'POST') return importHistory(importMatch[1], owner, env);
@@ -75,10 +176,15 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   if (pathname === '/api/posts' && method === 'POST') return createPost(request, owner, env);
   if (pathname === '/api/posts/reschedule' && method === 'POST') return reschedulePosts(request, owner, env);
   if (pathname === '/api/media' && method === 'POST') return uploadMedia(request, owner, env);
+
+  // Avatar do próprio usuário (o do menu da conta, não o das redes conectadas). Guarda as ESCOLHAS,
+  // não uma imagem — ver a migração 0020.
+  if (pathname === '/api/profile/avatar' && method === 'PUT') return setProfileAvatar(request, owner, env);
+  if (pathname === '/api/profile/avatar' && method === 'DELETE') return removeProfileAvatar(owner, env);
   // Upload em partes: o navegador fatia o arquivo, então nem o limite de corpo da requisição
   // (100MB no plano free) nem a memória do Worker (128MB) são atingidos por vídeos grandes.
   if (pathname === '/api/media/multipart/start' && method === 'POST') return multipartStart(request, owner, env);
-  if (pathname === '/api/media/multipart/part' && method === 'PUT') return multipartPart(request, url, env);
+  if (pathname === '/api/media/multipart/part' && method === 'PUT') return multipartPart(request, url, owner, env);
   if (pathname === '/api/media/multipart/complete' && method === 'POST') return multipartComplete(request, owner, env);
 
   // Feed real da conta conectada (busca AO VIVO na API da rede — as URLs de mídia do Instagram
@@ -95,7 +201,7 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   // e sem CORS: uma imagem carregada de lá suja o canvas e o recorte no navegador quebra. Por aqui
   // é same-origin, então dá pra recortar mídia de post duplicado/editado igual a arquivo novo.
   const mediaBytesMatch = /^\/api\/media\/([^/]+)\/bytes$/.exec(pathname);
-  if (mediaBytesMatch && method === 'GET') return getMediaBytes(mediaBytesMatch[1], env);
+  if (mediaBytesMatch && method === 'GET') return getMediaBytes(mediaBytesMatch[1], owner, env);
 
   // Resumo do painel: contagem por status, o que travou, e o que sai a seguir. Vem do servidor
   // porque /api/posts é filtrado e paginado — ver o comentário em getSummary.
@@ -113,6 +219,10 @@ export async function handleApiRequest(request: Request, url: URL, env: Env, own
   // backfill de histórico vale a migração no schema. Some assim que a decisão for tomada.
   const probeMatch = /^\/api\/metrics\/probe\/([^/]+)$/.exec(pathname);
   if (probeMatch && method === 'GET') return runProbe(probeMatch[1], owner, env);
+
+  // Sugestão de legenda pelo Workers AI. POST porque manda o assunto no corpo, e porque cada
+  // chamada consome cota — não é uma leitura que dá pra repetir à toa.
+  if (pathname === '/api/legenda' && method === 'POST') return sugerirLegenda(request, owner, env);
 
   // Pilares de conteúdo. Tabela própria, e não texto solto, porque o destino delas é um group by
   // no Insights — ver o comentário na migração 0014.
@@ -262,16 +372,30 @@ function jsonResponse(body: unknown, status = 200): Response {
 // Início do fluxo de conexão pelo navegador: gera um nonce (guardado num cookie HttpOnly como CSRF),
 // monta a URL de consentimento com redirect_uri = <origin>/oauth/callback/:platform e redireciona
 // 302 pra plataforma. O botão "Conectar" do SPA só navega pra cá. Meta cobre Instagram + Facebook.
-function startConnect(platform: string, url: URL, owner: string, env: Env): Response {
+async function startConnect(platform: string, url: URL, owner: string, env: Env): Promise<Response> {
   if (!isOAuthPlatform(platform)) {
     return jsonResponse({ error: `conexão pelo app ainda não suportada para "${platform}"` }, 400);
+  }
+
+  // O teto é checado ANTES de mandar pro consentimento, não no callback: autorizar na plataforma e
+  // só então ouvir "não deu" seria fazer a pessoa entregar acesso à conta dela à toa, e ainda
+  // deixaria o app autorizado lá sem nada aqui.
+  if (await limitesValem(owner, env)) {
+    const row = await env.DB.prepare(`select count(*) as total from accounts where owner_id = ?`)
+      .bind(owner)
+      .first<{ total: number }>();
+    if ((row?.total ?? 0) >= FREE_LIMITS.connections) {
+      return Response.redirect(`${url.origin}/app?connect_error=${platform}&reason=limite_contas`, 302);
+    }
   }
   const envVar = OAUTH_CLIENT_ID_ENV[platform];
   const clientId = String(env[envVar as keyof Env] ?? '');
   // Sem o secret, a plataforma recebe client_id vazio e devolve um erro críptico ("client_key")
   // na tela dela. Melhor falhar aqui e explicar o que falta configurar.
   if (!clientId) {
-    return Response.redirect(`${url.origin}/?connect_error=${platform}&reason=missing_${envVar}`, 302);
+    // /app, não a raiz: a raiz é a landing pública, e cair nela deixava a pessoa numa URL que no
+    // primeiro F5 servia a página de vendas em vez do painel (ver connectedRedirect em worker.ts).
+    return Response.redirect(`${url.origin}/app?connect_error=${platform}&reason=missing_${envVar}`, 302);
   }
   const nonce = crypto.randomUUID();
   // o dono viaja no state: o callback OAuth roda sem sessão (vem da plataforma) e é ele que
@@ -596,7 +720,13 @@ async function validateAccountsAndMedia(env: Env, owner: string, params: Validat
   }
   const media: MediaAsset[] = [];
   for (const mediaId of mediaIds) {
-    const row = await env.DB.prepare(`select * from media_assets where id = ?`).bind(mediaId).first<any>();
+    // `and owner_id = ?` pelo mesmo motivo das contas acima: sem ele, mandar o media_asset_id de
+    // OUTRO dono criava o post normalmente (201), e a arte privada dele saía publicada na conta
+    // social de quem pediu. media_assets tem owner_id desde a migração 0007; este caminho só nunca
+    // passou a usá-lo. Coberto por test/isolation.test.ts.
+    const row = await env.DB.prepare(`select * from media_assets where id = ? and owner_id = ?`)
+      .bind(mediaId, owner)
+      .first<any>();
     if (!row) return { ok: false, response: jsonResponse({ error: `media_asset_id não encontrado: ${mediaId}` }, 400) };
     media.push(rowToMediaAsset(row));
   }
@@ -732,6 +862,26 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
     return jsonResponse({ error: 'scheduled_for inválido' }, 400);
   }
 
+  // Teto mensal. Vale pro RASCUNHO também: ele ocupa a mesma linha em `scheduled_posts` e vira post
+  // com um clique, então isentá-lo seria só mudar o nome do contorno.
+  //
+  // 429 e não 403: o teto é temporário por natureza (vira o mês e a pessoa volta a ter espaço), que
+  // é exatamente o que "muitas requisições neste período" descreve. 403 diria "você não tem
+  // direito", o que não é verdade.
+  if (await limitesValem(owner, env)) {
+    const usados = await postsNoMes(owner, env);
+    if (usados >= FREE_LIMITS.postsPerMonth) {
+      return jsonResponse(
+        {
+          error: avisoDeLimite(
+            `Você já agendou ${usados} de ${FREE_LIMITS.postsPerMonth} posts neste mês. O limite se renova no dia 1º.`
+          ),
+        },
+        429
+      );
+    }
+  }
+
   const targetStatus: NewTargetStatus = payload.save_as === 'draft' ? 'draft' : 'queued';
 
   const result = await validateAccountsAndMedia(env, owner, {
@@ -743,6 +893,11 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
     pinterestBoardId: payload.pinterest_board_id,
     tiktokPrivacyLevel: payload.tiktok_privacy_level,
     instagramAsStory: payload.instagram_as_story,
+    // Faltava esta linha — só updatePost a tinha. O compositor manda só `instagram_format` (nunca
+    // o `instagram_as_story` antigo), então todo post NOVO com Reel ou Story escolhido caía no
+    // fallback de igFormat() (vídeo→Reel, imagem→Post): Story com foto rejeitava por proporção de
+    // feed sem motivo, e Story com VÍDEO publicava como Reel em silêncio, sem erro nenhum.
+    instagramFormat: payload.instagram_format,
     coverMediaId: payload.cover_media_id,
     coverTimestampMs: payload.cover_timestamp_ms,
     body: payload.body,
@@ -992,6 +1147,42 @@ async function uploadMedia(request: Request, owner: string, env: Env): Promise<R
   );
 }
 
+/**
+ * PUT /api/profile/avatar: grava as ESCOLHAS do avatar (Open Peeps) do usuário.
+ *
+ * Não guarda imagem nenhuma — só o JSON das variantes (~140 bytes), que o navegador transforma em
+ * SVG na hora de desenhar. Foi o que substituiu a foto no R2: sem upload, sem cota, sem purge, e
+ * com personalização que a foto não dava.
+ *
+ * Toda variante passa por `validarAvatar` (src/lib/avatar.ts): o campo volta pro navegador dentro
+ * de um `<svg>`, então string arbitrária aqui não pode existir.
+ */
+async function setProfileAvatar(request: Request, owner: string, env: Env): Promise<Response> {
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'JSON inválido' }, 400);
+  }
+
+  const avatar = validarAvatar(payload);
+  if (!avatar) return jsonResponse({ error: 'avatar inválido' }, 400);
+
+  await env.DB.prepare(`update user set avatar = ? where id = ?`).bind(JSON.stringify(avatar), owner).run();
+  return jsonResponse({ avatar });
+}
+
+/**
+ * DELETE /api/profile/avatar: volta pro avatar padrão.
+ *
+ * Nulo não é "sem rosto": quem não personalizou recebe um peep derivado do próprio id, sempre o
+ * mesmo. Por isso remover é uma saída de verdade e não um beco (design.md, princípio 4).
+ */
+async function removeProfileAvatar(owner: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`update user set avatar = null where id = ?`).bind(owner).run();
+  return jsonResponse({ ok: true });
+}
+
 export interface FeedItem {
   id: string;
   thumbnail_url: string | null;
@@ -1157,10 +1348,16 @@ async function multipartStart(request: Request, owner: string, env: Env): Promis
   const safeName = (body.name ?? 'upload').replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload';
   const storageKey = `${id}-${safeName}`;
   const upload = await env.MEDIA.createMultipartUpload(storageKey, { httpMetadata: { contentType: mimeType } });
+  // Registra de quem é o upload: é o que permite ao /part conferir o dono depois. Ver migração 0019.
+  await env.DB.prepare(
+    `insert into media_uploads (storage_key, upload_id, owner_id, created_at) values (?, ?, ?, ?)`
+  )
+    .bind(storageKey, upload.uploadId, owner, nowIso())
+    .run();
   return jsonResponse({ id, storage_key: storageKey, upload_id: upload.uploadId }, 201);
 }
 
-async function multipartPart(request: Request, url: URL, env: Env): Promise<Response> {
+async function multipartPart(request: Request, url: URL, owner: string, env: Env): Promise<Response> {
   const storageKey = url.searchParams.get('key');
   const uploadId = url.searchParams.get('upload_id');
   const partNumber = Number(url.searchParams.get('part'));
@@ -1168,6 +1365,17 @@ async function multipartPart(request: Request, url: URL, env: Env): Promise<Resp
     return jsonResponse({ error: 'parâmetros key/upload_id/part obrigatórios' }, 400);
   }
   if (!request.body) return jsonResponse({ error: 'corpo vazio' }, 400);
+
+  // O par (key, upload_id) precisa ser DESTE dono. Antes disso, esta rota escrevia no bucket sem
+  // nada ligando o upload a quem mandava os bytes — o upload_id ser opaco funcionava como senha, e
+  // isso não é autorização. Ver migração 0019.
+  const dono = await env.DB.prepare(
+    `select owner_id from media_uploads where storage_key = ? and upload_id = ? and owner_id = ?`
+  )
+    .bind(storageKey, uploadId, owner)
+    .first<{ owner_id: string }>();
+  if (!dono) return jsonResponse({ error: 'upload não encontrado' }, 404);
+
   const upload = env.MEDIA.resumeMultipartUpload(storageKey, uploadId);
   // O corpo vai direto pro R2 como stream — nada é acumulado na memória do Worker.
   const part = await upload.uploadPart(partNumber, request.body);
@@ -1198,6 +1406,16 @@ async function multipartComplete(request: Request, owner: string, env: Env): Pro
     return jsonResponse({ error: 'id/storage_key/upload_id/parts obrigatórios' }, 400);
   }
 
+  // Mesma checagem do /part: sem ela, fechar o upload de outro dono gravaria o media_asset em nome
+  // de quem chamou, com os bytes de quem subiu. O `delete ... returning` confere e limpa numa
+  // instrução só — o registro pendente já cumpriu o papel dele quando o upload fecha.
+  const pendente = await env.DB.prepare(
+    `delete from media_uploads where storage_key = ? and upload_id = ? and owner_id = ? returning storage_key`
+  )
+    .bind(storageKey, uploadId, owner)
+    .first<{ storage_key: string }>();
+  if (!pendente) return jsonResponse({ error: 'upload não encontrado' }, 404);
+
   const upload = env.MEDIA.resumeMultipartUpload(storageKey, uploadId);
   await upload.complete(parts.map((p) => ({ partNumber: p.part_number, etag: p.etag })));
 
@@ -1225,9 +1443,12 @@ async function multipartComplete(request: Request, owner: string, env: Env): Pro
   );
 }
 
-async function getMediaBytes(id: string, env: Env): Promise<Response> {
-  const row = await env.DB.prepare(`select storage_key, mime_type from media_assets where id = ?`)
-    .bind(id)
+async function getMediaBytes(id: string, owner: string, env: Env): Promise<Response> {
+  // `and owner_id = ?`: sem ele esta rota servia o arquivo de QUALQUER dono a quem soubesse o id,
+  // bastando estar logado. O uuid ser difícil de adivinhar não é controle de acesso — ele aparece
+  // em resposta de API, em log e no cliente. Coberto por test/isolation.test.ts.
+  const row = await env.DB.prepare(`select storage_key, mime_type from media_assets where id = ? and owner_id = ?`)
+    .bind(id, owner)
     .first<{ storage_key: string; mime_type: string }>();
   if (!row) return jsonResponse({ error: 'mídia não encontrada' }, 404);
 
@@ -1258,6 +1479,7 @@ interface ResumoContagemRow {
   total: number;
   vencidos: number;
   atrasados: number;
+  retentando: number;
 }
 
 interface ProximoRow {
@@ -1271,6 +1493,29 @@ interface ProximoRow {
   body: string | null;
   caption_override: string | null;
   options: string | null;
+}
+
+/**
+ * GET /api/state: contas + agenda + pilares + resumo numa resposta só, pro poll do dashboard.
+ *
+ * Composição, não cópia: chama os quatro handlers que já existem e funde os corpos. A regra de
+ * cada bloco continua morando num lugar só, e este endpoint não vira uma quinta query paralela
+ * que alguém esquece de atualizar quando a original mudar.
+ */
+async function getState(url: URL, owner: string, env: Env): Promise<Response> {
+  const [acc, pst, tgs, sum] = await Promise.all([
+    listAccounts(owner, env),
+    listPosts(url, owner, env),
+    listTags(owner, env),
+    getSummary(owner, env),
+  ]);
+  const [accounts, posts, tags, summary] = await Promise.all([
+    acc.json() as Promise<Record<string, unknown>>,
+    pst.json() as Promise<Record<string, unknown>>,
+    tgs.json() as Promise<Record<string, unknown>>,
+    sum.json() as Promise<Record<string, unknown>>,
+  ]);
+  return jsonResponse({ ...accounts, ...posts, ...tags, summary });
 }
 
 /**
@@ -1307,7 +1552,15 @@ async function getSummary(owner: string, env: Env): Promise<Response> {
               -- invisível do app hoje, e a razão principal deste painel existir.
               sum(case when pt.status = 'draft' and sp.scheduled_for < ? then 1 else 0 end) as vencidos,
               -- Na fila e já passou da folga: a varredura devia ter pegado e não pegou.
-              sum(case when pt.status = 'queued' and sp.scheduled_for < ? then 1 else 0 end) as atrasados
+              sum(case when pt.status = 'queued' and sp.scheduled_for < ? then 1 else 0 end) as atrasados,
+              -- JÁ TENTOU E FALHOU, mas voltou pra fila pro retry. Conta separado porque é o estado
+              -- mais enganoso do app: na lista ele é idêntico a um post que só está esperando a
+              -- hora, e a mensagem de erro fica escondida no modal de detalhe. Sem isto, a falha só
+              -- apareceria depois dos 30min de tolerância de "atrasados", ou quando as tentativas
+              -- esgotassem e virasse "failed", o que leva horas.
+              -- (Sem crase em comentário aqui: a query é um template literal, e uma crase solta
+              -- fecha a string no meio.)
+              sum(case when pt.status = 'queued' and pt.attempt_count > 0 then 1 else 0 end) as retentando
          from post_targets pt
          join scheduled_posts sp on sp.id = pt.scheduled_post_id
         where sp.owner_id = ?
@@ -1338,10 +1591,12 @@ async function getSummary(owner: string, env: Env): Promise<Response> {
   const porStatus: Record<string, number> = {};
   let vencidos = 0;
   let atrasados = 0;
+  let retentando = 0;
   for (const linha of contagens.results ?? []) {
     porStatus[linha.status] = linha.total;
     vencidos += linha.vencidos ?? 0;
     atrasados += linha.atrasados ?? 0;
+    retentando += linha.retentando ?? 0;
   }
 
   const linhasProximos = proximos.results ?? [];
@@ -1352,7 +1607,7 @@ async function getSummary(owner: string, env: Env): Promise<Response> {
 
   return jsonResponse({
     por_status: porStatus,
-    atencao: { rascunhos_vencidos: vencidos, atrasados },
+    atencao: { rascunhos_vencidos: vencidos, atrasados, retentando },
     proximos: linhasProximos.map((r) => ({
       post_id: r.post_id,
       target_id: r.target_id,
@@ -1609,6 +1864,133 @@ async function deleteGridPreview(id: string, owner: string, env: Env): Promise<R
 const TAG_COLORS: readonly string[] = ['roxo', 'verde', 'azul', 'laranja', 'rosa', 'ciano'];
 
 const MAX_TAG_NAME = 24;
+
+/**
+ * Responde uma dúvida de quem está na landing.
+ *
+ * Três defesas, e nenhuma delas é opcional num endpoint sem sessão:
+ *  1. limite por IP (binding), que barra o laço de shell de um abusador só;
+ *  2. teto global do dia (D1), que barra tráfego distribuído — sem ele, uma enxurrada derruba junto
+ *     a sugestão de legenda de quem paga, porque a cota do Workers AI é da conta inteira;
+ *  3. tamanho máximo da pergunta, que impede alguém de usar o endpoint como tradutor de graça
+ *     colando um texto inteiro dentro dele.
+ *
+ * A recusa NUNCA é um erro seco: sempre oferece o e-mail. Quem está com dúvida na hora de decidir
+ * assinar e leva "erro 429" na cara vai embora, não tenta de novo.
+ */
+async function responderDuvida(request: Request, env: Env): Promise<Response> {
+  const SAIDA = 'Manda a sua dúvida pra contato@omangue.co que a gente responde.';
+
+  const body = (await request.json().catch(() => null)) as { pergunta?: string } | null;
+  const pergunta = (body?.pergunta ?? '').trim();
+  if (pergunta.length < 3) {
+    return jsonResponse({ error: 'Escreva a sua dúvida.' }, 400);
+  }
+  if (pergunta.length > MAX_PERGUNTA) {
+    return jsonResponse(
+      { error: `Resuma em até ${MAX_PERGUNTA} caracteres, ou ${SAIDA.toLowerCase()}` },
+      400
+    );
+  }
+
+  // O IP vem do CF-Connecting-IP, que a Cloudflare preenche e o cliente não consegue forjar (o
+  // X-Forwarded-For, que seria a escolha óbvia, é cabeçalho de request e qualquer um manda o que
+  // quiser nele). Sem IP, cai num balde único: preferível a não limitar nada.
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'sem-ip';
+  if (env.ATENDENTE_LIMITE) {
+    const { success } = await env.ATENDENTE_LIMITE.limit({ key: ip });
+    if (!success) {
+      return jsonResponse({ error: `Muitas perguntas seguidas. Espere um minuto, ou ${SAIDA.toLowerCase()}` }, 429);
+    }
+  }
+
+  try {
+    const { texto, respondeu } = await responder(env, pergunta);
+    // Log do que NÃO soube responder: é o buraco do corpus, e é a única forma de descobrir qual
+    // pergunta a landing devia responder e não responde. Sem o IP junto — o que interessa é a
+    // pergunta, não quem fez.
+    if (!respondeu) console.warn(`[atendente] sem resposta: ${pergunta.slice(0, 200)}`);
+    return jsonResponse({ resposta: texto });
+  } catch (err) {
+    if (err instanceof AtendenteIndisponivel) {
+      console.error('[atendente]', err.message);
+      return jsonResponse({ resposta: `Não consigo responder agora. ${SAIDA}` });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Sugere legendas pro assunto que a pessoa descreveu.
+ *
+ * O que faz isto valer mais que um "gerar texto" genérico é o `buscarExemplos`: o prompt leva as
+ * legendas do PRÓPRIO dono que mais engajaram, no mesmo pilar. É por isso que a busca acontece aqui
+ * e não no cliente — o histórico e a métrica são dados do servidor, e mandá-los pro navegador só
+ * pra ele devolver no corpo seria expor dado sem motivo.
+ */
+async function sugerirLegenda(request: Request, owner: string, env: Env): Promise<Response> {
+  if (!env.AI) {
+    return jsonResponse({ error: 'A sugestão de legenda não está disponível neste ambiente.' }, 503);
+  }
+
+  const body = (await request.json().catch(() => null)) as {
+    assunto?: string;
+    plataforma?: Platform;
+    tag_id?: string | null;
+  } | null;
+
+  const assunto = (body?.assunto ?? '').trim();
+  // 4 caracteres: abaixo disso não há assunto, e o modelo inventaria o post inteiro — exatamente o
+  // que a regra "não invente fato" no prompt existe pra evitar.
+  if (assunto.length < 4) {
+    return jsonResponse({ error: 'Escreva em uma linha sobre o que é o post.' }, 400);
+  }
+  const plataforma = body?.plataforma;
+  if (!plataforma || !PLATFORMS.includes(plataforma)) {
+    return jsonResponse({ error: 'Escolha a conta de destino antes de gerar a legenda.' }, 400);
+  }
+
+  // A cota é consumida ANTES de chamar o modelo. Consumir depois deixaria a chamada cara acontecer
+  // e só então descobrir que não podia — que é o gasto que o teto existe pra impedir.
+  const restam = await consumirCota(env, owner);
+  if (restam === null) {
+    return jsonResponse(
+      { error: `Você já gerou ${TETO_DIARIO} legendas hoje. O contador volta amanhã.` },
+      429
+    );
+  }
+
+  // O pilar entra pelo NOME, não pelo id: quem lê o prompt é um modelo de linguagem, e "bastidores"
+  // diz algo que um uuid não diz. Filtrado por dono pra um id de outra pessoa não vazar nome.
+  let pilar: string | undefined;
+  if (body?.tag_id) {
+    const tag = await env.DB.prepare(`select name from tags where id = ? and owner_id = ?`)
+      .bind(body.tag_id, owner)
+      .first<{ name: string }>();
+    pilar = tag?.name;
+  }
+
+  const exemplos = await buscarExemplos(env, owner, plataforma, body?.tag_id ?? null);
+
+  try {
+    const sugestoes = await gerarLegenda(env, { assunto, plataforma, pilar, exemplos });
+    // `usou_historico` alimenta a dica na tela: sem ela, a pessoa não tem como saber por que a
+    // sugestão melhora depois que ela publica algumas peças.
+    // O `teto` vai junto do `restam` pra tela poder dizer "restam 3 de 20" em vez de "restam 3".
+    // Número solto não tem escala (ancoragem, web/design.md) — e mandar o teto daqui evita o front
+    // guardar uma cópia do 20 que envelhece calada no dia em que este número mudar.
+    return jsonResponse({ sugestoes, restam, teto: TETO_DIARIO, usou_historico: exemplos.length > 0 });
+  } catch (err) {
+    // A falha foi nossa, então a cota volta: cobrar da pessoa uma unidade por um erro que não foi
+    // dela é o tipo de coisa que ela nota (o contador cai sem legenda nenhuma na tela).
+    await devolverCota(env, owner);
+    if (err instanceof SemIA) {
+      console.error('[legenda]', err.message);
+      return jsonResponse({ error: 'Não consegui gerar agora. Tente de novo em alguns segundos.' }, 502);
+    }
+    throw err;
+  }
+}
 
 async function listTags(owner: string, env: Env): Promise<Response> {
   // O `uso` é o que permite a tela dizer "este pilar tem 3 peças" antes de você apagá-lo — e

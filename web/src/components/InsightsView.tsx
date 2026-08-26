@@ -507,7 +507,7 @@ function VazioDeMetricas({ onOpenConnections }: { onOpenConnections: () => void 
   if (semEscopo.length > 0 && semEscopo.length === accounts.length) {
     return (
       <EmptyState
-        art="conectar"
+        art="bloqueado"
         title="Falta permissão para ler as métricas"
         action={
           <Button size="lg" variant="outline" onClick={onOpenConnections}>
@@ -536,8 +536,10 @@ function VazioDeMetricas({ onOpenConnections }: { onOpenConnections: () => void 
   // 4. Publicou: é só a coleta ainda não ter rodado.
   return (
     <EmptyState art="esperando" title="Coletando os primeiros números">
-      A varredura roda a cada 10 minutos e busca as métricas de cada post publicado. Os indicadores
-      aparecem sozinhos assim que a primeira coleta terminar.
+      {/* Sem cravar o intervalo do cron aqui: já mudou uma vez hoje (10min → 1min) e esse texto
+          ficou desatualizado sem ninguém perceber até alguém ler a tela com atenção. */}
+      A varredura busca as métricas de cada post publicado automaticamente. Os indicadores aparecem
+      sozinhos assim que a primeira coleta terminar.
     </EmptyState>
   );
 }
