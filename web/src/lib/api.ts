@@ -223,6 +223,8 @@ export interface CreatePostPayload {
   /** Pilar de conteúdo. `null` tira. */
   tag_id?: string | null;
   target_caption_overrides?: Record<string, string>;
+  /** Mídia própria de uma conta, por account_id: o recorte daquela rede. Ausente = usa media_asset_ids. */
+  target_media_asset_ids?: Record<string, string[]>;
 }
 
 export function createPost(payload: CreatePostPayload): Promise<{ id: string; target_count: number }> {
