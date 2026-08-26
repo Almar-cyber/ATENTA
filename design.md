@@ -44,7 +44,21 @@ scheduled_posts ─┘                                          ↑
 | `post_comments` | log bruto de comentário lido no Instagram (id da rede como PK — dedup de graça). "Quem comenta com você" é sempre um `group by` na hora de ler, nunca um contador gravado (migração 0015). Cadência própria (`post_targets.next_comments_at`, migração 0016), sem horizonte — ao contrário da de métrica, que congela depois de 60 dias |
 
 **Um post, N destinos.** A legenda vive em `scheduled_posts.body`; cada destino pode divergir via
-`post_targets.caption_override`. O horário é um só, compartilhado por todos os destinos.
+`post_targets.caption_override`. A **mídia** diverge do mesmo jeito: `post_target_media` sempre foi
+por destino, então a mesma foto pode entrar recortada numa proporção por rede (4:5 no feed, 9:16 no
+Reel) dentro de um post só. `POST /api/posts` recebe isso em `target_media_asset_ids`, um mapa de
+`account_id` pra lista de mídia, com três leituras possíveis por conta:
+
+| No mapa | Significa |
+| --- | --- |
+| ausente | usa a lista compartilhada do post (`media_asset_ids`) |
+| `["md-a", "md-b"]` | esta conta tem a mídia dela, nesta ordem de carrossel |
+| `[]` | esta conta sai **sem arquivo**, mesmo que o post tenha lista compartilhada |
+
+A lista compartilhada é resolvida mesmo quando toda conta diverge, pra que um id inexistente siga
+sendo 400 em vez de virar uma lista ignorada em silêncio. E a guarda de "post vazio" (legenda OU
+mídia) só conta as contas que estão em `target_account_ids`: mapa apontando pra conta de fora não é
+conteúdo. O horário é um só, compartilhado por todos os destinos.
 
 **Ideia → post.** `grid_previews` é o estágio anterior: o que você quer postar, ainda sem data. Não
 virou um "rascunho sem data" porque `scheduled_for` é `not null` e o SQLite não remove um NOT NULL
