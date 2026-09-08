@@ -157,15 +157,14 @@ O que dá pra fazer:
   título, Story 9:16 sem legenda, etc.), já com a mídia que está na fila. Avisa quando a legenda
   passa do limite da plataforma e quando um Story ignora a legenda. O mesmo card aparece no modal
   de detalhe de qualquer post agendado ("Como vai ficar").
-- **Consultar** — três visões, alternáveis por aba (inspirado no calendário editorial de
-  ferramentas como mLabs/Buffer/Later): **lista** agrupada por dia, com thumbnail real da mídia; um
-  **calendário mensal** com um chip por post em cada dia (cor da borda = plataforma; passar o mouse abre um cartão com a thumbnail, a legenda, a conta e o status); e um **Grid
-  IG** — a grade 3-colunas do perfil do Instagram, mais novo no canto superior esquerdo, que dá pra
-  **arrastar e reordenar** antes de decidir a ordem final (ver abaixo). O status aparece na própria
-  peça, não só na coluna de badge: borda tracejada = rascunho, ⚠ + fundo vermelho = falhou. Clicar
-  num chip/tile abre o detalhe; clicar num dia vazio do calendário já pré-preenche a data no
-  formulário. Filtros por status, plataforma e conta. Atualiza sozinho a cada 60s (só com a aba
-  visível; ao voltar pra aba, atualiza na hora).
+- **Consultar** — a **Agenda** tem três visões, alternáveis por aba (inspirado no calendário
+  editorial de ferramentas como mLabs/Buffer/Later): **lista** agrupada por dia, com thumbnail real
+  da mídia; uma **semana** de horas × dias; e um **calendário mensal** com um chip por post em cada
+  dia (cor da borda = plataforma; passar o mouse abre um cartão com a thumbnail, a legenda, a conta
+  e o status). O status aparece na própria peça, não só na coluna de badge: borda tracejada =
+  rascunho, ⚠ + fundo vermelho = falhou. Clicar num chip abre o detalhe; clicar num dia vazio já
+  pré-preenche a data no formulário. Filtros por status, plataforma e conta. Atualiza sozinho a cada
+  60s (só com a aba visível; ao voltar pra aba, atualiza na hora).
 - **Alerta no topo** — barra vermelha quando algum post falhou ou alguma conta precisa
   reautenticar; clicar nela filtra a lista pelas falhas. Compensa em parte a falta de e-mail
   automático dos Cron Triggers (ver Pendências), mas só enquanto o dashboard estiver aberto.
@@ -179,9 +178,15 @@ O que dá pra fazer:
   a plataforma. Editar também passou a valer pra cancelado/falhou (é o caso de reaproveitar a peça);
   ao salvar, esses destinos voltam como rascunho.
 
-### Grid IG (planejador arrastável)
+### Planejar (a grade do perfil, arrastável)
 
-A aba **Grid IG** monta a grade 3-colunas do perfil, mais novo no canto superior esquerdo, com as
+**Planejar** é um destino próprio no cabeçalho — Painel · Agenda · Planejar · Insights — e não uma
+quarta aba da Agenda, que é onde nasceu. Duas das três peças que ele mostra não são post agendado
+(o publicado vem do feed real da conta, a ideia não tem data), o `IdeaSidebar` ao lado é uma
+funcionalidade inteira, e enquanto era aba ele herdava os **filtros da Agenda**: filtrar por
+"rascunho" apagava os publicados, que são justamente as âncoras contra as quais se planeja.
+
+A tela monta a grade 3-colunas do perfil, mais novo no canto superior esquerdo, com as
 **três** coisas que compõem a aparência do feed:
 
 | Peça | De onde vem | Arrasta? |
@@ -201,6 +206,9 @@ Arrastar reordena, e cada espécie se move de um jeito:
 
 O botão **Desfazer** restaura o arranjo anterior (um passo). O que já foi publicado nunca entra na
 permutação; arrastar pra cima de um explica isso em vez de não fazer nada.
+
+Com mais de um Instagram conectado, o perfil da grade se escolhe num seletor no cabeçalho da tela:
+uma grade é UM perfil, e misturar dois desenharia um feed que nenhum dos dois vai ter.
 
 ### Ideias (a lista ao lado da grade)
 

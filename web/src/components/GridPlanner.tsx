@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { motion } from 'motion/react';
-import { CalendarPlus, ImagePlus, ImageIcon, Layers, Loader2, PenLine, X } from 'lucide-react';
+import { CalendarPlus, HelpCircle, ImagePlus, ImageIcon, Layers, Loader2, PenLine, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { GridPreview, Post } from '@/lib/types';
 import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
@@ -13,6 +13,7 @@ import {
   deleteGridPreview,
   getAccountFeed,
   getGridPreviews,
+  getPosts,
   reschedule,
   updateGridPreview,
   uploadMedia,
@@ -20,27 +21,68 @@ import {
 import type { FeedItem } from '@/lib/api';
 import { videoPosterUrl } from '@/lib/useMediaUrl';
 import { planGridOrder, moveItem } from '@/lib/gridOrder';
+import { usePressDrag } from '@/lib/usePressDrag';
 import { buildTiles } from '@/lib/gridTiles';
 import type { Tile } from '@/lib/gridTiles';
 import type { Movable } from '@/lib/gridOrder';
 import { useScheduler } from '@/store';
 import { IdeaSidebar } from './IdeaSidebar';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { ViewHeader } from '@/components/ui/view-header';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { DialogSelection } from './PostDialog';
 
 const HOUR_MS = 3_600_000;
 
-export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogSelection) => void }) {
-  const { reload, accounts } = useScheduler();
+export function GridPlanner({
+  onOpen,
+  onOpenConnections,
+}: {
+  onOpen: (s: DialogSelection) => void;
+  onOpenConnections: () => void;
+}) {
+  const { reload, accounts, posts: postsDoStore, loading } = useScheduler();
+
+  // A CONTA DESTA GRADE. Uma grade é um PERFIL — mostrar dois Instagons no mesmo quadriculado
+  // desenharia um feed que nenhum dos dois vai ter. Quando há mais de um, a escolha vira um Select
+  // no cabeçalho; com um só, ele nem aparece.
+  const igAccounts = useMemo(
+    () => accounts.filter((a) => a.platform === 'instagram' && a.status === 'active'),
+    [accounts]
+  );
+  const [contaId, setContaId] = useState<string>('');
+  const igAccount = igAccounts.find((a) => a.id === contaId) ?? igAccounts[0];
+
+  // OS POSTS SÃO BUSCADOS AQUI, e não recebidos da Agenda. Os filtros da Agenda (status e
+  // plataforma) vão pra QUERY do servidor, então a lista do store chega já cortada por eles — e a
+  // grade lida com isso da pior forma possível: filtrar por "rascunho" apagava os PUBLICADOS, que
+  // são justamente as âncoras contra as quais se planeja. Enquanto isto era uma aba da Agenda o
+  // filtro ficava na mesma fileira, apagado, sem dizer que estava ligado. Aqui a grade é dona do
+  // que mostra: Instagram, todos os status.
+  const [posts, setPosts] = useState<Post[]>([]);
+  const refreshPosts = useCallback(async () => {
+    const r = await getPosts({ platform: 'instagram' });
+    setPosts(r.posts ?? []);
+  }, []);
+  // `postsDoStore` na dependência é de propósito, e não é a lista que a grade usa: a identidade
+  // dela muda a cada poll do store (60s, pausado com a aba oculta) e a cada mutação de qualquer
+  // tela, então isto reaproveita aquele relógio em vez de criar um segundo aqui.
+  useEffect(() => {
+    refreshPosts().catch((e) => console.error(e));
+  }, [refreshPosts, postsDoStore]);
 
   // Feed real do perfil, buscado ao vivo: é o que permite planejar a estética contra o que já
   // existe. As URLs de mídia do Instagram expiram, então nada disso é cacheado.
-  const igAccount = accounts.find((a) => a.platform === 'instagram' && a.status === 'active');
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [feedError, setFeedError] = useState<string | null>(null);
   useEffect(() => {
     if (!igAccount) return;
     let alive = true;
+    setFeed([]);
+    setFeedError(null);
     getAccountFeed(igAccount.id)
       .then((r) => {
         if (!alive) return;
@@ -67,7 +109,18 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
   const dragKey = useRef<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const tiles = useMemo(() => buildTiles(posts, feed, previews), [posts, feed, previews]);
+  // Só os destinos da conta escolhida chegam na montagem: `buildTiles` filtra por REDE, não por
+  // conta — com dois Instagrams, os dois perfis caíam no mesmo quadriculado.
+  const postsDaConta = useMemo(() => {
+    if (!igAccount) return posts;
+    const out: Post[] = [];
+    for (const post of posts) {
+      const targets = post.targets.filter((t) => t.account_id === igAccount.id);
+      if (targets.length) out.push({ ...post, targets });
+    }
+    return out;
+  }, [posts, igAccount?.id]);
+  const tiles = useMemo(() => buildTiles(postsDaConta, feed, previews), [postsDaConta, feed, previews]);
   const movableTiles = useMemo(() => tiles.filter((t) => t.movable), [tiles]);
   const movable: Movable[] = useMemo(
     () => movableTiles.map((t) => ({ id: t.domainId, kind: t.kind === 'preview' ? 'preview' : 'post', at: t.at })),
@@ -86,26 +139,40 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
       if (plan.postOrder.length > 1) await reschedule(plan.postOrder.slice().reverse());
       await Promise.all(changedPreviews.map(([id, at]) => updateGridPreview(id, { sort_at: at })));
       setUndo(snapshot);
-      await Promise.all([reload(), refreshPreviews()]);
+      await Promise.all([reload(), refreshPosts(), refreshPreviews()]);
       toast.success(okMsg);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
   }
 
+  // O QUE ACONTECE AO SOLTAR — um só, pros dois gestos: o drag nativo do HTML (ponteiro) e o
+  // pressionar-e-arrastar do toque (`usePressDrag`). Eles diferem só em COMO chegam aqui.
+  const mover = useCallback(
+    (fromKey: string, toKey: string) => {
+      if (!fromKey || fromKey === toKey) return;
+      const from = movableTiles.findIndex((t) => t.key === fromKey);
+      const to = movableTiles.findIndex((t) => t.key === toKey);
+      // Silêncio aqui parecia "o arrastar não funciona" — o motivo real é sempre uma peça publicada
+      // na jogada (o horário dela já passou, não dá pra redistribuir). Diz isso em vez de no-op.
+      if (from === -1 || to === -1) {
+        toast.error('O que já foi publicado é âncora e não muda de lugar — arraste entre agendados e ideias.');
+        return;
+      }
+      applyArrangement(moveItem(movable, from, to), movable, 'Ordem atualizada.');
+    },
+    // `applyArrangement` fica de fora de propósito: ela é redeclarada a cada render e só fecha
+    // sobre `previews`/`reload`, que não mudam o resultado de um arraste em andamento. Entrar aqui
+    // faria esta função trocar de identidade toda hora, sem ganho nenhum.
+    [movableTiles, movable]
+  );
+
+  const toque = usePressDrag(mover);
+
   function onDrop(toKey: string) {
     const fromKey = dragKey.current;
     dragKey.current = null;
-    if (!fromKey || fromKey === toKey) return;
-    const from = movableTiles.findIndex((t) => t.key === fromKey);
-    const to = movableTiles.findIndex((t) => t.key === toKey);
-    // Silêncio aqui parecia "o arrastar não funciona" — o motivo real é sempre uma peça publicada
-    // na jogada (o horário dela já passou, não dá pra redistribuir). Diz isso em vez de no-op.
-    if (from === -1 || to === -1) {
-      toast.error('O que já foi publicado é âncora e não muda de lugar — arraste entre agendados e ideias.');
-      return;
-    }
-    applyArrangement(moveItem(movable, from, to), movable, 'Ordem atualizada.');
+    if (fromKey) mover(fromKey, toKey);
   }
 
   async function onAddPreviews(files: FileList | null) {
@@ -172,17 +239,67 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
     });
   }
 
-  const dragProps = (tile: Tile) =>
-    tile.movable
+  const dragProps = (tile: Tile) => ({
+    ...toque.itemProps(tile.key, tile.movable),
+    ...(tile.movable
       ? {
           draggable: true,
           onDragStart: () => (dragKey.current = tile.key),
           onDragOver: (e: DragEvent) => e.preventDefault(),
           onDrop: () => onDrop(tile.key),
         }
-      : { onDragOver: (e: React.DragEvent) => e.preventDefault(), onDrop: () => onDrop(tile.key) };
+      : { onDragOver: (e: React.DragEvent) => e.preventDefault(), onDrop: () => onDrop(tile.key) }),
+  });
+
+  // O gesto de toque não tem imagem de arraste como o do desktop, então o estado tem que aparecer
+  // na própria peça: a que está na mão apaga e encolhe, a que vai receber ganha o contorno.
+  const dragClasses = (tile: Tile) =>
+    toque.pegou === tile.key
+      ? 'scale-95 opacity-50'
+      : toque.pegou && toque.sobre === tile.key
+        ? 'outline outline-2 outline-offset-[-2px] outline-brand'
+        : '';
 
   return (
+    <Card className="h-full">
+      <ViewHeader
+        title="Planejar"
+        description="A grade do perfil, e as ideias sem data."
+        actions={
+          igAccounts.length > 1 && (
+            <Select value={igAccount?.id ?? ''} onValueChange={setContaId}>
+              <SelectTrigger className="w-[190px]" aria-label="Perfil desta grade">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {igAccounts.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )
+        }
+      />
+      <CardContent className="min-h-0 flex-1 overflow-hidden">
+        {/* Sem conta de Instagram ativa a grade não tem o que ancorar: não há feed, e nenhum post
+            agendado pode existir. Um quadriculado vazio pareceria defeito — diga o que fazer.
+            O `loading` é o que impede isto de PISCAR: `accounts` nasce vazio, então sem ele toda
+            visita abria em "Nenhum Instagram conectado" por uma fração de segundo — um vazio que
+            mente é pior que nenhum. */}
+        {loading ? null : !igAccount ? (
+          <EmptyState
+            title="Nenhum Instagram conectado"
+            action={
+              <Button size="lg" onClick={onOpenConnections}>
+                Conectar Instagram
+              </Button>
+            }
+          >
+            Esta tela monta a grade do seu perfil com o que já foi publicado e o que está agendado.
+          </EmptyState>
+        ) : (
     // Grade à esquerda com a largura que ela já tinha; a lista de ideias ocupa o resto — que antes
     // era só branco. Abaixo do `lg` elas empilham, com a lista embaixo: espremer as duas num
     // celular deixaria a grade estreita demais pra cumprir a função dela.
@@ -196,6 +313,26 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         <Button size="sm" variant="ghost" disabled={!undo} onClick={() => undo && applyArrangement(undo, null, 'Ordem anterior restaurada.')}>
           Desfazer
         </Button>
+        {/* AS REGRAS DA GRADE FICAM AQUI DENTRO, e não num parágrafo fixo. Eram quatro linhas de
+            texto acima da grade — no celular, quase uma tela inteira gasta, toda visita, por uma
+            explicação que se lê UMA vez. Mesma régua do ponto vermelho do sino e do UsoIA: aviso
+            que aparece sempre é aviso que ninguém lê no dia em que importa. O que ele explicava
+            continua explicado, a um toque de distância. */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button size="sm" variant="ghost" aria-label="Como esta grade funciona">
+              <HelpCircle className="size-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72 space-y-2 text-xs text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Pressione e arraste para reordenar.</span> Os posts agendados só trocam
+              entre si os horários que já têm — nenhuma data nova é inventada.
+            </p>
+            <p>As ideias entram no meio sem ocupar horário nenhum.</p>
+            <p>A grade do perfil corta tudo em 3:4. No feed, o post mantém a proporção original.</p>
+          </PopoverContent>
+        </Popover>
         <input
           ref={fileRef}
           type="file"
@@ -206,12 +343,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         />
       </div>
 
-      <p className="mb-3 max-w-md text-xs text-muted-foreground">
-        Arraste para reordenar: os posts agendados só trocam entre si os horários que já têm; as ideias entram no meio
-        sem ocupar horário nenhum. A grade do perfil corta tudo em 3:4 — no feed, o post mantém a proporção original.
-      </p>
-
-      <div className="grid max-w-md grid-cols-3 gap-0.5">
+      <div ref={toque.containerRef} className="grid max-w-md grid-cols-3 gap-0.5">
         {tiles.map((tile) => {
           if (tile.kind === 'preview') {
             const { preview } = tile;
@@ -220,7 +352,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
                 layout
                 key={tile.key}
                 {...dragProps(tile)}
-                className="group relative aspect-[3/4] cursor-grab overflow-hidden border-2 border-dashed border-brand bg-muted active:cursor-grabbing"
+                className={`group relative aspect-[3/4] cursor-grab overflow-hidden border-2 border-dashed border-brand bg-muted transition-transform active:cursor-grabbing ${dragClasses(tile)}`}
               >
                 {preview.public_url ? (
                   isVideoMime(preview.mime_type) ? (
@@ -269,7 +401,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
                 rel="noopener noreferrer"
                 title={item.caption ?? 'Post publicado no Instagram'}
                 {...dragProps(tile)}
-                className="relative block aspect-[3/4] overflow-hidden bg-muted"
+                className={`relative block aspect-[3/4] overflow-hidden bg-muted transition-transform ${dragClasses(tile)}`}
               >
                 {item.thumbnail_url ? (
                   <img src={item.thumbnail_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
@@ -293,10 +425,12 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
               layout
               key={tile.key}
               {...dragProps(tile)}
-              onClick={() => onOpen({ post, target })}
-              className={`group relative aspect-[3/4] overflow-hidden bg-muted ${
+              // O navegador dispara um clique logo depois de soltar o dedo; sem esta guarda,
+              // terminar um arraste abriria o detalhe da peça que acabou de ser movida.
+              onClick={() => !toque.consumiuClique() && onOpen({ post, target })}
+              className={`group relative aspect-[3/4] overflow-hidden bg-muted transition-transform ${
                 published ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
-              }`}
+              } ${dragClasses(tile)}`}
             >
               {/* Ordem de queda: nossa cópia → capa do feed → glyph. O meio existe porque a nossa
                   cópia some depois de 30 dias (purge), e sem ele todo post com mais de um mês era
@@ -354,5 +488,8 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         className="min-w-0 flex-1 lg:h-full lg:overflow-y-auto lg:pb-2 lg:pr-1"
       />
     </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -1,23 +1,26 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Crop, ImagePlus, RefreshCw, X, ImageIcon, Film } from 'lucide-react';
 import { toast } from 'sonner';
 import type { QueuedMedia } from '@/lib/types';
 import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
 import { useMediaUrl, videoPosterUrl } from '@/lib/useMediaUrl';
+import { usePressDrag } from '@/lib/usePressDrag';
 
 function Tile({
   item,
   index,
-  onDragStart,
-  onDrop,
+  dragProps,
+  dragClass,
   onRemove,
   onReplaceClick,
   onCropClick,
 }: {
   item: QueuedMedia;
   index: number;
-  onDragStart: () => void;
-  onDrop: () => void;
+  /** Tudo que faz o tile arrastar: o drag nativo (ponteiro) e o pressionar-e-arrastar (toque). */
+  dragProps: Record<string, unknown>;
+  /** Estado visual do arraste por toque, que não tem imagem de arraste pra mostrar. */
+  dragClass: string;
   onRemove: () => void;
   onReplaceClick: () => void;
   onCropClick?: () => void;
@@ -30,11 +33,8 @@ function Tile({
     // Sem `layout` do motion aqui de propósito: com muitos arquivos pesados, animar a posição de
     // cada tile a cada reordenação travava o arrastar. A troca de ordem é instantânea.
     <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={onDrop}
-      className="group relative aspect-square cursor-grab overflow-hidden rounded-xl border bg-muted active:cursor-grabbing"
+      {...dragProps}
+      className={`group relative aspect-square cursor-grab overflow-hidden rounded-xl border bg-muted transition-transform active:cursor-grabbing ${dragClass}`}
     >
       {url && !broken ? (
         video ? (
@@ -118,16 +118,26 @@ export function MediaQueueGrid({
   const replaceKey = useRef<string | null>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
 
+  // Um só caminho de "soltou aqui", pros dois gestos — igual ao GridPlanner.
+  const mover = useCallback(
+    (fromKey: string, toKey: string) => {
+      if (!fromKey || fromKey === toKey) return;
+      const next = items.slice();
+      const from = next.findIndex((i) => i.key === fromKey);
+      const to = next.findIndex((i) => i.key === toKey);
+      if (from === -1 || to === -1) return;
+      next.splice(to, 0, next.splice(from, 1)[0]);
+      onReorder(next);
+    },
+    [items, onReorder]
+  );
+
+  const toque = usePressDrag(mover);
+
   function handleDrop(toKey: string) {
     const fromKey = dragKey.current;
     dragKey.current = null;
-    if (!fromKey || fromKey === toKey) return;
-    const next = items.slice();
-    const from = next.findIndex((i) => i.key === fromKey);
-    const to = next.findIndex((i) => i.key === toKey);
-    if (from === -1 || to === -1) return;
-    next.splice(to, 0, next.splice(from, 1)[0]);
-    onReorder(next);
+    if (fromKey) mover(fromKey, toKey);
   }
 
   function handleReplaceClick(key: string) {
@@ -152,7 +162,7 @@ export function MediaQueueGrid({
 
   return (
     // 3 colunas no mobile (tiles maiores, os 3 botões de ação cabem), 4 no desktop.
-    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+    <div ref={toque.containerRef} className="grid grid-cols-3 gap-2 sm:grid-cols-4">
       <input
         ref={replaceInputRef}
         type="file"
@@ -165,8 +175,20 @@ export function MediaQueueGrid({
           key={item.key}
           item={item}
           index={idx}
-          onDragStart={() => (dragKey.current = item.key)}
-          onDrop={() => handleDrop(item.key)}
+          dragProps={{
+            ...toque.itemProps(item.key, true),
+            draggable: true,
+            onDragStart: () => (dragKey.current = item.key),
+            onDragOver: (e: React.DragEvent) => e.preventDefault(),
+            onDrop: () => handleDrop(item.key),
+          }}
+          dragClass={
+            toque.pegou === item.key
+              ? 'scale-95 opacity-50'
+              : toque.pegou && toque.sobre === item.key
+                ? 'outline outline-2 outline-offset-[-2px] outline-brand'
+                : ''
+          }
           onRemove={() => onRemove(item.key)}
           onReplaceClick={() => handleReplaceClick(item.key)}
           onCropClick={onCrop ? () => onCrop(item.key) : undefined}

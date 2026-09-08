@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, CalendarDays, Check, CheckCircle2, LayoutDashboard, Link2, LogOut, Menu, Plus, Smile } from 'lucide-react';
+import { BarChart3, CalendarDays, Check, CheckCircle2, Grid3x3, LayoutDashboard, Link2, LogOut, Menu, Plus, Smile } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
@@ -38,7 +38,7 @@ import { AvatarDialog } from '@/components/AvatarDialog';
 import type { DialogSelection } from '@/components/PostDialog';
 
 /** As telas do app. `connections` fica fora da navegação — chega pelo menu da conta. */
-type Screen = 'home' | 'scheduler' | 'connections' | 'insights';
+type Screen = 'home' | 'scheduler' | 'planner' | 'connections' | 'insights';
 
 /**
  * Nome e ícone de cada tela. Serve pros itens do menu E pro gatilho dele, que carrega a tela atual.
@@ -46,24 +46,34 @@ type Screen = 'home' | 'scheduler' | 'connections' | 'insights';
 const SCREEN_META: Record<Screen, { label: string; icon: typeof LayoutDashboard }> = {
   home: { label: 'Painel', icon: LayoutDashboard },
   scheduler: { label: 'Agenda', icon: CalendarDays },
+  // Grid3x3 e NÃO LayoutGrid: aquele é 2×2 e fica quase idêntico ao LayoutDashboard do Painel —
+  // dois dos quatro itens do menu com o mesmo desenho. Este é a própria grade de 3 colunas do
+  // perfil, que é literalmente o que a tela mostra.
+  planner: { label: 'Planejar', icon: Grid3x3 },
   insights: { label: 'Insights', icon: BarChart3 },
   connections: { label: 'Conexões', icon: Link2 },
 };
 
 /**
- * Os três destinos do app. Aparecem de dois jeitos, e o corte é `lg` (1024px):
+ * Os destinos do app. Aparecem de dois jeitos, e o corte é `xl` (1280px):
  *
- * - **A partir de `lg`**: três botões visíveis ao lado do logo, como sempre foram. Ali eles cabem
- *   na mesma fileira das ações, então não custam altura nenhuma — e navegação visível é melhor que
- *   navegação escondida sempre que couber.
- * - **Abaixo de `lg`**: um menu ao lado do logo. É onde os três botões NÃO cabiam ao lado das ações
- *   e desciam pra uma fileira própria — 44px mais o respiro, tirados do conteúdo em toda tela, o
+ * - **A partir de `xl`**: os quatro botões visíveis ao lado do logo. Ali eles cabem na mesma
+ *   fileira das ações, então não custam altura nenhuma — e navegação visível é melhor que navegação
+ *   escondida sempre que couber.
+ * - **Abaixo de `xl`**: um menu ao lado do logo. É onde os botões NÃO cabem ao lado das ações e
+ *   desceriam pra uma fileira própria — 44px mais o respiro, tirados do conteúdo em toda tela, o
  *   tempo todo, por uma navegação que se usa uma vez a cada visita.
+ *
+ * O corte era `lg` com TRÊS destinos. "Planejar" é o quarto botão, e com ele a fileira voltava a
+ * quebrar em duas de 1024 a ~1099 (medido: 136px em vez de 76, com 1 conta e com 6; a partir de
+ * 1100 cabia). Então o corte subiu junto com o número de botões, em vez de o cabeçalho voltar a ter
+ * duas linhas — que é exatamente o que este menu existe pra desfazer. Os avatares de conta, que já
+ * eram os primeiros a ceder, foram junto pra `2xl`.
  *
  * O gatilho do menu NOMEIA a tela atual em vez de ser só o ☰. É o que faz o menu não perder a régua
  * de "onde você está" que o botão aceso dá de graça: some a lista, fica o rótulo.
  */
-const NAV: Screen[] = ['home', 'scheduler', 'insights'];
+const NAV: Screen[] = ['home', 'scheduler', 'planner', 'insights'];
 
 function Header({
   screen,
@@ -98,7 +108,7 @@ function Header({
             Abaixo de 768px fica só o ☰: ali a largura é o recurso escasso, e é ela que decide se o
             cabeçalho cabe numa fileira; a tela abaixo já se apresenta de qualquer forma (o
             "Painel"/"Insights"/"Conexões" do ViewHeader, o "Posts agendados" da Agenda). */}
-        <div className="lg:hidden">
+        <div className="xl:hidden">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -142,13 +152,13 @@ function Header({
           <img src="/atenta-icon.svg" alt="ATENTA!" className="h-10 w-auto sm:hidden" />
           <img src="/atenta-logoetipo.png" alt="ATENTA!" className="hidden h-10 w-auto sm:block" />
         </button>
-        {/* A mesma navegação aberta, a partir de `lg`. `size="lg"` e não a pílula de abas:
+        {/* A mesma navegação aberta, a partir de `xl`. `size="lg"` e não a pílula de abas:
             web/design.md proíbe misturar a `TabsList` (h-8) com os botões (h-11) na mesma fileira. */}
-        <nav className="hidden items-center gap-1 lg:flex">
+        <nav className="hidden items-center gap-1 xl:flex">
           {NAV.map((id) => {
             // Conexões não acende nenhum dos três de propósito: ela é ajuste de conta, chega pelo
             // menu do avatar, e acender a Agenda ali diria que você está num lugar onde não está.
-            // (Abaixo de `lg`, onde não há botão pra acender, quem diz isso é o rótulo do gatilho.)
+            // (Abaixo de `xl`, onde não há botão pra acender, quem diz isso é o rótulo do gatilho.)
             const { label, icon: Icon } = SCREEN_META[id];
             const ativo = screen === id;
             return (
@@ -168,7 +178,7 @@ function Header({
         </nav>
       </div>
       <div className="flex items-center justify-end gap-3 sm:ml-auto">
-        {/* Avatares só a partir de `xl` (antes era `sm:`): eles são o item mais ELÁSTICO da fileira
+        {/* Avatares só a partir de `2xl` (já foram `sm:`, depois `xl:`): eles são o item mais ELÁSTICO da fileira
             — crescem a cada conta conectada — e por isso são os primeiros a fazer o cabeçalho
             quebrar em duas fileiras, que é o que este cabeçalho existe pra evitar. Mediram os
             ~115px que quebravam a linha entre 640 e ~830px com o menu, e os que sobravam em 1024
@@ -178,7 +188,7 @@ function Header({
         <button
           type="button"
           onClick={onOpenConnections}
-          className="hidden flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted xl:flex"
+          className="hidden flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted 2xl:flex"
           title="Gerenciar conexões"
         >
           {accounts.length === 0 ? (
@@ -433,6 +443,8 @@ function Dashboard({
           <HomeView onIr={irPara} onAbrirPost={abrirPost} />
         ) : screen === 'connections' ? (
           <ConnectionsView onBack={() => setScreen('scheduler')} />
+        ) : screen === 'planner' ? (
+          <GridPlanner onOpen={setSelection} onOpenConnections={() => setScreen('connections')} />
         ) : screen === 'insights' ? (
           <InsightsView onOpenConnections={() => setScreen('connections')} />
         ) : (
@@ -447,7 +459,6 @@ function Dashboard({
                   <TabsTrigger value="list">Lista</TabsTrigger>
                   <TabsTrigger value="week">Semana</TabsTrigger>
                   <TabsTrigger value="calendar">Mês</TabsTrigger>
-                  <TabsTrigger value="grid">Grid IG</TabsTrigger>
                 </TabsList>
               </Tabs>
               <div className="ml-auto sm:ml-0">
@@ -473,7 +484,6 @@ function Dashboard({
               {view === 'list' && <ListView posts={visible} onOpen={setSelection} />}
               {view === 'week' && <WeekView posts={visible} onOpen={setSelection} />}
               {view === 'calendar' && <CalendarView posts={visible} onOpen={setSelection} />}
-              {view === 'grid' && <GridPlanner posts={visible} onOpen={setSelection} />}
             </motion.div>
           </div>
         </section>

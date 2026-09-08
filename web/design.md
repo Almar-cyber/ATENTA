@@ -79,11 +79,11 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `PostPreview` | Card que imita o formato de cada rede — a proporção vem do **formato** escolhido, não do arquivo. Vídeo tem play (com som e controles); com capa escolhida, a capa é o que aparece parado e o play toca o vídeo por baixo. Reusado no composer e no dialog. |
 | `HomeView` | **Painel** — a tela inicial. Três grades de cards: *Precisa de você* (pendências acionáveis, cada uma leva à Agenda já filtrada), *Sai a seguir* (próximos posts com a capa em destaque) e *Como foi* (números + link pro Insights). A conta de pendências fica em `@/lib/pendencias` (`construirPendencias`), reusada pelo `NotificationsBell` — ver abaixo. |
 | `NotificationsBell` | Sino no cabeçalho (substitui a antiga faixa vermelha, sempre visível): abre um `Popover` com as mesmas pendências do Painel. Um ponto vermelho liga só quando há pendência **grave** (falha, conta caída, fila atrasada) — rascunho esperando é acervo normal, não alarme, e um ponto ligado o tempo todo por causa dele treina a ignorá-lo. Balança (rotação via `motion`) quando a pendência grave aparece e a cada 12s enquanto o popover estiver fechado; para de balançar assim que abre. Fica sempre visível, inclusive no Painel — ele não disputa espaço com o bloco "Precisa de você" como a faixa vermelha disputava. |
-| `ViewHeader` | Cabeçalho das telas de segundo nível (título, descrição, voltar, ações). Existe porque cada tela montava o seu e eles divergiram. Isola a armadilha do `CardHeader` ser **grid**: passar `flex-row` muda a direção sem mudar o `display`, e cada filho vira uma linha. **Voltar é só pra drill-down de verdade** (Conexões, chegada pelo menu da conta; o detalhe de uma rede dentro do Insights) — nunca nos três destinos de primeiro nível do cabeçalho (Painel, Agenda, Insights), que não têm "de onde voltar". |
+| `ViewHeader` | Cabeçalho das telas de segundo nível (título, descrição, voltar, ações). Existe porque cada tela montava o seu e eles divergiram. Isola a armadilha do `CardHeader` ser **grid**: passar `flex-row` muda a direção sem mudar o `display`, e cada filho vira uma linha. **Voltar é só pra drill-down de verdade** (Conexões, chegada pelo menu da conta; o detalhe de uma rede dentro do Insights) — nunca nos quatro destinos de primeiro nível do cabeçalho (Painel, Agenda, Planejar, Insights), que não têm "de onde voltar". |
 | `ListView` | Lista agrupada por dia, thumbnail real, badge de status, ações inline. |
 | `WeekView` | Vista "Semana": grade horas × 7 dias, cada post na sua hora agendada; clique em slot vazio pré-preenche data/hora. |
 | `CalendarView` | Vista "Mês": grade mensal; chip por post (cor = plataforma, tracejado = rascunho, ⚠ = falhou). Clique em dia vazio pré-preenche a data. |
-| `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer — **à esquerda**, com o `IdeaSidebar` ocupando o resto da largura. Três espécies de tile: **agendado**, **publicado** (âncoras; a capa cai pro feed real quando a nossa cópia já foi apagada pelo purge de 30 dias) e **ideia com arte**. **Story não entra** — ele nunca aparece no perfil, e um Story publicado virava âncora imóvel no meio do feed planejado. **Reel de teste só entra quando o feed real confirma**: enquanto está em teste ele não está no perfil, e a graduação acontece sem nos avisar — o feed é a única autoridade sobre isso. Fora da janela que a API do feed devolve, a grade MOSTRA: esconder um post que existe é o erro pior. Só renderiza: a montagem da grade fica em `src/lib/gridTiles.ts` e a matemática de reordenação em `src/lib/gridOrder.ts`, ambas fora do componente e ambas com teste (`test/gridTiles.test.ts`, `test/gridOrder.test.ts`) — são as duas partes que erram em silêncio. |
+| `GridPlanner` | A tela **Planejar** — destino de primeiro nível, não uma aba da Agenda. É a tela inteira: `Card` + `ViewHeader`, e o `Select` de perfil no `actions` quando há mais de um Instagram (uma grade é UM perfil; dois no mesmo quadriculado desenhariam um feed que nenhum dos dois vai ter). **Busca os próprios posts** (`getPosts({platform:'instagram'})`, todos os status) em vez de receber a lista do store: os filtros da Agenda vão pra query do servidor, e filtrar por "rascunho" apagava os PUBLICADOS — que são justamente as âncoras contra as quais se planeja. Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer — **à esquerda**, com o `IdeaSidebar` ocupando o resto da largura. As regras da grade (horários permutam, ideia não ocupa horário, corte 3:4) vivem num **`Popover` atrás de um `?`** na fileira dos botões, não num parágrafo fixo: eram quatro linhas acima da grade, quase uma tela de celular gasta a cada visita por uma explicação que se lê uma vez (mesma régua do ponto vermelho do `NotificationsBell` e do `UsoIA`). No celular isso levou o começo da grade de 244px pra 136px do topo do card. Três espécies de tile: **agendado**, **publicado** (âncoras; a capa cai pro feed real quando a nossa cópia já foi apagada pelo purge de 30 dias) e **ideia com arte**. **Story não entra** — ele nunca aparece no perfil, e um Story publicado virava âncora imóvel no meio do feed planejado. **Reel de teste só entra quando o feed real confirma**: enquanto está em teste ele não está no perfil, e a graduação acontece sem nos avisar — o feed é a única autoridade sobre isso. Fora da janela que a API do feed devolve, a grade MOSTRA: esconder um post que existe é o erro pior. Só renderiza: a montagem da grade fica em `src/lib/gridTiles.ts` e a matemática de reordenação em `src/lib/gridOrder.ts`, ambas fora do componente e ambas com teste (`test/gridTiles.test.ts`, `test/gridOrder.test.ts`) — são as duas partes que erram em silêncio. |
 | `IdeaSidebar` | A lista de **ideias** ao lado da grade: um post que ainda não tem data. Campo rápido (Enter cria), card com capa/texto, e as ações **anexar arte**, **Agendar** (abre o compositor com o que a ideia tem) e **Remover**. Ideia só de texto **não** entra na grade — a grade mostra como o feed vai ficar, e um quadrado cinza atrapalha essa leitura. Agrupada por pilar (não filtrada): um FILTRO esconde o desbalanço — você vê "viagem" e nunca fica sabendo que "depoimento" está zerado. Agrupar mostra os dois, com todo pilar aparecendo mesmo em 0 posts; é a linha vazia que revela o buraco. |
 | `PostHoverCard` | Cartão que aparece ao passar o mouse num chip do calendário (Mês e Semana): thumbnail da peça na proporção do formato, legenda/título, conta, horário e status. Substitui o `title=` do navegador — o chip só cabe o nome da conta, e é a imagem que faz reconhecer o post. |
 | `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). Num **Reel de teste** publicado, mostra um `InlineAlert tone="info"` dizendo que ele está saindo só pra quem não segue, desde quando, e que abrir pra todo mundo é um passo dentro do app do Instagram — a API não expõe a graduação. Sem essa linha a pendência do Painel abriria um post idêntico a qualquer outro, e a pessoa procuraria aqui um botão que não pode existir. |
@@ -124,11 +124,11 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
     da pílula de abas (`TabsList` é h-8)**, então a fileira do topo fica alinhada.
   - `size="sm"` (h-7): **ações terciárias inline** numa linha de lista (Duplicar/Cancelar/Excluir).
   Regra: se está na mesma fileira das abas, é `default` (h-8) — não misture `sm`/`lg` ali.
-- **Navegação: aberta onde cabe, num menu onde não cabe.** Os três destinos (Painel, Agenda,
-  Insights) aparecem de dois jeitos, com o corte em `lg` (1024px). **A partir de `lg`**, três
-  `Button size="lg"` visíveis ao lado do logo — ali eles cabem na mesma fileira das ações e não
-  custam altura nenhuma, e navegação visível é melhor que escondida sempre que couber. **Abaixo de
-  `lg`**, um `DropdownMenu` **no canto esquerdo, com o logo à direita dele** — o ☰ é o que se usa e
+- **Navegação: aberta onde cabe, num menu onde não cabe.** Os quatro destinos (Painel, Agenda,
+  Planejar, Insights) aparecem de dois jeitos, com o corte em `xl` (1280px). **A partir de `xl`**,
+  quatro `Button size="lg"` visíveis ao lado do logo — ali eles cabem na mesma fileira das ações e
+  não custam altura nenhuma, e navegação visível é melhor que escondida sempre que couber. **Abaixo
+  de `xl`**, um `DropdownMenu` **no canto esquerdo, com o logo à direita dele** — o ☰ é o que se usa e
   o logo é identidade, não controle, então quem fica no canto que o polegar alcança primeiro é o
   controle; o inverso punha um alvo não-clicável na melhor posição da barra. É exatamente onde os
   três não cabiam ao lado das ações e
@@ -137,7 +137,11 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   640, 136→76 de 768 a 1023). **O gatilho do menu carrega a tela atual** (ícone + nome,
   `SCREEN_META` no `App.tsx`), não só o ☰: é o que substitui a régua de "onde você está" que o botão
   aceso dá de graça. Em Conexões o gatilho diz "Conexões" e nenhum item acende — ela continua não
-  sendo um dos três.
+  sendo um dos quatro.
+  **O corte acompanha o número de botões.** Era `lg` com três; o quarto ("Planejar") fazia a fileira
+  quebrar em duas de 1024 a ~1099 (medido: 136px em vez de 76, com 1 conta e com 6), então subiu pra
+  `xl` e os avatares foram junto pra `2xl`. Ícone repetido conta como erro aqui: `Planejar` usa
+  `Grid3x3` e não `LayoutGrid`, que ficava quase igual ao `LayoutDashboard` do Painel.
 - **Uma fileira em toda largura**: o cabeçalho quebrar em duas devolve o problema que o menu
   resolveu, então o que entra nele tem que caber — **de 360 a 1920, com 1 conta ou com 6**. As três
   válvulas, na ordem em que cedem: o wordmark vira o **selo quadrado** (`atenta-icon.svg`) abaixo de
@@ -145,7 +149,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   abaixo de `md`; e os **avatares de conta** só aparecem em `xl` (são o item mais elástico da
   fileira — crescem a cada conta conectada — e por isso os primeiros a quebrar a linha: eram os
   ~115px que estouravam entre 640 e ~830px com o menu, e os que sobravam em 1024 com a navegação
-  aberta de volta ao lado). Nenhum caminho se perde: Conexões está no menu da conta, nos estados
+  aberta de volta ao lado; com o quarto destino desceram mais um degrau). Nenhum caminho se perde: Conexões está no menu da conta, nos estados
   vazios e na pendência do Painel; "precisa reautenticar" é o sino.
   Use `atenta-icon.svg` e **não** `atenta-icon-256.png` — esse PNG está cortado no repositório.
 - **Responsivo dos controles do topo**: header e barra usam `px-3 sm:px-6` (aproveita a lateral no
@@ -195,9 +199,19 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   fade+slide de 150ms (evite `AnimatePresence mode="wait"` numa view que também sofre poll —
   já causou um freeze real, ver `App.tsx`: prefira remount-and-fade via `key`); itens da fila de
   mídia com `layout`.
-- **Drag-and-drop nativo**: `GridPlanner` e `MediaQueueGrid` usam o mesmo padrão — HTML5
-  `draggable`/`onDragStart`/`onDragOver`(`preventDefault`)/`onDrop`, sem lib externa. Reaproveite
-  esse padrão em vez de introduzir uma dependência de DnD nova.
+- **Drag-and-drop: duas metades, uma lib nenhuma.** `GridPlanner` e `MediaQueueGrid` usam o mesmo
+  par. No **ponteiro**, HTML5 `draggable`/`onDragStart`/`onDragOver`(`preventDefault`)/`onDrop`. No
+  **toque**, `usePressDrag` (`src/lib/usePressDrag.ts`) — porque navegador de celular **não emite
+  `dragstart` a partir do dedo**, em nenhum deles: a grade dizia "arraste para reordenar" e no
+  telefone não reordenava nada. Reaproveite esse par em vez de introduzir uma dependência de DnD.
+  O gesto do toque é **pressionar e segurar** (320ms parado) antes de arrastar, e isso não é
+  enfeite: pra a página não rolar junto é preciso `preventDefault()` no `touchmove`, e isso não
+  desfaz uma rolagem já começada — a espera garante que o `preventDefault` já esteja posto antes de
+  qualquer rolagem existir. `touch-action: none` nos tiles resolveria o scroll e mataria a rolagem
+  da grade, que ocupa a tela inteira no celular. Duas consequências a manter: a peça na mão e o
+  destino sob o dedo precisam de **estado visual** (não há imagem de arraste no toque), e o clique
+  que o navegador dispara ao soltar precisa ser engolido (`consumiuClique`), senão terminar um
+  arraste abre o detalhe da peça.
 - **`useMediaUrl`** (`src/lib/useMediaUrl.ts`): resolve um `QueuedMedia` pra URL exibível (object
   URL pro `File` ainda não enviado, com revoke no cleanup; `public_url` pro que já foi upload).
   Compartilhado por `PostPreview` e `MediaQueueGrid` — não duplicar essa lógica.
