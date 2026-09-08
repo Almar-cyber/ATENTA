@@ -452,16 +452,35 @@ describe('sweeps', () => {
 });
 
 describe('token health scan', () => {
-  it('marks an account needs_reauth when the refresh throws', async () => {
+  // Desconectar deixou de ser a resposta a QUALQUER falha da renovação e passou a depender da
+  // classe do erro. O motivo está no comentário de stepTokenHealthScan: com o cron de minuto em
+  // minuto, um 500 ou um 429 passageiro derrubava conta com refresh_token vivo — era o sintoma de
+  // "YouTube e TikTok ficam desconectando". Os dois casos, contra as redes de verdade, estão em
+  // test/token-refresh.test.ts; aqui ficam os dois lados da REGRA, com adapter falso.
+  it('desconecta quando a recusa é definitiva (auth)', async () => {
     fake('linkedin', {
       needsRefresh: true,
       onEnsureFreshToken: () => { throw new Error('no refresh possible'); },
+      classify: 'auth',
     });
     const accountId = await insertAccount({ platform: 'linkedin' });
 
     await runPoller();
 
     expect(await getAccountStatus(accountId)).toBe('needs_reauth');
+  });
+
+  it('NÃO desconecta quando a falha é passageira (retryable) — a próxima varredura tenta de novo', async () => {
+    fake('linkedin', {
+      needsRefresh: true,
+      onEnsureFreshToken: () => { throw new Error('a plataforma respondeu 500'); },
+      classify: 'retryable',
+    });
+    const accountId = await insertAccount({ platform: 'linkedin' });
+
+    await runPoller();
+
+    expect(await getAccountStatus(accountId)).toBe('active');
   });
 
   it('leaves a healthy account alone', async () => {

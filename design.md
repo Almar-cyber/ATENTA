@@ -97,6 +97,15 @@ Regras que valem a pena não esquecer:
 - **Claim atômico**: `UPDATE ... WHERE status='queued'` garante que duas execuções do cron não
   publiquem o mesmo destino.
 - **Sweep de travados**: `publishing` parado além do limite volta pra `queued`.
+- **Desconectar exige recusa, não tropeço.** A varredura de saúde de token (Step 0) roda a cada
+  tique e renova o que está perto de vencer. Quando a renovação falha, quem decide é o
+  `classifyError()`: só marca `needs_reauth` se a recusa for DEFINITIVA — a plataforma disse não ao
+  `refresh_token` (`auth`), um 4xx que não muda tentando de novo (`permanent`), ou a rede não tem
+  renovação automática (LinkedIn e Meta lançam com `code: 'no_refresh_mechanism'`). Passageiro
+  (`retryable`, `quota`) NÃO desconecta: a conta segue ativa e a varredura seguinte tenta de novo.
+  Antes era um `catch` só, e qualquer erro desconectava — com o cron de minuto em minuto, um 500 do
+  Google ou um 429 da TikTok derrubava conta com token perfeitamente vivo. Se a plataforma ficar
+  fora do ar até o token vencer, quem marca é a falha na publicação, que classifica do mesmo jeito.
 - **Nem todo erro reenfileira.** O `classifyError()` do adapter decide: `retryable` volta pra fila
   (15min entre tentativas, até `MAX_ATTEMPTS`), `quota` espera 24h, `auth` marca a conta como
   `needs_reauth`, e **`permanent` falha na primeira**. Pra isso funcionar o adapter tem que jogar

@@ -81,7 +81,10 @@ export const instagramAdapter: PlatformAdapter = {
   },
 
   async ensureFreshToken() {
-    throw new Error('instagram: no refresh mechanism implemented — run meta-auth-url again if needs_reauth');
+    // SEM renovação nesta rede: só a pessoa reconecta. O `code` é o que diz isso ao
+    // stepTokenHealthScan — sem ele, esta falha pareceria um erro passageiro e a conta ficaria
+    // 'active' pra sempre com um token morto, publicando nada e sem avisar ninguém.
+    throw Object.assign(new Error('instagram: no refresh mechanism implemented — run meta-auth-url again if needs_reauth'), { code: 'no_refresh_mechanism' });
   },
 
   validate(target, media, _account) {
@@ -262,7 +265,11 @@ export const instagramAdapter: PlatformAdapter = {
    * tabela — não devolver tudo pro 'retryable'.
    */
   classifyError(err) {
-    return classifyByKnownCodes(err, { OAuthException: 'auth', '190': 'auth' });
+    return classifyByKnownCodes(err, {
+      no_refresh_mechanism: 'auth',
+      OAuthException: 'auth',
+      '190': 'auth',
+    });
   },
 };
 

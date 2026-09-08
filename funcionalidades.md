@@ -26,6 +26,7 @@ Legenda de estado:
 | O que | Onde mora | Estado |
 | --- | --- | --- |
 | Fila, claim atômico, sweep de travados, retry com backoff | `src/worker.ts` (`runPoller`) | ✅ |
+| Renovação de token (YouTube, TikTok, Pinterest) | `ensureFreshToken` de cada adapter + `stepTokenHealthScan` | ✅ — desde 09/2026 só desconecta em recusa definitiva. Antes qualquer falha da renovação marcava `needs_reauth`, e com o cron de 1 em 1 minuto um 500/429 passageiro derrubava conta com token vivo (era o "YouTube e TikTok ficam desconectando"). Coberto em `test/token-refresh.test.ts` |
 | Cron de 1 em 1 minuto | `wrangler.toml [triggers]` | ✅ |
 | YouTube | `src/adapters/youtube.ts` | ✅ |
 | LinkedIn | `src/adapters/linkedin.ts` | ✅ |
