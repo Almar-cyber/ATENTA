@@ -139,7 +139,7 @@ O que dá pra fazer:
 - **Criar posts** — formulário com legenda, título opcional (YouTube), data/hora, contas de
   destino (uma ou várias, uma checkbox por conta autenticada), upload de mídia (um arquivo ou
   vários pra carrossel, reordenáveis com ↑/↓) e os campos específicos mais comuns
-  (`privacyStatus` do YouTube, `board_id` do Pinterest, Story do Instagram).
+  (`privacyStatus` do YouTube, `board_id` do Pinterest, Story e Reel de teste do Instagram).
 - **Sugerir legenda** — o botão ao lado do campo manda o que você já escreveu (o rascunho É o
   briefing, não existe um segundo campo pra preencher) e devolve três opções. O prompt leva as
   **suas** legendas que mais engajaram naquela rede, no mesmo pilar, então a saída sai no seu tom em
@@ -310,6 +310,12 @@ diferença real de API, não só de preview:
 | **Post** | `VIDEO` (ou nenhum, se for imagem) | foto, carrossel de até 10, ou um vídeo | só frame do vídeo |
 | **Reel** | `REELS` | um vídeo, vertical | imagem própria (`cover_url`) ou frame |
 | **Story** | `STORIES` | um arquivo, até 60s | — |
+
+**Reel de teste**: escolhendo Reel, aparece "Quem vê primeiro" nos ajustes por rede. *Teste* publica
+só pra quem **não segue** a conta, pra você medir antes de mostrar aos seguidores; depois ele gradua
+(você abre dentro do app, ou o Instagram abre sozinho se render). Enquanto está em teste ele não
+aparece no perfil — e por isso some da grade até graduar. Exige conta profissional com 1.000
+seguidores; abaixo disso quem recusa é a Meta, na publicação.
 
 **Vários Stories de uma vez**: a API publica um arquivo por Story (não existe Story em carrossel),
 mas nada impede publicar vários seguidos. Escolhendo Story com 2+ arquivos, o compositor cria **um

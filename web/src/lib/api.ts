@@ -217,6 +217,8 @@ export interface CreatePostPayload {
   pinterest_board_id?: string;
   tiktok_privacy_level?: string;
   instagram_format?: string;
+  /** 'MANUAL' | 'SS_PERFORMANCE' — publica o Reel como teste, só pra quem não segue a conta. */
+  instagram_trial_graduation?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   save_as?: 'draft';

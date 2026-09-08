@@ -3,7 +3,7 @@
 // na compilação; o de `platforms` é valor, e por isso a cadeia dele também precisa ser relativa.
 import type { GridPreview, Post, Target } from './types';
 import type { FeedItem } from './api';
-import { igFormatOf } from './platforms';
+import { igFormatOf, igTrialOf } from './platforms';
 
 // A montagem da grade do Instagram: quais peças entram, em que ordem, e quais podem se mover.
 //
@@ -61,6 +61,16 @@ export function buildTiles(posts: Post[], feed: FeedItem[], previews: GridPrevie
   const capaDoFeed = new Map<string, string>();
   for (const item of feed) if (item.thumbnail_url) capaDoFeed.set(item.id, item.thumbnail_url);
 
+  // A JANELA DO FEED: até onde a resposta da API enxerga (ela vem paginada, hoje 24 itens). Serve
+  // pro Reel de teste logo abaixo — dentro da janela, ausência é informação; fora dela, não é.
+  let maisAntigoDoFeed: string | undefined;
+  for (const item of feed) {
+    if (item.published_at && (maisAntigoDoFeed === undefined || item.published_at < maisAntigoDoFeed)) {
+      maisAntigoDoFeed = item.published_at;
+    }
+  }
+  const idsDoFeed = new Set(feed.map((item) => item.id));
+
   for (const post of posts) {
     for (const target of post.targets) {
       if (target.platform !== 'instagram') continue;
@@ -72,13 +82,32 @@ export function buildTiles(posts: Post[], feed: FeedItem[], previews: GridPrevie
       // agendado é pior ainda — entra na permutação de horários do arrastar e leva junto um
       // `scheduled_for` que não tem nada a ver com a ordem do feed.
       if (igFormatOf(target.options) === 'story') continue;
+      const at = postTimestamp(post, target);
+      // REEL DE TESTE. Enquanto está em teste ele sai só pra quem não segue a conta e NÃO aparece
+      // no perfil; quando gradua, passa a aparecer. Nosso registro não sabe dizer em qual dos dois
+      // estados ele está — a graduação acontece dentro do app do Instagram (MANUAL) ou sozinha
+      // (SS_PERFORMANCE), sem nos avisar. Quem sabe é o FEED REAL do perfil, que já buscamos.
+      //
+      // Daí a regra em três passos, e a ordem importa:
+      //  1. não publicado  → não está no perfil, ponto.
+      //  2. no feed        → graduou. Entra, com a mesma dedup dos outros publicados.
+      //  3. fora do feed   → só significa "ainda em teste" se ele CABIA na janela que a API nos
+      //     devolveu. Mais antigo que o item mais velho do feed, a ausência não diz nada — e aí a
+      //     grade MOSTRA. Esconder um post que existe é o erro pior: é exatamente o defeito do
+      //     Story, com o sinal trocado.
+      if (igTrialOf(target.options)) {
+        if (target.status !== 'published') continue;
+        const noFeed = !!target.external_post_id && idsDoFeed.has(target.external_post_id);
+        const cabiaNaJanela = maisAntigoDoFeed !== undefined && at >= maisAntigoDoFeed;
+        if (!noFeed && cabiaNaJanela) continue;
+      }
       const isPublished = target.status === 'published';
       if (isPublished && target.external_post_id) publishedExternalIds.add(target.external_post_id);
       const tile: Tile = {
         kind: 'post',
         key: `post:${post.id}`,
         domainId: post.id,
-        at: postTimestamp(post, target),
+        at,
         movable: !isPublished,
         post,
         target,

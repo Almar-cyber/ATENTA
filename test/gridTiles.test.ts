@@ -159,3 +159,90 @@ describe('buildTiles — o resto das regras que já valiam', () => {
     expect(tiles.map((t) => t.domainId)).toEqual(['g2']);
   });
 });
+
+describe('buildTiles — Reel de teste só entra quando o perfil confirma', () => {
+  // O Reel de teste sai só pra quem NÃO segue a conta e não aparece no perfil; quando gradua,
+  // passa a aparecer. Nosso registro não sabe em qual dos dois estados ele está — a graduação
+  // acontece dentro do app (MANUAL) ou sozinha (SS_PERFORMANCE), sem nos avisar. Quem sabe é o
+  // feed real do perfil, que a grade já busca.
+  const trial = { format: 'reel', trial_graduation: 'MANUAL' };
+
+  function feedItem(id: string, at: string): FeedItem {
+    return { id, thumbnail_url: `https://cdn/${id}.jpg`, permalink: null, published_at: at, caption: null };
+  }
+
+  it('agendado, ainda não publicado: fora — não está no perfil e não vai estar ao publicar', () => {
+    const tiles = buildTiles(
+      [post('p1', '2026-09-20T10:00:00Z', [target({ options: trial })])],
+      [feedItem('ig-velho', '2026-09-01T10:00:00Z')],
+      []
+    );
+    expect(tiles.map((t) => t.domainId)).toEqual(['ig-velho']);
+  });
+
+  it('publicado e ausente do feed, dentro da janela: fora — ainda está em teste', () => {
+    const tiles = buildTiles(
+      [
+        post('p1', '2026-09-10T10:00:00Z', [
+          target({ status: 'published', published_at: '2026-09-10T10:00:00Z', external_post_id: 'ig-1', options: trial }),
+        ]),
+      ],
+      [feedItem('ig-outro', '2026-09-01T10:00:00Z')],
+      []
+    );
+    expect(tiles.map((t) => t.domainId)).toEqual(['ig-outro']);
+  });
+
+  it('publicado e presente no feed: entra, uma vez só — graduou', () => {
+    const tiles = buildTiles(
+      [
+        post('p1', '2026-09-10T10:00:00Z', [
+          target({ status: 'published', published_at: '2026-09-10T10:00:00Z', external_post_id: 'ig-1', options: trial }),
+        ]),
+      ],
+      [feedItem('ig-1', '2026-09-10T10:00:00Z')],
+      []
+    );
+    // O nosso registro, não o item do feed: é ele que é clicável e sabe a data.
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].kind).toBe('post');
+    expect(tiles[0].kind === 'post' && tiles[0].feedThumb).toBe('https://cdn/ig-1.jpg');
+  });
+
+  it('publicado ANTES da janela que o feed devolveu: entra — a ausência ali não prova nada', () => {
+    // A resposta do feed é paginada. Esconder um post que existe é o erro pior: seria o defeito do
+    // Story com o sinal trocado.
+    const tiles = buildTiles(
+      [
+        post('p1', '2026-01-05T10:00:00Z', [
+          target({ status: 'published', published_at: '2026-01-05T10:00:00Z', external_post_id: 'ig-1', options: trial }),
+        ]),
+      ],
+      [feedItem('ig-novo', '2026-09-01T10:00:00Z')],
+      []
+    );
+    expect(tiles.map((t) => t.domainId)).toEqual(['ig-novo', 'p1']);
+  });
+
+  it('feed vazio (conta caiu, sem permissão): o publicado entra — não dá pra afirmar que está em teste', () => {
+    const tiles = buildTiles(
+      [
+        post('p1', '2026-09-10T10:00:00Z', [
+          target({ status: 'published', published_at: '2026-09-10T10:00:00Z', external_post_id: 'ig-1', options: trial }),
+        ]),
+      ],
+      semFeed,
+      []
+    );
+    expect(tiles.map((t) => t.domainId)).toEqual(['p1']);
+  });
+
+  it('Reel COMUM segue entrando sem depender do feed', () => {
+    const tiles = buildTiles(
+      [post('p1', '2026-09-20T10:00:00Z', [target({ options: { format: 'reel' } })])],
+      semFeed,
+      []
+    );
+    expect(tiles.map((t) => t.domainId)).toEqual(['p1']);
+  });
+});

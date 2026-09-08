@@ -28,7 +28,10 @@ import {
   PLATFORM_VIDEO_LIMITS,
   YOUTUBE_LONG_VIDEO_WARN_SECONDS,
   findFormat,
+  INSTAGRAM_TRIAL_GRADUATIONS,
+  INSTAGRAM_TRIAL_MIN_FOLLOWERS,
   igFormatOf,
+  igTrialOf,
   isFeedRatioOk,
   isVideoMime,
 } from '@/lib/platforms';
@@ -98,6 +101,10 @@ export function PostComposer({
   const [formats, setFormats] = useState<Record<string, string>>({ instagram: 'post', youtube: 'video' });
   const [formatTouched, setFormatTouched] = useState(false);
   const isStory = formats.instagram === 'story';
+  // Reel de teste: '' = Reel comum. Guardado à parte de `formats` porque NÃO é um formato — é uma
+  // opção do Reel (mesmo `media_type`, um `trial_params` a mais). Ver INSTAGRAM_TRIAL_GRADUATIONS.
+  const [igTrial, setIgTrial] = useState('');
+  const isReel = formats.instagram === 'reel';
   const [ytPrivacy, setYtPrivacy] = useState('');
   const [pinBoard, setPinBoard] = useState('');
   // Sem valor padrão de propósito: a auditoria da Content Posting API do TikTok exige que o app
@@ -136,6 +143,7 @@ export function PostComposer({
       setTiktokPrivacy((target.options?.privacy_level as string) ?? '');
       setTagId(post.tag?.id ?? null);
       setFormats((f) => ({ ...f, instagram: igFormatOf(target.options) ?? 'post' }));
+      setIgTrial(igTrialOf(target.options) ?? '');
       setFormatTouched(true);
       setQueue(
         (target.media ?? []).map((m) => ({
@@ -186,6 +194,7 @@ export function PostComposer({
         ...f,
         instagram: igFormatOf(post.targets.find((t) => t.platform === 'instagram')?.options) ?? 'post',
       }));
+      setIgTrial(igTrialOf(post.targets.find((t) => t.platform === 'instagram')?.options) ?? '');
       setFormatTouched(true);
       setQueue(
         (post.targets[0]?.media ?? []).map((m) => ({
@@ -533,10 +542,13 @@ export function PostComposer({
     (p) => (PLATFORM_FORMATS[p]?.length ?? 0) > 1
   );
 
+  /** O Reel de teste é ajuste de rede, mas só existe quando o formato escolhido é Reel. */
+  const mostrarTesteIg = isReel && selectedAccounts.some((a) => a.platform === 'instagram');
+
   /** Alguma rede escolhida tem campo próprio? Decide se o bloco "Ajustes por rede" existe. */
-  const temAjustesDeRede = selectedAccounts.some(
-    (a) => a.platform === 'youtube' || a.platform === 'pinterest' || a.platform === 'tiktok'
-  );
+  const temAjustesDeRede =
+    mostrarTesteIg ||
+    selectedAccounts.some((a) => a.platform === 'youtube' || a.platform === 'pinterest' || a.platform === 'tiktok');
 
   const hasBlockingProblem = hints.some((h) => h.problem);
   // Conta o que REALMENTE existe: `selected` pode guardar id de conta que sumiu (desconectada
@@ -594,6 +606,10 @@ export function PostComposer({
         pinterest_board_id: pinBoard || undefined,
         tiktok_privacy_level: tiktokPrivacy || undefined,
         instagram_format: formats.instagram,
+        // Só viaja quando o formato É Reel: trocar pra Story ou Post não pode levar junto um
+        // teste escolhido antes — o servidor recusaria, e o estado fica guardado pra quando a
+        // pessoa voltar pro Reel.
+        instagram_trial_graduation: (isReel && igTrial) || undefined,
         cover_media_id: coverMediaId,
         cover_timestamp_ms: Number.isFinite(coverMs) ? coverMs : undefined,
         save_as: asDraft ? 'draft' : undefined,
@@ -937,6 +953,45 @@ export function PostComposer({
                   </SelectContent>
                 </Select>
                 <ComposerHints hints={hints} field="rede" />
+              </div>
+            )}
+
+            {/* Reel de teste. Um `Select` como o "Quem pode ver" do YouTube e a privacidade do
+                TikTok, porque é da mesma natureza (quem enxerga a peça) — e não um `ToggleGroup`
+                como o FormatPicker: ali os rótulos são de uma palavra, aqui são frases, e três
+                chips longos quebram na coluna estreita do modal.
+                Só aparece com Reel escolhido: é a única combinação que a API aceita. */}
+            {mostrarTesteIg && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <PlatformIcon platform="instagram" className="size-3.5 shrink-0" />
+                  <Label>Quem vê primeiro</Label>
+                </div>
+                <Select value={igTrial || 'todos'} onValueChange={(v) => setIgTrial(v === 'todos' ? '' : v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INSTAGRAM_TRIAL_GRADUATIONS.map((g) => (
+                      <SelectItem key={g.id || 'todos'} value={g.id || 'todos'}>
+                        {g.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {(INSTAGRAM_TRIAL_GRADUATIONS.find((g) => g.id === igTrial) ?? INSTAGRAM_TRIAL_GRADUATIONS[0]).hint}
+                </p>
+                {/* Não dá pra recusar antes de enviar: a contagem de seguidores não está aqui, e
+                    inventar um bloqueio com dado que não temos seria pior que avisar. Quem recusa
+                    de fato é o Instagram, na publicação. */}
+                {igTrial && (
+                  <p className="text-xs text-muted-foreground">
+                    O Instagram só aceita Reel de teste em conta profissional com{' '}
+                    {INSTAGRAM_TRIAL_MIN_FOLLOWERS.toLocaleString('pt-BR')} seguidores ou mais. Enquanto estiver em
+                    teste ele não aparece no seu perfil — some da grade até graduar.
+                  </p>
+                )}
               </div>
             )}
 

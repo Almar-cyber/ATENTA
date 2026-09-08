@@ -35,6 +35,7 @@ Legenda de estado:
 | Pinterest | `src/adapters/pinterest.ts` | 🚧 **sem credencial em produção** (ver §6) |
 | Carrossel (IG, FB, LinkedIn, Pinterest) | os quatro adapters | ⚠️ escrito a partir da doc, **nenhum publicado de verdade** |
 | Vários Stories seguidos (1 post por arquivo, 1min de intervalo) | `src/api.ts` (`createPost`) | ✅ |
+| **Reel de teste** (só pra quem não segue, gradua depois) | `src/adapters/instagram.ts` (`trial_params`), `PostComposer.tsx` | ⚠️ coberto por teste de ponta a ponta do nosso lado (escolha → `options` → corpo do container), mas **nunca publicado de verdade**: exige conta com 1.000 seguidores. Ver §6.5 |
 | Upload em partes do YouTube | `src/adapters/youtube.ts` | ✅ partes de 16 MB com `Content-Range`, verificado publicando um vídeo de 126 MB que antes falhava |
 | Upload de vídeo do Pinterest | `src/adapters/pinterest.ts` | ⚠️ o formato de `upload_url`/`upload_parameters` veio da doc, não de teste |
 
@@ -169,6 +170,7 @@ e, adiante, 2FA.
 | Meta usa só a primeira Página | `handleMetaCallback` em `src/worker.ts` | se `/me/accounts` devolver mais de uma Página concedida, as outras são ignoradas |
 | **Worker duplicado publicando da mesma fila** | conta Cloudflare | existe um segundo Worker chamado `social-scheduler`, criado em 18/08/2026 pelos deploys da branch `main`. Ele não atende domínio nenhum, mas tem Cron Trigger de 1 em 1 minuto e aponta pro MESMO D1, então vem publicando da fila com o código antigo. Não duplica post (o claim é atômico), mas decide QUEM publica por corrida. Apagar: `npx wrangler delete --name social-scheduler` |
 | Popover de sugestão cobre o compositor | `LegendaIA.tsx` | com o modal curto, o popover abre pra cima e tapa mídia e formato. Não impede o uso |
+| **Reel de teste: a graduação é adivinhada, não sabida** | `web/src/lib/gridTiles.ts` | o Instagram não avisa quando um Reel de teste gradua (acontece dentro do app, ou sozinho), e não há campo pra consultar. A grade usa o FEED REAL como autoridade: ausente do feed **dentro da janela que a API devolveu** (hoje 24 itens) = ainda em teste; mais antigo que essa janela = mostra, porque ali a ausência não prova nada. O erro possível é mostrar cedo demais um teste antigo — escolhido de propósito: esconder um post que existe é o defeito do Story com o sinal trocado |
 | ~~Story ocupava quadrado na grade do Instagram~~ | `web/src/lib/gridTiles.ts` | ✅ corrigido — a montagem da grade filtrava por rede e por status, nunca por formato, então um Story publicado virava âncora imóvel no meio do feed planejado (e um agendado entrava na permutação de horários do arrastar). Story nunca aparece no perfil. Regressão coberta em `test/gridTiles.test.ts` |
 
 ---

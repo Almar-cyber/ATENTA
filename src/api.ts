@@ -593,6 +593,9 @@ interface CreatePostBody {
   /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
    *  continua aceito pra não quebrar chamadas antigas do CLI. */
   instagram_format?: string;
+  /** 'MANUAL' | 'SS_PERFORMANCE' — publica o Reel como TESTE (só pra quem não segue a conta).
+   *  Ausente = Reel comum. Quem recusa combinação inválida é o validate() do adapter. */
+  instagram_trial_graduation?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   save_as?: string;
@@ -628,6 +631,9 @@ interface UpdatePostBody {
   /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
    *  continua aceito pra não quebrar chamadas antigas do CLI. */
   instagram_format?: string;
+  /** 'MANUAL' | 'SS_PERFORMANCE' — publica o Reel como TESTE (só pra quem não segue a conta).
+   *  Ausente = Reel comum. Quem recusa combinação inválida é o validate() do adapter. */
+  instagram_trial_graduation?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   target_caption_overrides?: Record<string, string>;
@@ -665,6 +671,7 @@ interface ValidateAccountsAndMediaParams {
   tiktokPrivacyLevel?: string;
   instagramAsStory?: boolean;
   instagramFormat?: string;
+  instagramTrialGraduation?: string;
   coverMediaId?: string;
   coverTimestampMs?: number;
   // Legenda canônica e título do post + overrides por conta, pra que o validate() de cada adapter
@@ -820,6 +827,13 @@ async function validateAccountsAndMedia(env: Env, owner: string, params: Validat
       if (format) {
         options.format = format;
         if (format === 'story') options.as_story = true;
+      }
+      // Reel de teste: sai só pra quem não segue, e gradua depois. Gravado como veio, SEM conferir
+      // aqui se combina com o formato — quem recusa é o validate() do adapter, que é a autoridade
+      // sobre regra de plataforma (princípio 1 do design.md). Guardar antes de validar é o que faz
+      // a recusa citar o valor real em vez de um campo que sumiu no caminho.
+      if (params.instagramTrialGraduation) {
+        options.trial_graduation = params.instagramTrialGraduation;
       }
     }
     // Capa do vídeo. YouTube e Instagram aceitam uma IMAGEM própria; o TikTok só deixa escolher um
@@ -977,6 +991,7 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
     // fallback de igFormat() (vídeo→Reel, imagem→Post): Story com foto rejeitava por proporção de
     // feed sem motivo, e Story com VÍDEO publicava como Reel em silêncio, sem erro nenhum.
     instagramFormat: payload.instagram_format,
+    instagramTrialGraduation: payload.instagram_trial_graduation,
     coverMediaId: payload.cover_media_id,
     coverTimestampMs: payload.cover_timestamp_ms,
     body: payload.body,
@@ -1072,6 +1087,7 @@ async function updatePost(id: string, request: Request, owner: string, env: Env)
       tiktokPrivacyLevel: payload.tiktok_privacy_level,
       instagramAsStory: payload.instagram_as_story,
       instagramFormat: payload.instagram_format,
+      instagramTrialGraduation: payload.instagram_trial_graduation,
       coverMediaId: payload.cover_media_id,
       coverTimestampMs: payload.cover_timestamp_ms,
       body: payload.body,

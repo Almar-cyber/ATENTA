@@ -67,7 +67,7 @@ descrita no README pra migração 0002. A ideia já era essa peça desde a 0003;
 texto. O "Agendar" abre o compositor com o que ela tem, e ali ela ganha data e conta.
 
 `options` (JSON em `post_targets`) carrega o que é específico de rede: `format`, `privacyStatus`,
-`board_id`, `cover_media_id`, `cover_timestamp_ms`.
+`board_id`, `cover_media_id`, `cover_timestamp_ms`, `trial_graduation`.
 
 ## 3. Ciclo de vida
 
@@ -120,6 +120,27 @@ O formato é **escolhido** no compositor, não deduzido do arquivo — porque no
 | **Post** | foto ou vídeo | até 10 imagens | só frame (`thumb_offset`) | sim |
 | **Reel** | um vídeo | não | imagem própria (`cover_url`) ou frame | sim |
 | **Story** | um arquivo | não — mas **vários Stories seguidos sim** (um post por arquivo, espaçados de 1min) | não | **ignorada** |
+
+**Reel de teste** (`options.trial_graduation`): o Reel sai só pra quem **não segue** a conta, você
+mede o desempenho, e depois ele "gradua" — vira Reel normal, entra no feed de quem segue e aparece
+no perfil. Na API é o mesmo container de Reel com um `trial_params` a mais, e por isso é OPÇÃO do
+Reel e não um quarto formato: o critério pra ser formato, aqui, é mudar o `media_type`.
+
+| Valor | Quem gradua |
+| --- | --- |
+| ausente | não é teste — sai pra todo mundo na hora |
+| `MANUAL` | você, dentro do app do Instagram |
+| `SS_PERFORMANCE` | o Instagram, sozinho, se o desempenho com não-seguidores justificar |
+
+Três consequências que não são óbvias:
+
+1. **Exige 1.000 seguidores** e conta profissional. Não dá pra recusar na criação (a contagem não
+   está do nosso lado), então o compositor **avisa** em vez de bloquear — inventar bloqueio com dado
+   que não temos seria pior. Quem recusa de fato é a Meta, na publicação.
+2. **Enquanto está em teste ele não aparece no perfil.** Some da grade do Instagram até graduar; ver
+   `web/src/lib/gridTiles.ts`, que usa o feed real como autoridade sobre o que está no perfil.
+3. **A graduação não nos avisa.** Acontece dentro do app (MANUAL) ou sozinha (SS_PERFORMANCE), sem
+   webhook nem campo consultável — daí a grade descobrir pelo feed em vez de por um estado nosso.
 
 Posts criados antes do seletor não têm `options.format`; o adapter cai na regra antiga
 (`as_story`, e vídeo = Reel).

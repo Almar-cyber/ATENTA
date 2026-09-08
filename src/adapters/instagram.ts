@@ -49,6 +49,30 @@ function igFormat(rawOptions: unknown, media: MediaAsset[]): IgFormat {
   return media.some((m) => m.mime_type.startsWith('video/')) ? 'reel' : 'post';
 }
 
+/**
+ * Reel de TESTE: sai só pra quem NÃO segue a conta, pra medir o desempenho antes de mostrar aos
+ * seguidores. Depois ele "gradua" — passa a valer como Reel normal, entra no feed de quem segue e
+ * aparece no perfil.
+ *
+ * Na API é o mesmo container de Reel (`media_type=REELS`) com um `trial_params` a mais; não é um
+ * media_type próprio, e é por isso que aqui é uma OPÇÃO do Reel e não um quarto formato.
+ *
+ * `graduation_strategy` é o único campo de `trial_params` e a Meta o exige quando ele vem:
+ *   MANUAL         — fica em teste até você graduar dentro do app.
+ *   SS_PERFORMANCE — a Meta gradua sozinha se o desempenho com não-seguidores justificar.
+ *
+ * Ausente = Reel comum. Valor fora dos dois é recusado no validate() — mandar um terceiro valor
+ * faria a Meta recusar o container depois de já ter subido o vídeo.
+ */
+export type IgTrialGraduation = 'MANUAL' | 'SS_PERFORMANCE';
+
+const TRIAL_GRADUATIONS: IgTrialGraduation[] = ['MANUAL', 'SS_PERFORMANCE'];
+
+export function igTrialGraduation(rawOptions: unknown): string | undefined {
+  const value = (rawOptions as { trial_graduation?: unknown } | null | undefined)?.trial_graduation;
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 export const instagramAdapter: PlatformAdapter = {
   platform: 'instagram',
 
@@ -74,6 +98,18 @@ export const instagramAdapter: PlatformAdapter = {
     if (format === 'reel') {
       if (media.length > 1) throw new Error('instagram: um Reel leva um vídeo só — para vários arquivos, use o formato Post');
       if (!hasVideo) throw new Error('instagram: Reel precisa de um vídeo — para publicar imagem, use o formato Post');
+    }
+
+    // Reel de teste. Recusado aqui, na criação, e não lá na publicação: a Meta só reclamaria
+    // depois de o vídeo inteiro ter subido, e a mensagem dela não diria qual campo está errado.
+    const trial = igTrialGraduation(target.options);
+    if (trial) {
+      if (format !== 'reel') {
+        throw new Error('instagram: só Reel pode sair como teste — Post e Story vão direto pra todo mundo');
+      }
+      if (!TRIAL_GRADUATIONS.includes(trial as IgTrialGraduation)) {
+        throw new Error(`instagram: graduação do Reel de teste inválida ("${trial}") — use MANUAL ou SS_PERFORMANCE`);
+      }
     }
     if (format === 'post' && hasVideo && media.length > 1) {
       throw new Error('instagram: carrossel só aceita imagens — o vídeo tem que ir sozinho');
@@ -153,6 +189,11 @@ export const instagramAdapter: PlatformAdapter = {
         } else if (cover.cover_timestamp_ms != null) {
           body.set('thumb_offset', String(cover.cover_timestamp_ms));
         }
+        // `trial_params` é um OBJETO num corpo form-encoded — a Graph API lê esses como JSON em
+        // string, que é a convenção dela pra parâmetro aninhado. O validate() já garantiu que o
+        // valor é um dos dois que a Meta aceita.
+        const trial = igTrialGraduation(target.options);
+        if (trial) body.set('trial_params', JSON.stringify({ graduation_strategy: trial }));
       } else if (asset.mime_type.startsWith('video/')) {
         // Vídeo no feed (formato Post) é `VIDEO`, não `REELS` — vira um post normal do feed em vez
         // de entrar na aba de Reels. `cover_url` é exclusivo de Reels aqui; capa, se houver, só via

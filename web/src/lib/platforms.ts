@@ -268,6 +268,45 @@ export function findFormat(platform: Platform, id: string | undefined): PostForm
 }
 
 /**
+ * Reel de TESTE do Instagram: sai só pra quem NÃO segue a conta, pra você medir o desempenho antes
+ * de mostrar aos seguidores. Depois ele "gradua" — vira Reel normal, entra no feed de quem segue e
+ * aparece no perfil.
+ *
+ * NÃO é um formato à parte, e sim uma opção do Reel: na API é o mesmo container
+ * (`media_type=REELS`) com um `trial_params` a mais. O critério do design.md pra ser formato é
+ * mudar o `media_type`, e este não muda.
+ *
+ * Espelho do cliente, como todo o resto deste arquivo — a autoridade é o `validate()` do adapter.
+ */
+export const INSTAGRAM_TRIAL_GRADUATIONS: { id: string; label: string; hint: string }[] = [
+  { id: '', label: 'Todo mundo', hint: 'Reel normal: sai pra quem te segue e pro perfil na hora.' },
+  {
+    id: 'MANUAL',
+    label: 'Teste — eu abro depois',
+    hint: 'Só quem não te segue vê. Você decide, dentro do app do Instagram, quando abrir pra todo mundo.',
+  },
+  {
+    id: 'SS_PERFORMANCE',
+    label: 'Teste — abre sozinho se render',
+    hint: 'Só quem não te segue vê. O Instagram abre pra todo mundo sozinho se o desempenho justificar.',
+  },
+];
+
+/** Mínimo de seguidores que o Instagram exige pra aceitar Reel de teste. */
+export const INSTAGRAM_TRIAL_MIN_FOLLOWERS = 1000;
+
+/**
+ * A graduação gravada num destino, ou `undefined` quando o Reel é comum.
+ *
+ * Vale pra qualquer formato porque a leitura é literal: quem decide se a combinação é legal é o
+ * `validate()` do adapter, não este espelho.
+ */
+export function igTrialOf(options: Record<string, unknown> | undefined | null): string | undefined {
+  const value = options?.trial_graduation;
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/**
  * O formato gravado num destino do Instagram, ou `undefined` quando não dá pra saber.
  *
  * Posts criados antes do seletor de formato não têm `options.format` — neles vale o
