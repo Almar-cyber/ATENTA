@@ -83,7 +83,19 @@ export const CSP_APP = [
   "style-src 'self' 'unsafe-inline'",
   // blob: pro preview de arquivo ainda não enviado (useMediaUrl cria object URL); o domínio do R2
   // é de onde vêm as capas do que já subiu.
-  "img-src 'self' data: blob: https://scheduler-media.omangue.co",
+  //
+  // OS CDNs DE INSTAGRAM E YOUTUBE NÃO SÃO SUPÉRFLUOS. O Grid IG e os Insights mostram a capa vinda
+  // do FEED AO VIVO da rede (GET /api/feed/:accountId), e essa URL aponta pro CDN da plataforma —
+  // nunca pro nosso R2. É de lá que sai a capa de duas coisas que não têm outra: o post publicado há
+  // mais de 30 dias, cuja cópia o purge já apagou, e o post IMPORTADO do histórico, que nunca teve
+  // cópia nossa (src/metrics/backfill.ts grava o registro, jamais o arquivo).
+  //
+  // Foi o que esta política quebrou ao entrar (26/08), três semanas depois de o fallback de capa
+  // existir (04/08) justamente pra isso — e quebrou CALADA: bloqueio de CSP só reclama no console
+  // do navegador, e na tela o resultado é um quadrado cinza igualzinho a "esse post não tem capa".
+  // Antes de encurtar esta linha, abra o Grid IG de uma conta com histórico.
+  "img-src 'self' data: blob: https://scheduler-media.omangue.co " +
+    'https://*.cdninstagram.com https://*.fbcdn.net https://*.ytimg.com',
   "media-src 'self' blob: https://scheduler-media.omangue.co",
   "connect-src 'self'",
   "form-action 'self'",

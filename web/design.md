@@ -212,4 +212,10 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 2. Cor nova de UI? Não invente hex — use um token existente ou estenda o tema no `index.css`.
 3. Nova plataforma? Adicione em `PLATFORM_*` (labels, cores, limites, shape) — os componentes leem
    desses mapas, não têm plataforma hard-coded.
-4. Rode `npm run build` em `web/` (typecheck + bundle) antes de considerar pronto.
+4. **Imagem de origem externa? Ela precisa entrar no `img-src` do `CSP_APP`** (`src/lib/csp.ts`). A
+   CSP do app é uma lista fechada, e host fora dela é recusado **em silêncio**: o TypeScript não liga
+   uma `<img>` a uma linha da política, o console do navegador reclama e a tela não, e o resultado é
+   um quadrado cinza igual ao de "não tem capa" — foi assim que as capas do feed do Instagram sumiram
+   por duas semanas. Hoje passam por lá o R2 e os CDNs de Instagram/Facebook e do YouTube; o resto é
+   `public_url`, `data:` ou `blob:`, já liberados.
+5. Rode `npm run build` em `web/` (typecheck + bundle) antes de considerar pronto.
