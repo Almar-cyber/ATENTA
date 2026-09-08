@@ -4,7 +4,7 @@ import type { Account, Post } from './lib/types';
 import type { Summary, Tag } from './lib/api';
 import { getState } from './lib/api';
 
-export type View = 'list' | 'week' | 'calendar' | 'grid';
+export type View = 'list' | 'week' | 'calendar';
 
 export interface Filters {
   status: string;

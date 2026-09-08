@@ -13,6 +13,7 @@ import {
   deleteGridPreview,
   getAccountFeed,
   getGridPreviews,
+  getPosts,
   reschedule,
   updateGridPreview,
   uploadMedia,
@@ -26,21 +27,60 @@ import type { Movable } from '@/lib/gridOrder';
 import { useScheduler } from '@/store';
 import { IdeaSidebar } from './IdeaSidebar';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { ViewHeader } from '@/components/ui/view-header';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { DialogSelection } from './PostDialog';
 
 const HOUR_MS = 3_600_000;
 
-export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: DialogSelection) => void }) {
-  const { reload, accounts } = useScheduler();
+export function GridPlanner({
+  onOpen,
+  onOpenConnections,
+}: {
+  onOpen: (s: DialogSelection) => void;
+  onOpenConnections: () => void;
+}) {
+  const { reload, accounts, posts: postsDoStore, loading } = useScheduler();
+
+  // A CONTA DESTA GRADE. Uma grade é um PERFIL — mostrar dois Instagons no mesmo quadriculado
+  // desenharia um feed que nenhum dos dois vai ter. Quando há mais de um, a escolha vira um Select
+  // no cabeçalho; com um só, ele nem aparece.
+  const igAccounts = useMemo(
+    () => accounts.filter((a) => a.platform === 'instagram' && a.status === 'active'),
+    [accounts]
+  );
+  const [contaId, setContaId] = useState<string>('');
+  const igAccount = igAccounts.find((a) => a.id === contaId) ?? igAccounts[0];
+
+  // OS POSTS SÃO BUSCADOS AQUI, e não recebidos da Agenda. Os filtros da Agenda (status e
+  // plataforma) vão pra QUERY do servidor, então a lista do store chega já cortada por eles — e a
+  // grade lida com isso da pior forma possível: filtrar por "rascunho" apagava os PUBLICADOS, que
+  // são justamente as âncoras contra as quais se planeja. Enquanto isto era uma aba da Agenda o
+  // filtro ficava na mesma fileira, apagado, sem dizer que estava ligado. Aqui a grade é dona do
+  // que mostra: Instagram, todos os status.
+  const [posts, setPosts] = useState<Post[]>([]);
+  const refreshPosts = useCallback(async () => {
+    const r = await getPosts({ platform: 'instagram' });
+    setPosts(r.posts ?? []);
+  }, []);
+  // `postsDoStore` na dependência é de propósito, e não é a lista que a grade usa: a identidade
+  // dela muda a cada poll do store (60s, pausado com a aba oculta) e a cada mutação de qualquer
+  // tela, então isto reaproveita aquele relógio em vez de criar um segundo aqui.
+  useEffect(() => {
+    refreshPosts().catch((e) => console.error(e));
+  }, [refreshPosts, postsDoStore]);
 
   // Feed real do perfil, buscado ao vivo: é o que permite planejar a estética contra o que já
   // existe. As URLs de mídia do Instagram expiram, então nada disso é cacheado.
-  const igAccount = accounts.find((a) => a.platform === 'instagram' && a.status === 'active');
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [feedError, setFeedError] = useState<string | null>(null);
   useEffect(() => {
     if (!igAccount) return;
     let alive = true;
+    setFeed([]);
+    setFeedError(null);
     getAccountFeed(igAccount.id)
       .then((r) => {
         if (!alive) return;
@@ -67,7 +107,18 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
   const dragKey = useRef<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const tiles = useMemo(() => buildTiles(posts, feed, previews), [posts, feed, previews]);
+  // Só os destinos da conta escolhida chegam na montagem: `buildTiles` filtra por REDE, não por
+  // conta — com dois Instagrams, os dois perfis caíam no mesmo quadriculado.
+  const postsDaConta = useMemo(() => {
+    if (!igAccount) return posts;
+    const out: Post[] = [];
+    for (const post of posts) {
+      const targets = post.targets.filter((t) => t.account_id === igAccount.id);
+      if (targets.length) out.push({ ...post, targets });
+    }
+    return out;
+  }, [posts, igAccount?.id]);
+  const tiles = useMemo(() => buildTiles(postsDaConta, feed, previews), [postsDaConta, feed, previews]);
   const movableTiles = useMemo(() => tiles.filter((t) => t.movable), [tiles]);
   const movable: Movable[] = useMemo(
     () => movableTiles.map((t) => ({ id: t.domainId, kind: t.kind === 'preview' ? 'preview' : 'post', at: t.at })),
@@ -86,7 +137,7 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
       if (plan.postOrder.length > 1) await reschedule(plan.postOrder.slice().reverse());
       await Promise.all(changedPreviews.map(([id, at]) => updateGridPreview(id, { sort_at: at })));
       setUndo(snapshot);
-      await Promise.all([reload(), refreshPreviews()]);
+      await Promise.all([reload(), refreshPosts(), refreshPreviews()]);
       toast.success(okMsg);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -183,6 +234,45 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
       : { onDragOver: (e: React.DragEvent) => e.preventDefault(), onDrop: () => onDrop(tile.key) };
 
   return (
+    <Card className="h-full">
+      <ViewHeader
+        title="Planejar"
+        description="Como o perfil do Instagram vai ficar — e as ideias que ainda não têm data."
+        actions={
+          igAccounts.length > 1 && (
+            <Select value={igAccount?.id ?? ''} onValueChange={setContaId}>
+              <SelectTrigger className="w-[190px]" aria-label="Perfil desta grade">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {igAccounts.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )
+        }
+      />
+      <CardContent className="min-h-0 flex-1 overflow-hidden">
+        {/* Sem conta de Instagram ativa a grade não tem o que ancorar: não há feed, e nenhum post
+            agendado pode existir. Um quadriculado vazio pareceria defeito — diga o que fazer.
+            O `loading` é o que impede isto de PISCAR: `accounts` nasce vazio, então sem ele toda
+            visita abria em "Nenhum Instagram conectado" por uma fração de segundo — um vazio que
+            mente é pior que nenhum. */}
+        {loading ? null : !igAccount ? (
+          <EmptyState
+            title="Nenhum Instagram conectado"
+            action={
+              <Button size="lg" onClick={onOpenConnections}>
+                Conectar Instagram
+              </Button>
+            }
+          >
+            Esta tela monta a grade do seu perfil com o que já foi publicado e o que está agendado.
+          </EmptyState>
+        ) : (
     // Grade à esquerda com a largura que ela já tinha; a lista de ideias ocupa o resto — que antes
     // era só branco. Abaixo do `lg` elas empilham, com a lista embaixo: espremer as duas num
     // celular deixaria a grade estreita demais pra cumprir a função dela.
@@ -354,5 +444,8 @@ export function GridPlanner({ posts, onOpen }: { posts: Post[]; onOpen: (s: Dial
         className="min-w-0 flex-1 lg:h-full lg:overflow-y-auto lg:pb-2 lg:pr-1"
       />
     </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
