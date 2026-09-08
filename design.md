@@ -97,6 +97,13 @@ Regras que valem a pena não esquecer:
 - **Claim atômico**: `UPDATE ... WHERE status='queued'` garante que duas execuções do cron não
   publiquem o mesmo destino.
 - **Sweep de travados**: `publishing` parado além do limite volta pra `queued`.
+- **Nem todo erro reenfileira.** O `classifyError()` do adapter decide: `retryable` volta pra fila
+  (15min entre tentativas, até `MAX_ATTEMPTS`), `quota` espera 24h, `auth` marca a conta como
+  `needs_reauth`, e **`permanent` falha na primeira**. Pra isso funcionar o adapter tem que jogar
+  `ApiError` (via `apiError()`), que carrega o STATUS: sem ele, tudo que não casa na tabela de
+  códigos vira `retryable` e uma recusa definitiva custa cinco tentativas e uma hora. A tabela de
+  códigos é consultada ANTES do status, e é ela que impede um caso perigoso — a Meta responde
+  limite de requisição como `OAuthException` com HTTP 400, e sem a tabela ele viraria `permanent`.
 - **Recheck com cadência**: quem está em `processing` não é reconsultado a cada tique. `updated_at`
   é congelado na entrada (nunca bumpado por um recheck), então ele é a idade do processamento, e
   `next_check_after` diz quando perguntar de novo: sem espera nos 5 primeiros minutos, 5min até os
