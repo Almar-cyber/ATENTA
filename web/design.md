@@ -54,9 +54,11 @@ sempre as classes utilitárias semânticas — nunca hex solto:
 - Links/ênfase: `text-accent-foreground` (roxo legível — amarelo como texto não tem contraste)
 - Raio base `--radius` (**1rem**) e derivados `rounded-md/lg/xl/2xl`
 - Fonte: Geist (variável `--font-sans`), já aplicada no `body`
-- Logo: `web/public/atenta-wordmark.png` (sticker roxo com traço amarelo, pra fundo claro) no header;
-  `atenta-wordmark-onpurple.png` (traço branco) pra superfície colorida; `atenta-icon.svg` no favicon.
-  **PNG, não SVG, no wordmark** — o SVG deformava o "A" e o "N" em alguns renderizadores.
+- Logo: `web/public/atenta-logoetipo.png` (sticker roxo com traço amarelo, pra fundo claro) no
+  header a partir de `sm` e na tela de entrar; `atenta-wordmark-onpurple.png` (traço branco) pra
+  superfície colorida; `atenta-icon.svg` no favicon **e como selo do header no celular**, onde o
+  logotipo deitado não cabe. **PNG, não SVG, no wordmark** — o SVG deformava o "A" e o "N" em alguns
+  renderizadores; a ressalva é das LETRAS, o selo é só path e vale em SVG.
 
 **Segunda exceção — cores dos pilares de conteúdo.** `TAG_COLORS` (`src/lib/tags.ts`) tem seis tons que não significam nada no sistema; só precisam ser distinguíveis entre si. O banco guarda a CHAVE ('roxo'), nunca o hex, então mudar a paleta é editar um arquivo.
 
@@ -117,10 +119,26 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
     da pílula de abas (`TabsList` é h-8)**, então a fileira do topo fica alinhada.
   - `size="sm"` (h-7): **ações terciárias inline** numa linha de lista (Duplicar/Cancelar/Excluir).
   Regra: se está na mesma fileira das abas, é `default` (h-8) — não misture `sm`/`lg` ali.
+- **Navegação num menu, ao lado do logo**: os três destinos (Painel, Agenda, Insights) moram num
+  `DropdownMenu` colado no logo, não em três botões soltos. Motivo é espaço vertical: soltos, eles
+  não cabiam ao lado do logo e das ações abaixo de ~1024px e desciam pra uma **fileira própria** —
+  44px mais o respiro, tirados do conteúdo em toda tela, o tempo todo, por uma navegação que se usa
+  uma vez a cada visita. Medido no cabeçalho: 124→68px a 360, 192→76 a 640, 136→76 de 768 a 1023.
+  **O gatilho carrega a tela atual** (ícone + nome, `SCREEN_META` no `App.tsx`), não só o ☰: é o que
+  substitui a régua de "onde você está" que o botão aceso dava de graça. Estando em Conexões o
+  gatilho diz "Conexões" e nenhum item do menu acende — ela continua não sendo um dos três.
+- **Uma fileira em toda largura**: o cabeçalho quebrar em duas devolve o problema que o menu
+  resolveu, então o que entra nele tem que caber. As três válvulas, na ordem em que cedem:
+  o wordmark vira o **selo quadrado** (`atenta-icon.svg`) abaixo de `sm` — o logotipo deitado come
+  145px dos ~336 de uma tela de 360; o **rótulo do gatilho** some abaixo de `md`; e os **avatares de
+  conta** só aparecem em `lg` (são o item mais elástico da fileira — crescem a cada conta — e eram
+  os ~115px que quebravam a linha entre 640 e ~830px). Nenhum caminho se perde: Conexões está no
+  menu da conta, nos estados vazios e na pendência do Painel; "precisa reautenticar" é o sino.
+  Use `atenta-icon.svg` e **não** `atenta-icon-256.png` — esse PNG está cortado no repositório.
 - **Responsivo dos controles do topo**: header e barra usam `px-3 sm:px-6` (aproveita a lateral no
-  mobile). No mobile os CTAs do header dividem a linha (`flex-1`), os avatares de conta somem
-  (`hidden sm:flex`) e o botão de Filtros vira **só ícone** (`hidden sm:inline` no rótulo). Os
-  filtros moram num popover (`FilterMenu`), não soltos na barra.
+  mobile). No mobile o "Novo post" vira **só o "+"** (`hidden sm:inline` no rótulo) e o botão de
+  Filtros vira **só ícone** pela mesma regra. Os filtros moram num popover (`FilterMenu`), não
+  soltos na barra.
 - **Card quadrado, não faixa**: numa tela larga, um card de largura total vira uma faixa com o texto
   num canto e o resto vazio — o olho atravessa a tela pra ligar duas pontas que cabiam num palmo.
   Grade de cards altos resolve os dois lados: ocupa a largura em colunas e abre espaço pra

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, CalendarDays, CheckCircle2, LayoutDashboard, Link2, LogOut, Plus, Smile } from 'lucide-react';
+import { BarChart3, CalendarDays, Check, CheckCircle2, LayoutDashboard, Link2, LogOut, Menu, Plus, Smile } from 'lucide-react';
 import { toast } from 'sonner';
 import { SchedulerProvider, useScheduler } from '@/store';
 import type { View } from '@/store';
@@ -37,24 +37,32 @@ import { AvatarUsuario } from '@/components/AvatarUsuario';
 import { AvatarDialog } from '@/components/AvatarDialog';
 import type { DialogSelection } from '@/components/PostDialog';
 
-/**
- * Os três destinos do app, na barra de cima.
- *
- * Antes o cabeçalho tinha só um botão de Insights solto e a Agenda era a tela implícita — o que
- * funcionava enquanto havia duas telas. Com o Painel eles viram três lugares de igual estatura, e
- * uma navegação nomeada diz onde você está, coisa que um botão solto não faz.
- *
- * São `Button size="lg"`, e não a pílula de abas: web/design.md proíbe misturar a `TabsList` (h-8)
- * com os botões (h-11) na mesma fileira, e o botão resolve a altura sozinho.
- */
-const NAV: { id: Screen; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'home', label: 'Painel', icon: LayoutDashboard },
-  { id: 'scheduler', label: 'Agenda', icon: CalendarDays },
-  { id: 'insights', label: 'Insights', icon: BarChart3 },
-];
-
 /** As telas do app. `connections` fica fora da navegação — chega pelo menu da conta. */
 type Screen = 'home' | 'scheduler' | 'connections' | 'insights';
+
+/**
+ * Nome e ícone de cada tela. Serve pros itens do menu E pro gatilho dele, que carrega a tela atual.
+ */
+const SCREEN_META: Record<Screen, { label: string; icon: typeof LayoutDashboard }> = {
+  home: { label: 'Painel', icon: LayoutDashboard },
+  scheduler: { label: 'Agenda', icon: CalendarDays },
+  insights: { label: 'Insights', icon: BarChart3 },
+  connections: { label: 'Conexões', icon: Link2 },
+};
+
+/**
+ * Os três destinos do app, agora dentro do menu ao lado do logo.
+ *
+ * Antes eram três botões soltos no cabeçalho. Numa janela abaixo de ~1024px eles não cabiam ao lado
+ * do logo e das ações, então desciam pra UMA FILEIRA PRÓPRIA — 44px de altura mais o respiro, tirados
+ * do conteúdo em toda tela, o tempo todo, para uma navegação que se usa uma vez a cada visita. Um
+ * gatilho só devolve essa faixa e vale em qualquer largura, sem a navegação mudar de lugar conforme
+ * a janela.
+ *
+ * O gatilho NOMEIA a tela atual em vez de ser só o ☰. É o que faz o menu não perder a régua de "onde
+ * você está" que os três botões davam de graça pelo botão aceso: some a lista, fica o rótulo.
+ */
+const NAV: Screen[] = ['home', 'scheduler', 'insights'];
 
 function Header({
   screen,
@@ -80,55 +88,69 @@ function Header({
   const [avatarAberto, setAvatarAberto] = useState(false);
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 px-3 pb-2 pt-4 sm:gap-4 sm:px-6 sm:pt-6">
-      {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores. */}
-      <button type="button" onClick={() => onNavigate('home')} aria-label="Ir para o Painel" className="cursor-pointer">
-        {/* Menor no celular: a 375px o wordmark em h-10 sozinho já não deixava o "Novo post" caber
-            na mesma fileira, e o cabeçalho quebrava numa terceira linha. */}
-        <img src="/atenta-logoetipo.png" alt="ATENTA!" className="h-8 w-auto sm:h-10" />
-      </button>
-      {/* No desktop largo a navegação senta ao lado do wordmark. Em qualquer largura menor — do
-          celular até uma janela estreita de desktop — ela desce pra própria fileira, e fica
-          SEMPRE por último (`order-last` sem reverter antes do `lg`), nunca entre o logo e as
-          ações.
-          Isso não é só estética: a navegação decide o que aparece abaixo dela na tela — é a régua
-          de "onde você está". Ela precisa ficar colada no conteúdo, não separada dele por uma
-          fileira de botões no meio. `sm:order-none` (o que havia antes) revertia cedo demais: entre
-          640 e ~1023px o logo+navegação cabiam juntos numa linha, mas as ações (avatares, sino,
-          Novo post, conta) não cabiam mais do lado — e sobravam pra uma SEGUNDA fileira, com a
-          navegação em cima e as ações no meio do caminho até o conteúdo. `lg:order-none` empurra
-          esse reverter pra uma largura em que tudo cabe de verdade numa linha só (testado: ~930px
-          de conteúdo é o teto; o breakpoint `lg` do Tailwind, 1024px, sobra folga).
-          No celular ela ocupa a largura toda, dividida em três — o formato de barra de abas, que é
-          onde a mão alcança — e o ÍCONE some e o RÓTULO fica (o contrário do resto do cabeçalho),
-          porque um quadriculado, um calendário e um gráfico lado a lado não dizem para onde levam;
-          a palavra diz. */}
-      <nav className="order-last flex w-full items-center gap-1 lg:order-none sm:w-auto">
-        {NAV.map(({ id, label, icon: Icon }) => {
-          // Conexões não acende nenhum dos três de propósito: ela é ajuste de conta, chega pelo
-          // menu do avatar, e acender a Agenda ali diria que você está num lugar onde não está.
-          const ativo = screen === id;
-          return (
+      {/* Logo e navegação viram um bloco só: o menu fica colado no logo, no canto em que a mão e o
+          olho já procuram "onde estou / pra onde vou". */}
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores.
+            No celular entra o SELO quadrado no lugar do logotipo deitado: o logotipo sozinho come
+            145px dos ~336px de uma tela de 360, e com o menu ao lado o cabeçalho voltaria a quebrar
+            em duas fileiras — que é justamente o que este menu existe pra desfazer. É a mesma marca,
+            a mesma que o aparelho já mostra no ícone do app. Aqui o SVG vale (a ressalva do
+            web/design.md é sobre o WORDMARK, cujas letras deformavam): o selo é só path, sem texto.
+            Não use `atenta-icon-256.png` — esse arquivo está cortado, o glifo sai pela metade. */}
+        <button type="button" onClick={() => onNavigate('home')} aria-label="Ir para o Painel" className="shrink-0 cursor-pointer">
+          <img src="/atenta-icon.svg" alt="ATENTA!" className="h-10 w-auto sm:hidden" />
+          <img src="/atenta-logoetipo.png" alt="ATENTA!" className="hidden h-10 w-auto sm:block" />
+        </button>
+        {/* O gatilho carrega a tela atual (ícone + nome), não só o ☰ — ver o comentário de NAV.
+            Abaixo de 768px fica só o ☰: ali a largura é o recurso escasso, e é ela que decide se o
+            cabeçalho cabe numa fileira; a tela abaixo já se apresenta de qualquer forma (o
+            "Painel"/"Insights"/"Conexões" do ViewHeader, o "Posts agendados" da Agenda). */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
-              key={id}
               size="lg"
-              variant={ativo ? 'default' : 'ghost'}
-              aria-current={ativo ? 'page' : undefined}
-              onClick={() => onNavigate(id)}
-              className="flex-1 px-2.5 sm:flex-none sm:px-5"
+              variant="outline"
+              aria-label={`Menu de navegação — você está em ${SCREEN_META[screen].label}`}
+              className="px-3 md:px-5"
             >
-              <Icon className="hidden size-4 sm:block" />
-              {label}
+              <Menu className="size-4" />
+              <span className="hidden md:inline">{SCREEN_META[screen].label}</span>
             </Button>
-          );
-        })}
-      </nav>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            {NAV.map((id) => {
+              // Conexões não acende nenhum dos três de propósito: ela é ajuste de conta, chega pelo
+              // menu do avatar, e acender a Agenda ali diria que você está num lugar onde não está.
+              // (Estando nela, quem diz isso é o rótulo do gatilho.)
+              const { label, icon: Icon } = SCREEN_META[id];
+              const ativo = screen === id;
+              return (
+                <DropdownMenuItem
+                  key={id}
+                  aria-current={ativo ? 'page' : undefined}
+                  onSelect={() => onNavigate(id)}
+                  className={ativo ? 'bg-muted font-semibold' : undefined}
+                >
+                  <Icon className="size-4" />
+                  {label}
+                  {ativo && <Check className="ml-auto size-4" />}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       <div className="flex items-center justify-end gap-3 sm:ml-auto">
-        {/* Avatares só no desktop: no mobile eles empurravam o "Novo post" pra quebrar, e a função
-            (abrir Conexões) já está no botão ao lado. */}
+        {/* Avatares só no desktop LARGO (antes era `sm:`): eles são o item mais elástico da fileira
+            — crescem a cada conta conectada — e eram os ~115px que faziam o cabeçalho quebrar em
+            duas fileiras entre 640 e ~830px, desfazendo o espaço que o menu acabou de devolver.
+            Some sem perda de caminho: quem quer Conexões chega pelo menu da conta, pelos estados
+            vazios e pela pendência do Painel, e "conta precisa reautenticar" já é o sino. */}
         <button
           type="button"
           onClick={onOpenConnections}
-          className="hidden flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted sm:flex"
+          className="hidden flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted lg:flex"
           title="Gerenciar conexões"
         >
           {accounts.length === 0 ? (
