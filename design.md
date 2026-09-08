@@ -142,6 +142,29 @@ Três consequências que não são óbvias:
 3. **A graduação não nos avisa.** Acontece dentro do app (MANUAL) ou sozinha (SS_PERFORMANCE), sem
    webhook nem campo consultável — daí a grade descobrir pelo feed em vez de por um estado nosso.
 
+**Abrir pra todo mundo não tem API.** Não existe endpoint de graduação: com `MANUAL` o passo final
+é dentro do app do Instagram, e é lá que ficam os números do teste comparados aos seus Reels de
+sempre. O que o produto faz é fechar o ciclo até a porta:
+
+| Peça | O que faz |
+| --- | --- |
+| `atencao.testes_para_decidir` (`/api/summary`) | conta os testes `MANUAL` publicados entre 72h e 7 dias atrás |
+| `teste_a_decidir` | o mais antigo deles, pra pendência abrir NUM post em vez de numa lista |
+| pendência no Painel e no sino | "Reel de teste rodou — decidir no app do Instagram". **Não é `grave`**: nada quebrou |
+| `PostDialog` | diz que o Reel está em teste, desde quando, e que o passo final é no app |
+| `external_url` do Instagram | o link pro post, capturado na publicação (ver abaixo) |
+
+A janela de 72h–7 dias é uma **aproximação deliberada**: o lembrete não tem como se apagar sozinho
+ao ser atendido, e sem teto seria o único número do painel impossível de zerar — aviso que nunca sai
+é aviso que se aprende a ignorar. O preço: graduou no dia 2, ele insiste até o dia 7; ignorou, some
+sozinho. Constantes em `TESTE_DECISAO_*` (`src/api.ts`).
+
+**`external_url` do Instagram**: o adapter passou a buscar o `permalink` logo depois do
+`media_publish`. Era a única rede que publicava sem link (Facebook, Pinterest e YouTube montam a URL
+a partir do id; o Instagram usa um shortcode que a API não deriva). Essa busca **nunca lança**: nesse
+ponto o post já saiu, e deixar um erro subir faria o poller republicar — o pior desfecho possível
+(princípio 6).
+
 Posts criados antes do seletor não têm `options.format`; o adapter cai na regra antiga
 (`as_story`, e vídeo = Reel).
 
@@ -183,7 +206,7 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | Método | Rota | Papel |
 | --- | --- | --- |
 | GET | `/api/accounts` | contas conectadas (nunca devolve token) |
-| GET | `/api/summary` | o Painel: destinos por status, o que travou, e os 5 próximos a sair. Existe no servidor porque `/api/posts` é filtrada e paginada — um painel não pode mudar de número por causa de um filtro ligado noutra tela, nem contar "publicados" até o teto da página |
+| GET | `/api/summary` | o Painel: destinos por status, o que travou, os 5 próximos a sair e os Reels de teste esperando decisão. Existe no servidor porque `/api/posts` é filtrada e paginada — um painel não pode mudar de número por causa de um filtro ligado noutra tela, nem contar "publicados" até o teto da página |
 | GET | `/api/state` | contas + agenda + pilares + resumo numa resposta só — é o que o poll do dashboard chama. Composição dos quatro handlers acima, não uma quinta query: requisição é o recurso contado do plano grátis do Workers, e o poll era quem mais gastava (4 por ciclo) |
 | GET | `/api/connect/:rede` | 302 pro consentimento, com nonce CSRF em cookie |
 | GET | `/api/posts` | agenda, com filtro de status/plataforma |

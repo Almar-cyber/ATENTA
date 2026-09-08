@@ -369,24 +369,8 @@ function Dashboard({
 
   const visible = useMemo(() => accountFilter(posts, filters.account), [posts, filters.account]);
 
-  // Uma pendência do Painel leva à Agenda JÁ FILTRADA — é o que transforma a linha em ação em vez
-  // de recado. Sem aplicar o filtro, "3 rascunhos ficaram pra trás" devolveria a pessoa pra mesma
-  // lista onde eles estavam escondidos, que é exatamente o problema que o Painel existe pra evitar.
-  const irPara = useCallback(
-    (destino: PainelDestino) => {
-      if (destino.tipo === 'agenda') {
-        setFilters({ status: destino.status });
-        setView('list');
-        setScreen('scheduler');
-      } else if (destino.tipo === 'conexoes') {
-        setScreen('connections');
-      } else {
-        setScreen('insights');
-      }
-    },
-    [setFilters]
-  );
-
+  // Vem ANTES de `irPara` de propósito: aquele depende deste, e `const` não é içado — invertido,
+  // a lista de dependências lê `abrirPost` na zona morta temporal e derruba o render.
   // O Painel só tem os ids; o objeto inteiro do post mora no store. Quando um filtro ligado deixa
   // o post fora do que o store carregou, cair na Agenda limpa é melhor que um clique que não faz
   // nada — a pessoa continua a um passo do post em vez de achar que o card quebrou.
@@ -403,6 +387,29 @@ function Dashboard({
       setScreen('scheduler');
     },
     [posts, setFilters]
+  );
+
+  // Uma pendência do Painel leva à Agenda JÁ FILTRADA — é o que transforma a linha em ação em vez
+  // de recado. Sem aplicar o filtro, "3 rascunhos ficaram pra trás" devolveria a pessoa pra mesma
+  // lista onde eles estavam escondidos, que é exatamente o problema que o Painel existe pra evitar.
+  const irPara = useCallback(
+    (destino: PainelDestino) => {
+      if (destino.tipo === 'agenda') {
+        setFilters({ status: destino.status });
+        setView('list');
+        setScreen('scheduler');
+      } else if (destino.tipo === 'conexoes') {
+        setScreen('connections');
+      } else if (destino.tipo === 'post') {
+        // Abre o post direto — é o destino do Reel de teste, onde estão os números e o link pro
+        // Instagram. `abrirPost` já cai na Agenda limpa quando o post não está no que o store
+        // carregou, então um filtro ligado noutra tela não transforma isto num clique morto.
+        abrirPost(destino.post_id, destino.target_id);
+      } else {
+        setScreen('insights');
+      }
+    },
+    [setFilters, abrirPost]
   );
 
   // h-dvh (dynamic viewport height), não h-screen/100vh: no iOS o 100vh ignora a barra de endereço

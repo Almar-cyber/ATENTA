@@ -245,13 +245,43 @@ export const instagramAdapter: PlatformAdapter = {
     }
     const publishJson = (await publishRes.json()) as { id: string };
 
-    return { state: 'published', externalId: publishJson.id };
+    return {
+      state: 'published',
+      externalId: publishJson.id,
+      externalUrl: await permalinkDe(publishJson.id, tokens.access_token),
+    };
   },
 
   classifyError(err) {
     return classifyByKnownCodes(err, { OAuthException: 'auth', '190': 'auth' });
   },
 };
+
+/**
+ * O endereço público do post recém-publicado.
+ *
+ * O Instagram era a única rede que publicava sem guardar `external_url` (Facebook, Pinterest e
+ * YouTube montam a URL a partir do id; aqui não dá — o link do Instagram usa um shortcode que a
+ * API não deriva do id). Resultado: o botão "ver no Instagram" no detalhe do post nunca aparecia
+ * pra IG, e não havia caminho do app pro post.
+ *
+ * NUNCA LANÇA, e isso é o ponto: quando chega aqui o post JÁ SAIU. Deixar um erro subir faria o
+ * poller tratar a publicação como falha e tentar de novo — publicando duas vezes, que é o pior
+ * desfecho possível do projeto (design.md §7, princípio 6). Sem permalink o post fica exatamente
+ * como ficava antes: publicado, sem link.
+ */
+async function permalinkDe(mediaId: string, accessToken: string): Promise<string | undefined> {
+  try {
+    const res = await fetchWithRetry(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}?fields=permalink&access_token=${encodeURIComponent(accessToken)}`
+    );
+    if (!res.ok) return undefined;
+    const json = (await res.json()) as { permalink?: unknown };
+    return typeof json.permalink === 'string' && json.permalink ? json.permalink : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function setMediaUrl(body: URLSearchParams, asset: MediaAsset): void {
   body.set(asset.mime_type.startsWith('video/') ? 'video_url' : 'image_url', asset.public_url!);

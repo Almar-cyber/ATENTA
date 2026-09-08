@@ -2,7 +2,7 @@ import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:
 import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../src/worker.js';
 import { instagramAdapter } from '../src/adapters/instagram.js';
-import type { Account, MediaAsset, PostTarget } from '../src/lib/types.js';
+import type { Account, MediaAsset, PostTarget, PublishResult } from '../src/lib/types.js';
 import { resetDb } from './helpers.js';
 
 // REEL DE TESTE do Instagram: sai só pra quem NÃO segue a conta, pra medir o desempenho antes de
@@ -268,5 +268,114 @@ describe('publicação: o container leva trial_params', () => {
     const body = await corpoDoContainer({ format: 'reel' });
     expect(body.get('media_type')).toBe('REELS');
     expect(body.has('trial_params')).toBe(false);
+  });
+});
+
+// O PERMALINK do Instagram, guardado ao publicar.
+//
+// O Instagram era a única rede que publicava sem `external_url`: Facebook, Pinterest e YouTube
+// montam a URL a partir do id, e aqui não dá — o link usa um shortcode que a API não deriva do id.
+// Sem isso o botão "ver post publicado" nunca aparecia pra IG, e não havia caminho do painel pro
+// post: exatamente o que o lembrete de Reel de teste precisa ter.
+//
+// A propriedade que mais importa aqui é a SEGUNDA: quando esta busca acontece, o post JÁ SAIU.
+// Deixar um erro dela subir faria o poller tratar a publicação como falha e tentar de novo —
+// publicando duas vezes, o pior desfecho do projeto (design.md §7, princípio 6).
+describe('publicação: o permalink é guardado, e nunca custa o post', () => {
+  const conta: Account = {
+    id: 'acc-ig',
+    platform: 'instagram',
+    display_name: 'conta.teste',
+    external_account_id: 'ig-user-1',
+    status: 'active',
+    token_ciphertext: null,
+    token_iv: null,
+    access_token_expires_at: null,
+    refresh_token_expires_at: null,
+    scope: null,
+    extra: {},
+  };
+
+  function destinoEmProcessamento(): PostTarget {
+    return {
+      id: 't1',
+      scheduled_post_id: 'p1',
+      account_id: conta.id,
+      platform: 'instagram',
+      status: 'processing',
+      caption_override: 'legenda',
+      title: null,
+      options: { format: 'reel' },
+      adapter_state: { creation_id: 'container-1' },
+      external_post_id: null,
+      external_url: null,
+      attempt_count: 0,
+      last_error: null,
+      published_at: null,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Roda o checkStatus com o container já pronto. `permalink` decide o que a terceira chamada
+   * (a do permalink) responde: uma URL, um erro HTTP, ou uma exceção de rede.
+   */
+  async function publicar(permalink: string | 'http-500' | 'explode'): Promise<PublishResult> {
+    await resetDb();
+    await env.DB.prepare(
+      `insert into accounts (id, platform, display_name, external_account_id, status, extra)
+       values (?, 'instagram', 'conta.teste', ?, 'active', '{}')`
+    )
+      .bind(conta.id, conta.external_account_id)
+      .run();
+    const { encryptJSON } = await import('../src/lib/crypto.js');
+    const { ciphertext, iv } = await encryptJSON({ access_token: 'tok' }, env.TOKEN_ENCRYPTION_KEY);
+    await env.DB.prepare(`update accounts set token_ciphertext = ?, token_iv = ? where id = ?`)
+      .bind(ciphertext, iv, conta.id)
+      .run();
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      const u = String(url);
+      if (u.includes('media_publish')) {
+        return new Response(JSON.stringify({ id: 'ig-media-1' }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      if (u.includes('fields=permalink')) {
+        if (permalink === 'explode') throw new Error('conexão caiu');
+        if (permalink === 'http-500') return new Response('erro', { status: 500 });
+        return new Response(JSON.stringify({ permalink }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      // status do container
+      return new Response(JSON.stringify({ status_code: 'FINISHED' }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      return await instagramAdapter.checkStatus(destinoEmProcessamento(), conta, env as never);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  it('guarda o endereço do post', async () => {
+    const r = await publicar('https://www.instagram.com/reel/ABC123/');
+    expect(r).toMatchObject({
+      state: 'published',
+      externalId: 'ig-media-1',
+      externalUrl: 'https://www.instagram.com/reel/ABC123/',
+    });
+  });
+
+  it('permalink que responde erro NÃO derruba a publicação — o post já saiu', async () => {
+    const r = await publicar('http-500');
+    expect(r.state).toBe('published');
+    expect(r).toMatchObject({ externalId: 'ig-media-1' });
+    expect((r as { externalUrl?: string }).externalUrl).toBeUndefined();
+  });
+
+  it('permalink que estoura a conexão também não — senão o poller republicaria', async () => {
+    const r = await publicar('explode');
+    expect(r.state).toBe('published');
+    expect((r as { externalUrl?: string }).externalUrl).toBeUndefined();
   });
 });

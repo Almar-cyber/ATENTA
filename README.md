@@ -317,6 +317,13 @@ só pra quem **não segue** a conta, pra você medir antes de mostrar aos seguid
 aparece no perfil — e por isso some da grade até graduar. Exige conta profissional com 1.000
 seguidores; abaixo disso quem recusa é a Meta, na publicação.
 
+**Abrir pra todo mundo depois do teste é no app do Instagram** — a API não tem endpoint pra isso, e
+é lá também que ficam os números do teste comparados aos seus Reels de sempre. O que o ATENTA faz é
+te levar até a porta na hora certa: passadas as 72h que o Instagram usa pra medir, aparece no Painel
+e no sino um "Reel de teste rodou — decidir no app do Instagram", que abre o post com o link pra ele.
+O lembrete some sozinho depois de 7 dias, porque a graduação acontece fora daqui e ele não teria como
+se apagar ao ser atendido.
+
 **Vários Stories de uma vez**: a API publica um arquivo por Story (não existe Story em carrossel),
 mas nada impede publicar vários seguidos. Escolhendo Story com 2+ arquivos, o compositor cria **um
 post por arquivo**, espaçados de 1 minuto — o espaçamento é o que garante a ordem, já que o poller

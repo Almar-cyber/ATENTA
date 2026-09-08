@@ -117,8 +117,17 @@ export interface Summary {
      * tentativas esgotassem e virasse `failed`, o que leva horas.
      */
     retentando: number;
+    /**
+     * Reels de teste (`trial_graduation: MANUAL`) publicados há mais de 72h — o prazo que o
+     * Instagram usa pra medir — e há menos de 7 dias. A janela fecha porque a graduação acontece
+     * DENTRO do app e não nos avisa: sem teto, este seria o único número do painel impossível de
+     * zerar. Ver `TESTE_DECISAO_*` em `src/api.ts`.
+     */
+    testes_para_decidir: number;
   };
   proximos: ProximoPost[];
+  /** O teste mais antigo esperando decisão — é nele que a pendência abre. */
+  teste_a_decidir: { post_id: string; target_id: string } | null;
 }
 
 export function getSummary(): Promise<Summary> {
