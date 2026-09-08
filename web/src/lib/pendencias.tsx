@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, CalendarClock, Clock, FileText, Link2, RotateCcw } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Clock, FileText, FlaskConical, Link2, RotateCcw } from 'lucide-react';
 import type { Summary } from './api';
 import type { Platform } from './types';
 import { PLATFORM_LABELS } from './platforms';
@@ -13,7 +13,10 @@ import { PLATFORM_LABELS } from './platforms';
 export type PainelDestino =
   | { tipo: 'agenda'; status: string }
   | { tipo: 'conexoes' }
-  | { tipo: 'insights' };
+  | { tipo: 'insights' }
+  // Abre UM post direto, em vez de uma tela filtrada. Existe pro Reel de teste: filtrar a Agenda
+  // por "published" devolveria tudo que já saiu, e o teste sumiria no meio.
+  | { tipo: 'post'; post_id: string; target_id: string };
 
 export interface Pendencia {
   id: string;
@@ -122,6 +125,27 @@ export function construirPendencias(
       icone: <Clock className="size-4" />,
       grave: true,
       destino: { tipo: 'agenda', status: 'queued' },
+    });
+  }
+
+  // Reel de teste esperando decisão. Não é `grave`: nada quebrou — o post está no ar, rendendo com
+  // não-seguidores. É uma janela de oportunidade, e a régua do sino diz que só falha, conta caída
+  // e fila atrasada acendem o ponto vermelho.
+  const testes = summary.atencao.testes_para_decidir ?? 0;
+  if (testes > 0 && summary.teste_a_decidir) {
+    out.push({
+      id: 'testes-para-decidir',
+      quantidade: testes,
+      titulo: plural(testes, 'Reel de teste rodou', 'Reels de teste rodaram'),
+      // Diz o que fazer, e onde — o passo final é no app do Instagram, não aqui, e esconder isso
+      // faria a pessoa procurar no ATENTA um botão que não pode existir (princípio 3 do design.md).
+      detalhe: 'decidir no app do Instagram',
+      icone: <FlaskConical className="size-4" />,
+      destino: {
+        tipo: 'post',
+        post_id: summary.teste_a_decidir.post_id,
+        target_id: summary.teste_a_decidir.target_id,
+      },
     });
   }
 

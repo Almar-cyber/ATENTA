@@ -593,6 +593,9 @@ interface CreatePostBody {
   /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
    *  continua aceito pra não quebrar chamadas antigas do CLI. */
   instagram_format?: string;
+  /** 'MANUAL' | 'SS_PERFORMANCE' — publica o Reel como TESTE (só pra quem não segue a conta).
+   *  Ausente = Reel comum. Quem recusa combinação inválida é o validate() do adapter. */
+  instagram_trial_graduation?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   save_as?: string;
@@ -628,6 +631,9 @@ interface UpdatePostBody {
   /** 'post' | 'reel' | 'story' — escolhido no compositor. Substitui instagram_as_story, que
    *  continua aceito pra não quebrar chamadas antigas do CLI. */
   instagram_format?: string;
+  /** 'MANUAL' | 'SS_PERFORMANCE' — publica o Reel como TESTE (só pra quem não segue a conta).
+   *  Ausente = Reel comum. Quem recusa combinação inválida é o validate() do adapter. */
+  instagram_trial_graduation?: string;
   cover_media_id?: string;
   cover_timestamp_ms?: number;
   target_caption_overrides?: Record<string, string>;
@@ -665,6 +671,7 @@ interface ValidateAccountsAndMediaParams {
   tiktokPrivacyLevel?: string;
   instagramAsStory?: boolean;
   instagramFormat?: string;
+  instagramTrialGraduation?: string;
   coverMediaId?: string;
   coverTimestampMs?: number;
   // Legenda canônica e título do post + overrides por conta, pra que o validate() de cada adapter
@@ -820,6 +827,13 @@ async function validateAccountsAndMedia(env: Env, owner: string, params: Validat
       if (format) {
         options.format = format;
         if (format === 'story') options.as_story = true;
+      }
+      // Reel de teste: sai só pra quem não segue, e gradua depois. Gravado como veio, SEM conferir
+      // aqui se combina com o formato — quem recusa é o validate() do adapter, que é a autoridade
+      // sobre regra de plataforma (princípio 1 do design.md). Guardar antes de validar é o que faz
+      // a recusa citar o valor real em vez de um campo que sumiu no caminho.
+      if (params.instagramTrialGraduation) {
+        options.trial_graduation = params.instagramTrialGraduation;
       }
     }
     // Capa do vídeo. YouTube e Instagram aceitam uma IMAGEM própria; o TikTok só deixa escolher um
@@ -977,6 +991,7 @@ async function createPost(request: Request, owner: string, env: Env): Promise<Re
     // fallback de igFormat() (vídeo→Reel, imagem→Post): Story com foto rejeitava por proporção de
     // feed sem motivo, e Story com VÍDEO publicava como Reel em silêncio, sem erro nenhum.
     instagramFormat: payload.instagram_format,
+    instagramTrialGraduation: payload.instagram_trial_graduation,
     coverMediaId: payload.cover_media_id,
     coverTimestampMs: payload.cover_timestamp_ms,
     body: payload.body,
@@ -1072,6 +1087,7 @@ async function updatePost(id: string, request: Request, owner: string, env: Env)
       tiktokPrivacyLevel: payload.tiktok_privacy_level,
       instagramAsStory: payload.instagram_as_story,
       instagramFormat: payload.instagram_format,
+      instagramTrialGraduation: payload.instagram_trial_graduation,
       coverMediaId: payload.cover_media_id,
       coverTimestampMs: payload.cover_timestamp_ms,
       body: payload.body,
@@ -1557,6 +1573,22 @@ const ATRASO_TOLERADO_MS = 30 * 60_000;
 /** Quantos destinos aparecem em "Sai a seguir". Cabe na dobra sem virar uma segunda lista. */
 const PROXIMOS_LIMITE = 5;
 
+/**
+ * A janela em que faz sentido lembrar você de decidir sobre um Reel de teste.
+ *
+ * ABRE em 72h porque é o prazo que o próprio Instagram usa pra medir o teste com não-seguidores —
+ * antes disso não há o que decidir, só ansiedade.
+ *
+ * FECHA em 7 dias, e isso é uma aproximação DELIBERADA: o Instagram não nos conta quando um teste
+ * gradua (acontece dentro do app), então este lembrete não tem como se apagar sozinho ao ser
+ * atendido. Sem um teto ele viraria o único item do painel impossível de zerar — e um aviso que
+ * nunca sai é um aviso que se aprende a ignorar, que é a régua declarada do sino em web/design.md.
+ * O preço é conhecido: se você graduou no dia 2, o lembrete insiste até o dia 7; se ignorou, ele
+ * some sozinho. Preferível aos dois lados de um contador travado pra sempre.
+ */
+const TESTE_DECISAO_ABRE_MS = 72 * 3_600_000;
+const TESTE_DECISAO_FECHA_MS = 7 * 24 * 3_600_000;
+
 interface ResumoContagemRow {
   status: PostTarget['status'];
   total: number;
@@ -1626,7 +1658,10 @@ async function getSummary(owner: string, env: Env): Promise<Response> {
   const agoraIso = agora.toISOString();
   const limiteAtraso = new Date(agora.getTime() - ATRASO_TOLERADO_MS).toISOString();
 
-  const [contagens, proximos] = await Promise.all([
+  const inicioJanelaTeste = new Date(agora.getTime() - TESTE_DECISAO_FECHA_MS).toISOString();
+  const fimJanelaTeste = new Date(agora.getTime() - TESTE_DECISAO_ABRE_MS).toISOString();
+
+  const [contagens, proximos, testes] = await Promise.all([
     env.DB.prepare(
       `select pt.status as status,
               count(*) as total,
@@ -1669,6 +1704,26 @@ async function getSummary(owner: string, env: Env): Promise<Response> {
     )
       .bind(owner, agoraIso, PROXIMOS_LIMITE)
       .all<ProximoRow>(),
+
+    // Reels de teste esperando a SUA decisão. Só `MANUAL`: o SS_PERFORMANCE gradua sozinho, e
+    // lembrar de decidir sobre ele seria pedir uma ação que não existe.
+    // Mais ANTIGO primeiro: é ele que está mais perto de perder o timing, e é nele que o card do
+    // painel abre quando há vários (posição serial — ver web/design.md).
+    env.DB.prepare(
+      `select sp.id as post_id, pt.id as target_id
+         from post_targets pt
+         join scheduled_posts sp on sp.id = pt.scheduled_post_id
+        where sp.owner_id = ?
+          and pt.platform = 'instagram'
+          and pt.status = 'published'
+          and json_extract(pt.options, '$.trial_graduation') = 'MANUAL'
+          and pt.published_at is not null
+          and pt.published_at < ?
+          and pt.published_at > ?
+        order by pt.published_at asc`
+    )
+      .bind(owner, fimJanelaTeste, inicioJanelaTeste)
+      .all<{ post_id: string; target_id: string }>(),
   ]);
 
   const porStatus: Record<string, number> = {};
@@ -1688,9 +1743,14 @@ async function getSummary(owner: string, env: Env): Promise<Response> {
     linhasProximos.map((r) => r.target_id)
   );
 
+  const linhasTestes = testes.results ?? [];
+
   return jsonResponse({
     por_status: porStatus,
-    atencao: { rascunhos_vencidos: vencidos, atrasados, retentando },
+    atencao: { rascunhos_vencidos: vencidos, atrasados, retentando, testes_para_decidir: linhasTestes.length },
+    // O mais antigo, pra pendência abrir NUM post em vez de numa lista filtrada: "published" como
+    // filtro da Agenda devolveria tudo que já saiu, e o teste sumiria no meio.
+    teste_a_decidir: linhasTestes[0] ?? null,
     proximos: linhasProximos.map((r) => ({
       post_id: r.post_id,
       target_id: r.target_id,

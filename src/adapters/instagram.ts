@@ -1,5 +1,5 @@
 import type { MediaAsset, PlatformAdapter } from '../lib/types.js';
-import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
+import { apiError, classifyByKnownCodes } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { checkDuration } from '../lib/videoLimits.js';
@@ -49,6 +49,30 @@ function igFormat(rawOptions: unknown, media: MediaAsset[]): IgFormat {
   return media.some((m) => m.mime_type.startsWith('video/')) ? 'reel' : 'post';
 }
 
+/**
+ * Reel de TESTE: sai só pra quem NÃO segue a conta, pra medir o desempenho antes de mostrar aos
+ * seguidores. Depois ele "gradua" — passa a valer como Reel normal, entra no feed de quem segue e
+ * aparece no perfil.
+ *
+ * Na API é o mesmo container de Reel (`media_type=REELS`) com um `trial_params` a mais; não é um
+ * media_type próprio, e é por isso que aqui é uma OPÇÃO do Reel e não um quarto formato.
+ *
+ * `graduation_strategy` é o único campo de `trial_params` e a Meta o exige quando ele vem:
+ *   MANUAL         — fica em teste até você graduar dentro do app.
+ *   SS_PERFORMANCE — a Meta gradua sozinha se o desempenho com não-seguidores justificar.
+ *
+ * Ausente = Reel comum. Valor fora dos dois é recusado no validate() — mandar um terceiro valor
+ * faria a Meta recusar o container depois de já ter subido o vídeo.
+ */
+export type IgTrialGraduation = 'MANUAL' | 'SS_PERFORMANCE';
+
+const TRIAL_GRADUATIONS: IgTrialGraduation[] = ['MANUAL', 'SS_PERFORMANCE'];
+
+export function igTrialGraduation(rawOptions: unknown): string | undefined {
+  const value = (rawOptions as { trial_graduation?: unknown } | null | undefined)?.trial_graduation;
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 export const instagramAdapter: PlatformAdapter = {
   platform: 'instagram',
 
@@ -57,7 +81,10 @@ export const instagramAdapter: PlatformAdapter = {
   },
 
   async ensureFreshToken() {
-    throw new Error('instagram: no refresh mechanism implemented — run meta-auth-url again if needs_reauth');
+    // SEM renovação nesta rede: só a pessoa reconecta. O `code` é o que diz isso ao
+    // stepTokenHealthScan — sem ele, esta falha pareceria um erro passageiro e a conta ficaria
+    // 'active' pra sempre com um token morto, publicando nada e sem avisar ninguém.
+    throw Object.assign(new Error('instagram: no refresh mechanism implemented — run meta-auth-url again if needs_reauth'), { code: 'no_refresh_mechanism' });
   },
 
   validate(target, media, _account) {
@@ -74,6 +101,18 @@ export const instagramAdapter: PlatformAdapter = {
     if (format === 'reel') {
       if (media.length > 1) throw new Error('instagram: um Reel leva um vídeo só — para vários arquivos, use o formato Post');
       if (!hasVideo) throw new Error('instagram: Reel precisa de um vídeo — para publicar imagem, use o formato Post');
+    }
+
+    // Reel de teste. Recusado aqui, na criação, e não lá na publicação: a Meta só reclamaria
+    // depois de o vídeo inteiro ter subido, e a mensagem dela não diria qual campo está errado.
+    const trial = igTrialGraduation(target.options);
+    if (trial) {
+      if (format !== 'reel') {
+        throw new Error('instagram: só Reel pode sair como teste — Post e Story vão direto pra todo mundo');
+      }
+      if (!TRIAL_GRADUATIONS.includes(trial as IgTrialGraduation)) {
+        throw new Error(`instagram: graduação do Reel de teste inválida ("${trial}") — use MANUAL ou SS_PERFORMANCE`);
+      }
     }
     if (format === 'post' && hasVideo && media.length > 1) {
       throw new Error('instagram: carrossel só aceita imagens — o vídeo tem que ir sozinho');
@@ -153,6 +192,11 @@ export const instagramAdapter: PlatformAdapter = {
         } else if (cover.cover_timestamp_ms != null) {
           body.set('thumb_offset', String(cover.cover_timestamp_ms));
         }
+        // `trial_params` é um OBJETO num corpo form-encoded — a Graph API lê esses como JSON em
+        // string, que é a convenção dela pra parâmetro aninhado. O validate() já garantiu que o
+        // valor é um dos dois que a Meta aceita.
+        const trial = igTrialGraduation(target.options);
+        if (trial) body.set('trial_params', JSON.stringify({ graduation_strategy: trial }));
       } else if (asset.mime_type.startsWith('video/')) {
         // Vídeo no feed (formato Post) é `VIDEO`, não `REELS` — vira um post normal do feed em vez
         // de entrar na aba de Reels. `cover_url` é exclusivo de Reels aqui; capa, se houver, só via
@@ -177,12 +221,7 @@ export const instagramAdapter: PlatformAdapter = {
     const statusRes = await fetchWithRetry(
       `https://graph.facebook.com/${GRAPH_VERSION}/${state.creation_id}?fields=status_code&access_token=${encodeURIComponent(tokens.access_token)}`
     );
-    if (!statusRes.ok) {
-      const bodyText = await statusRes.text();
-      throw Object.assign(new Error(`instagram: container status check failed: ${statusRes.status} ${bodyText}`), {
-        code: metaErrorType(bodyText),
-      });
-    }
+    if (!statusRes.ok) throw await apiError('instagram: container status check failed', statusRes);
     const statusJson = (await statusRes.json()) as { status_code: string };
 
     if (statusJson.status_code === 'IN_PROGRESS') {
@@ -196,21 +235,69 @@ export const instagramAdapter: PlatformAdapter = {
       method: 'POST',
       body: new URLSearchParams({ access_token: tokens.access_token, creation_id: state.creation_id }),
     });
-    if (!publishRes.ok) {
-      const bodyText = await publishRes.text();
-      throw Object.assign(new Error(`instagram: media_publish failed: ${publishRes.status} ${bodyText}`), {
-        code: metaErrorType(bodyText),
-      });
-    }
+    if (!publishRes.ok) throw await apiError('instagram: media_publish failed', publishRes);
     const publishJson = (await publishRes.json()) as { id: string };
 
-    return { state: 'published', externalId: publishJson.id };
+    return {
+      state: 'published',
+      externalId: publishJson.id,
+      externalUrl: await permalinkDe(publishJson.id, tokens.access_token),
+    };
   },
 
+  /**
+   * Os erros deste adapter carregam o STATUS HTTP (viram `ApiError`, via `apiError()`), e é isso
+   * que faz a classificação abaixo funcionar de verdade.
+   *
+   * Antes eram `Error` com só um `code` colado. Sem status, o que não casava na tabela caía no
+   * 'retryable' padrão e ia pra cinco tentativas de 15 em 15 minutos — uma hora esperando por uma
+   * recusa que nunca ia mudar de resposta (proporção inválida, conta sem o recurso, parâmetro
+   * errado). O comentário de `classifyByStatus` já dizia isto: "um 400 tentado 5 vezes são 5
+   * falhas garantidas".
+   *
+   * A TABELA CONTINUA VINDO PRIMEIRO, e é ela que protege o caso perigoso: a Meta responde os
+   * erros de limite de requisição (códigos 4, 17, 32, 613) como `OAuthException`, então eles nem
+   * chegam à regra por status — continuam classificados exatamente como antes. O que passou a
+   * falhar de primeira é o resto do 4xx (`IGApiException`, `GraphMethodException` e afins), que é
+   * recusa de conteúdo, não de momento. 5xx segue retryable.
+   *
+   * Se aparecer na prática um 4xx transitório, o conserto é acrescentar o `type` dele a esta
+   * tabela — não devolver tudo pro 'retryable'.
+   */
   classifyError(err) {
-    return classifyByKnownCodes(err, { OAuthException: 'auth', '190': 'auth' });
+    return classifyByKnownCodes(err, {
+      no_refresh_mechanism: 'auth',
+      OAuthException: 'auth',
+      '190': 'auth',
+    });
   },
 };
+
+/**
+ * O endereço público do post recém-publicado.
+ *
+ * O Instagram era a única rede que publicava sem guardar `external_url` (Facebook, Pinterest e
+ * YouTube montam a URL a partir do id; aqui não dá — o link do Instagram usa um shortcode que a
+ * API não deriva do id). Resultado: o botão "ver no Instagram" no detalhe do post nunca aparecia
+ * pra IG, e não havia caminho do app pro post.
+ *
+ * NUNCA LANÇA, e isso é o ponto: quando chega aqui o post JÁ SAIU. Deixar um erro subir faria o
+ * poller tratar a publicação como falha e tentar de novo — publicando duas vezes, que é o pior
+ * desfecho possível do projeto (design.md §7, princípio 6). Sem permalink o post fica exatamente
+ * como ficava antes: publicado, sem link.
+ */
+async function permalinkDe(mediaId: string, accessToken: string): Promise<string | undefined> {
+  try {
+    const res = await fetchWithRetry(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}?fields=permalink&access_token=${encodeURIComponent(accessToken)}`
+    );
+    if (!res.ok) return undefined;
+    const json = (await res.json()) as { permalink?: unknown };
+    return typeof json.permalink === 'string' && json.permalink ? json.permalink : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function setMediaUrl(body: URLSearchParams, asset: MediaAsset): void {
   body.set(asset.mime_type.startsWith('video/') ? 'video_url' : 'image_url', asset.public_url!);
@@ -221,20 +308,6 @@ async function createContainer(igUserId: string, body: URLSearchParams): Promise
     method: 'POST',
     body,
   });
-  if (!res.ok) {
-    const bodyText = await res.text();
-    throw Object.assign(new Error(`instagram: container create failed: ${res.status} ${bodyText}`), {
-      code: metaErrorType(bodyText),
-    });
-  }
+  if (!res.ok) throw await apiError('instagram: container create failed', res);
   return ((await res.json()) as { id: string }).id;
-}
-
-// Graph API error envelope: { error: { message, type, code, error_subcode?, fbtrace_id } }. `type`
-// (e.g. "OAuthException") is used over the numeric `code` since it covers the whole family of
-// token-invalid codes (190, 102, ...) that classifyError's 'OAuthException' key is meant to catch,
-// not just the specific 190 case. Same shape/reasoning as facebook.ts's own copy of this helper.
-function metaErrorType(bodyText: string): string | undefined {
-  const parsed = safeParseJson(bodyText) as { error?: { type?: string } } | undefined;
-  return parsed?.error?.type;
 }

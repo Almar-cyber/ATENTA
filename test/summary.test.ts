@@ -40,8 +40,9 @@ async function register(email: string): Promise<{ id: string; cookie: string }> 
 
 interface Resumo {
   por_status: Record<string, number>;
-  atencao: { rascunhos_vencidos: number; atrasados: number };
+  atencao: { rascunhos_vencidos: number; atrasados: number; retentando?: number; testes_para_decidir: number };
   proximos: Array<{ target_id: string; scheduled_for: string; status: string; titulo: string | null; media: unknown }>;
+  teste_a_decidir: { post_id: string; target_id: string } | null;
 }
 
 async function resumoDe(user: { cookie: string }): Promise<Resumo> {
@@ -229,7 +230,99 @@ describe('GET /api/summary', () => {
   it('banco vazio devolve estrutura completa, não erro', async () => {
     const r = await resumoDe(alice);
     expect(r.por_status).toEqual({});
-    expect(r.atencao).toEqual({ rascunhos_vencidos: 0, atrasados: 0, retentando: 0 });
+    expect(r.atencao).toEqual({ rascunhos_vencidos: 0, atrasados: 0, retentando: 0, testes_para_decidir: 0 });
     expect(r.proximos).toEqual([]);
+    expect(r.teste_a_decidir).toBeNull();
+  });
+});
+
+// REEL DE TESTE esperando decisão.
+//
+// A graduação (abrir pra todo mundo) acontece DENTRO do app do Instagram e não nos avisa — não há
+// webhook nem campo pra consultar. Então este lembrete não tem como se apagar sozinho ao ser
+// atendido, e por isso vive numa JANELA: abre em 72h (o prazo que o Instagram usa pra medir o
+// teste) e fecha em 7 dias. Sem o teto, seria o único número do painel impossível de zerar — e
+// aviso que nunca sai é aviso que se aprende a ignorar.
+//
+// Os testes abaixo prendem as duas bordas da janela, e prendem também quem NÃO deve entrar:
+// SS_PERFORMANCE (gradua sozinho, não há o que decidir) e Reel comum.
+describe('GET /api/summary — Reels de teste esperando decisão', () => {
+  let alice: Awaited<ReturnType<typeof register>>;
+  let accountId: string;
+
+  const emHoras = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
+
+  beforeEach(async () => {
+    await resetDb();
+    alice = await register('alice@exemplo.com');
+    accountId = await criarConta(alice.id, 'ig');
+  });
+
+  /** Um Reel publicado, com a graduação e a idade que o caso pedir. */
+  async function publicar(tag: string, opts: { graduacao?: string; horasAtras: number }): Promise<string> {
+    const postId = `sp-${tag}`;
+    const options = opts.graduacao
+      ? JSON.stringify({ format: 'reel', trial_graduation: opts.graduacao })
+      : JSON.stringify({ format: 'reel' });
+    await env.DB.prepare(
+      `insert into scheduled_posts (id, title, body, scheduled_for, owner_id) values (?, '', ?, ?, ?)`
+    )
+      .bind(postId, `post ${tag}`, emHoras(-opts.horasAtras), alice.id)
+      .run();
+    await env.DB.prepare(
+      `insert into post_targets (id, scheduled_post_id, account_id, platform, status, options, adapter_state, published_at)
+       values (?, ?, ?, 'instagram', 'published', ?, '{}', ?)`
+    )
+      .bind(`pt-${tag}`, postId, accountId, options, emHoras(-opts.horasAtras))
+      .run();
+    return postId;
+  }
+
+  it('antes das 72h não cobra nada — o teste ainda está rodando', async () => {
+    await publicar('novo', { graduacao: 'MANUAL', horasAtras: 40 });
+    const r = await resumoDe(alice);
+    expect(r.atencao.testes_para_decidir).toBe(0);
+    expect(r.teste_a_decidir).toBeNull();
+  });
+
+  it('passadas as 72h, aparece — e aponta pro post, não pra uma lista filtrada', async () => {
+    await publicar('maduro', { graduacao: 'MANUAL', horasAtras: 80 });
+    const r = await resumoDe(alice);
+    expect(r.atencao.testes_para_decidir).toBe(1);
+    expect(r.teste_a_decidir).toEqual({ post_id: 'sp-maduro', target_id: 'pt-maduro' });
+  });
+
+  it('depois de 7 dias some: o lembrete não tem como se apagar sozinho, então ele expira', async () => {
+    await publicar('velho', { graduacao: 'MANUAL', horasAtras: 8 * 24 });
+    const r = await resumoDe(alice);
+    expect(r.atencao.testes_para_decidir).toBe(0);
+  });
+
+  it('com vários, abre no MAIS ANTIGO — é o que está mais perto de perder o timing', async () => {
+    await publicar('ontem', { graduacao: 'MANUAL', horasAtras: 80 });
+    await publicar('anteontem', { graduacao: 'MANUAL', horasAtras: 120 });
+    const r = await resumoDe(alice);
+    expect(r.atencao.testes_para_decidir).toBe(2);
+    expect(r.teste_a_decidir?.post_id).toBe('sp-anteontem');
+  });
+
+  it('SS_PERFORMANCE não entra — o Instagram gradua sozinho, não há decisão a cobrar', async () => {
+    await publicar('auto', { graduacao: 'SS_PERFORMANCE', horasAtras: 80 });
+    const r = await resumoDe(alice);
+    expect(r.atencao.testes_para_decidir).toBe(0);
+  });
+
+  it('Reel comum não entra', async () => {
+    await publicar('comum', { horasAtras: 80 });
+    const r = await resumoDe(alice);
+    expect(r.atencao.testes_para_decidir).toBe(0);
+  });
+
+  it('o teste de outro dono não aparece no seu painel', async () => {
+    await publicar('meu', { graduacao: 'MANUAL', horasAtras: 80 });
+    const bob = await register('bob@exemplo.com');
+    const r = await resumoDe(bob);
+    expect(r.atencao.testes_para_decidir).toBe(0);
+    expect(r.teste_a_decidir).toBeNull();
   });
 });

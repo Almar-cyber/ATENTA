@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from '../lib/types.js';
-import { classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
+import { apiError, classifyByKnownCodes, safeParseJson } from '../lib/errors.js';
 import { fetchWithRetry, toFixedLengthBody } from '../lib/http.js';
 import { getAccountTokens, setAccountTokens } from '../lib/tokens.js';
 import { nowIso } from '../lib/db.js';
@@ -79,10 +79,20 @@ export const tiktokAdapter: PlatformAdapter = {
         refresh_token: tokens.refresh_token,
       }),
     });
-    if (!res.ok) throw new Error(`tiktok: token refresh failed: ${res.status} ${await res.text()}`);
+    // ApiError (leva o STATUS), não Error: é o status que deixa o stepTokenHealthScan separar
+    // "a plataforma recusou o refresh_token" de "a plataforma estava fora do ar" — e só o primeiro
+    // justifica desconectar a conta. Ver o comentário lá.
+    if (!res.ok) throw await apiError('tiktok: token refresh failed', res);
     const json = (await res.json()) as { access_token: string; refresh_token: string; expires_in: number };
+    // Resposta 200 SEM token é o pior caso silencioso: `setAccountTokens` grava o payload inteiro,
+    // então escrever isto apagaria o refresh_token guardado e a conta ficaria morta de vez, sem
+    // erro nenhum. Erro simples de propósito (vira 'retryable'): não desconecta, tenta de novo.
+    if (!json.access_token) throw new Error('tiktok: refresh respondeu sem access_token — resposta inesperada');
 
-    await setAccountTokens(env.DB, account.id, json, env.TOKEN_ENCRYPTION_KEY);
+    // Mescla, não substitui: a TikTok ROTACIONA o refresh_token a cada renovação (por isso `json`
+    // vem depois), mas gravar só a resposta descartaria qualquer campo guardado na conexão que ela
+    // não repita.
+    await setAccountTokens(env.DB, account.id, { ...tokens, ...json }, env.TOKEN_ENCRYPTION_KEY);
     await env.DB.prepare(`update accounts set access_token_expires_at = ?, updated_at = ? where id = ?`)
       .bind(new Date(Date.now() + json.expires_in * 1000).toISOString(), nowIso(), account.id)
       .run();

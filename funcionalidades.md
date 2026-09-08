@@ -26,15 +26,18 @@ Legenda de estado:
 | O que | Onde mora | Estado |
 | --- | --- | --- |
 | Fila, claim atômico, sweep de travados, retry com backoff | `src/worker.ts` (`runPoller`) | ✅ |
+| Renovação de token (YouTube, TikTok, Pinterest) | `ensureFreshToken` de cada adapter + `stepTokenHealthScan` | ✅ — desde 09/2026 só desconecta em recusa definitiva. Antes qualquer falha da renovação marcava `needs_reauth`, e com o cron de 1 em 1 minuto um 500/429 passageiro derrubava conta com token vivo (era o "YouTube e TikTok ficam desconectando"). Coberto em `test/token-refresh.test.ts` |
 | Cron de 1 em 1 minuto | `wrangler.toml [triggers]` | ✅ |
 | YouTube | `src/adapters/youtube.ts` | ✅ |
 | LinkedIn | `src/adapters/linkedin.ts` | ✅ |
-| Instagram (post, reel, story) | `src/adapters/instagram.ts` | ✅ |
+| Instagram (post, reel, story) | `src/adapters/instagram.ts` | ✅ — e desde 09/2026 as recusas da Meta carregam o status HTTP, então um 4xx de conteúdo falha de primeira em vez de gastar 5 tentativas (`test/instagram-erros.test.ts`) |
 | Facebook | `src/adapters/facebook.ts` | ✅ |
 | TikTok | `src/adapters/tiktok.ts` | ✅ desde a correção do upload em partes. Publica público desde 18/08/2026 |
 | Pinterest | `src/adapters/pinterest.ts` | 🚧 **sem credencial em produção** (ver §6) |
 | Carrossel (IG, FB, LinkedIn, Pinterest) | os quatro adapters | ⚠️ escrito a partir da doc, **nenhum publicado de verdade** |
 | Vários Stories seguidos (1 post por arquivo, 1min de intervalo) | `src/api.ts` (`createPost`) | ✅ |
+| **Reel de teste** (só pra quem não segue, gradua depois) | `src/adapters/instagram.ts` (`trial_params`), `PostComposer.tsx`, `lib/pendencias.tsx` | ⚠️ coberto por teste de ponta a ponta do nosso lado (escolha → `options` → corpo do container; e o lembrete de decidir, no `/api/summary`), mas **nunca publicado de verdade**: exige conta profissional e pública, e há relato (não documentado pela Meta) de um piso de ~1.000 seguidores. Ver §6.5 |
+| `external_url` do Instagram (permalink) | `src/adapters/instagram.ts` | ⚠️ era a única rede que publicava sem link; agora o adapter busca o `permalink` após o `media_publish`, sem nunca deixar um erro dessa busca derrubar a publicação (com teste). Não exercitado contra a API real |
 | Upload em partes do YouTube | `src/adapters/youtube.ts` | ✅ partes de 16 MB com `Content-Range`, verificado publicando um vídeo de 126 MB que antes falhava |
 | Upload de vídeo do Pinterest | `src/adapters/pinterest.ts` | ⚠️ o formato de `upload_url`/`upload_parameters` veio da doc, não de teste |
 
@@ -48,7 +51,7 @@ promessa de "falhar na criação, não na publicação".
 | --- | --- | --- |
 | Compositor com campos em cascata e pré-visualização por rede | `web/src/components/PostComposer.tsx`, `PostPreview.tsx` | ✅ |
 | Recorte 4:5 / 1:1 / 1.91:1 pra faixa que a Meta aceita | `MediaCropDialog.tsx` | ✅ |
-| Grade 3 colunas arrastável, com permutação de horários | `GridPlanner.tsx`, `web/src/lib/gridOrder.ts` | ✅ com teste |
+| Grade 3 colunas arrastável, com permutação de horários | `GridPlanner.tsx`, `web/src/lib/gridOrder.ts`, `gridTiles.ts` | ✅ com teste |
 | Ideias (post sem data), com pilar e arte opcional | `IdeaSidebar.tsx`, migrações 0003 e 0013 | ✅ |
 | Pilares de conteúdo | `TagPicker.tsx`, migração 0014 | ✅ |
 | Agenda em lista, semana e mês | `ListView` / `WeekView` / `CalendarView` | ✅ |
@@ -168,7 +171,10 @@ e, adiante, 2FA.
 | **Recorte vale pra todas as redes de uma vez** | `PostComposer.tsx` + `MediaCropDialog.tsx` | com Instagram e Facebook selecionados, recortar pra um aplica o mesmo recorte no outro. Cada rede tem proporção aceita diferente, então a peça sai errada em uma delas. **Relatado e ainda não corrigido** |
 | Meta usa só a primeira Página | `handleMetaCallback` em `src/worker.ts` | se `/me/accounts` devolver mais de uma Página concedida, as outras são ignoradas |
 | **Worker duplicado publicando da mesma fila** | conta Cloudflare | existe um segundo Worker chamado `social-scheduler`, criado em 18/08/2026 pelos deploys da branch `main`. Ele não atende domínio nenhum, mas tem Cron Trigger de 1 em 1 minuto e aponta pro MESMO D1, então vem publicando da fila com o código antigo. Não duplica post (o claim é atômico), mas decide QUEM publica por corrida. Apagar: `npx wrangler delete --name social-scheduler` |
+| **Facebook classifica erro sem o status HTTP** | `src/adapters/facebook.ts` | mesmo defeito que o Instagram tinha: joga `Error` com só um `code`, então toda recusa que não casa na tabela vira `retryable` e gasta 5 tentativas (~1h) antes de falhar. O conserto é o mesmo — trocar os `throw` por `apiError()`, que já existe em `src/lib/errors.js`. Não feito junto de propósito: muda o retry de outro adapter, e nenhum dos dois dá pra exercitar contra a API real aqui |
 | Popover de sugestão cobre o compositor | `LegendaIA.tsx` | com o modal curto, o popover abre pra cima e tapa mídia e formato. Não impede o uso |
+| **Reel de teste: a graduação é adivinhada, não sabida** | `web/src/lib/gridTiles.ts`, `src/api.ts` | o Instagram não avisa quando um Reel de teste gradua (acontece dentro do app, ou sozinho), e não há campo pra consultar. Duas consequências, cada uma com a sua aproximação declarada: (1) a GRADE usa o feed real como autoridade — ausente do feed dentro da janela que a API devolveu (24 itens) = ainda em teste; mais antigo que ela = mostra, porque ali a ausência não prova nada; (2) o LEMBRETE de decidir vive numa janela de 72h a 7 dias, porque não tem como se apagar sozinho ao ser atendido. Nos dois casos o erro possível é aparecer demais, nunca esconder — esconder um post que existe é o defeito do Story com o sinal trocado |
+| ~~Story ocupava quadrado na grade do Instagram~~ | `web/src/lib/gridTiles.ts` | ✅ corrigido — a montagem da grade filtrava por rede e por status, nunca por formato, então um Story publicado virava âncora imóvel no meio do feed planejado (e um agendado entrava na permutação de horários do arrastar). Story nunca aparece no perfil. Regressão coberta em `test/gridTiles.test.ts` |
 
 ---
 

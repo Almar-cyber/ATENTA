@@ -44,7 +44,10 @@ export const linkedinAdapter: PlatformAdapter = {
     // nothing to silently refresh. The token-health scan (worker.ts Step 0) calling this when
     // the 60-day access token is close to expiry is itself the signal to flip needs_reauth;
     // reauth is a human clicking through `npm run linkedin-auth-url` again.
-    throw new Error('linkedin: token nearing expiry, no refresh possible — run linkedin-auth-url again');
+    // SEM renovação nesta rede: só a pessoa reconecta. O `code` é o que diz isso ao
+    // stepTokenHealthScan — sem ele, esta falha pareceria um erro passageiro e a conta ficaria
+    // 'active' pra sempre com um token morto, publicando nada e sem avisar ninguém.
+    throw Object.assign(new Error('linkedin: token nearing expiry, no refresh possible — run linkedin-auth-url again'), { code: 'no_refresh_mechanism' });
   },
 
   validate(_target, media, _account) {
@@ -115,6 +118,7 @@ export const linkedinAdapter: PlatformAdapter = {
   classifyError(err) {
     if (err instanceof TypeError) return 'ambiguous'; // network-level failure after send — can't confirm receipt
     return classifyByKnownCodes(err, {
+      no_refresh_mechanism: 'auth',
       invalid_access_token: 'auth',
       REVOKED_ACCESS_TOKEN: 'auth',
       ACCESS_DENIED: 'permanent',

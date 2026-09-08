@@ -67,7 +67,7 @@ descrita no README pra migração 0002. A ideia já era essa peça desde a 0003;
 texto. O "Agendar" abre o compositor com o que ela tem, e ali ela ganha data e conta.
 
 `options` (JSON em `post_targets`) carrega o que é específico de rede: `format`, `privacyStatus`,
-`board_id`, `cover_media_id`, `cover_timestamp_ms`.
+`board_id`, `cover_media_id`, `cover_timestamp_ms`, `trial_graduation`.
 
 ## 3. Ciclo de vida
 
@@ -97,6 +97,22 @@ Regras que valem a pena não esquecer:
 - **Claim atômico**: `UPDATE ... WHERE status='queued'` garante que duas execuções do cron não
   publiquem o mesmo destino.
 - **Sweep de travados**: `publishing` parado além do limite volta pra `queued`.
+- **Desconectar exige recusa, não tropeço.** A varredura de saúde de token (Step 0) roda a cada
+  tique e renova o que está perto de vencer. Quando a renovação falha, quem decide é o
+  `classifyError()`: só marca `needs_reauth` se a recusa for DEFINITIVA — a plataforma disse não ao
+  `refresh_token` (`auth`), um 4xx que não muda tentando de novo (`permanent`), ou a rede não tem
+  renovação automática (LinkedIn e Meta lançam com `code: 'no_refresh_mechanism'`). Passageiro
+  (`retryable`, `quota`) NÃO desconecta: a conta segue ativa e a varredura seguinte tenta de novo.
+  Antes era um `catch` só, e qualquer erro desconectava — com o cron de minuto em minuto, um 500 do
+  Google ou um 429 da TikTok derrubava conta com token perfeitamente vivo. Se a plataforma ficar
+  fora do ar até o token vencer, quem marca é a falha na publicação, que classifica do mesmo jeito.
+- **Nem todo erro reenfileira.** O `classifyError()` do adapter decide: `retryable` volta pra fila
+  (15min entre tentativas, até `MAX_ATTEMPTS`), `quota` espera 24h, `auth` marca a conta como
+  `needs_reauth`, e **`permanent` falha na primeira**. Pra isso funcionar o adapter tem que jogar
+  `ApiError` (via `apiError()`), que carrega o STATUS: sem ele, tudo que não casa na tabela de
+  códigos vira `retryable` e uma recusa definitiva custa cinco tentativas e uma hora. A tabela de
+  códigos é consultada ANTES do status, e é ela que impede um caso perigoso — a Meta responde
+  limite de requisição como `OAuthException` com HTTP 400, e sem a tabela ele viraria `permanent`.
 - **Recheck com cadência**: quem está em `processing` não é reconsultado a cada tique. `updated_at`
   é congelado na entrada (nunca bumpado por um recheck), então ele é a idade do processamento, e
   `next_check_after` diz quando perguntar de novo: sem espera nos 5 primeiros minutos, 5min até os
@@ -120,6 +136,54 @@ O formato é **escolhido** no compositor, não deduzido do arquivo — porque no
 | **Post** | foto ou vídeo | até 10 imagens | só frame (`thumb_offset`) | sim |
 | **Reel** | um vídeo | não | imagem própria (`cover_url`) ou frame | sim |
 | **Story** | um arquivo | não — mas **vários Stories seguidos sim** (um post por arquivo, espaçados de 1min) | não | **ignorada** |
+
+**Reel de teste** (`options.trial_graduation`): o Reel sai só pra quem **não segue** a conta, você
+mede o desempenho, e depois ele "gradua" — vira Reel normal, entra no feed de quem segue e aparece
+no perfil. Na API é o mesmo container de Reel com um `trial_params` a mais, e por isso é OPÇÃO do
+Reel e não um quarto formato: o critério pra ser formato, aqui, é mudar o `media_type`.
+
+| Valor | Quem gradua |
+| --- | --- |
+| ausente | não é teste — sai pra todo mundo na hora |
+| `MANUAL` | você, dentro do app do Instagram |
+| `SS_PERFORMANCE` | o Instagram, sozinho, se o desempenho com não-seguidores justificar |
+
+Três consequências que não são óbvias:
+
+1. **Exige conta profissional (Criador ou Empresa) e perfil público** — isso é firme. Um mínimo de
+   ~1.000 seguidores e um teto diário de testes são **relatados e não documentados**: aparecem em
+   várias fontes do setor, atribuídas a um AMA do Instagram, mas a Meta não publica nenhum dos dois,
+   e os tetos que circulam divergem. O compositor separa as duas coisas de propósito — dar relato
+   como regra faz a pessoa desistir de algo que talvez possa fazer. De um jeito ou de outro não dá
+   pra recusar na criação (a contagem não está do nosso lado), então ele **avisa** em vez de
+   bloquear; quem recusa de fato é a Meta, na publicação.
+2. **Enquanto está em teste ele não aparece no perfil.** Some da grade do Instagram até graduar; ver
+   `web/src/lib/gridTiles.ts`, que usa o feed real como autoridade sobre o que está no perfil.
+3. **A graduação não nos avisa.** Acontece dentro do app (MANUAL) ou sozinha (SS_PERFORMANCE), sem
+   webhook nem campo consultável — daí a grade descobrir pelo feed em vez de por um estado nosso.
+
+**Abrir pra todo mundo não tem API.** Não existe endpoint de graduação: com `MANUAL` o passo final
+é dentro do app do Instagram, e é lá que ficam os números do teste comparados aos seus Reels de
+sempre. O que o produto faz é fechar o ciclo até a porta:
+
+| Peça | O que faz |
+| --- | --- |
+| `atencao.testes_para_decidir` (`/api/summary`) | conta os testes `MANUAL` publicados entre 72h e 7 dias atrás |
+| `teste_a_decidir` | o mais antigo deles, pra pendência abrir NUM post em vez de numa lista |
+| pendência no Painel e no sino | "Reel de teste rodou — decidir no app do Instagram". **Não é `grave`**: nada quebrou |
+| `PostDialog` | diz que o Reel está em teste, desde quando, e que o passo final é no app |
+| `external_url` do Instagram | o link pro post, capturado na publicação (ver abaixo) |
+
+A janela de 72h–7 dias é uma **aproximação deliberada**: o lembrete não tem como se apagar sozinho
+ao ser atendido, e sem teto seria o único número do painel impossível de zerar — aviso que nunca sai
+é aviso que se aprende a ignorar. O preço: graduou no dia 2, ele insiste até o dia 7; ignorou, some
+sozinho. Constantes em `TESTE_DECISAO_*` (`src/api.ts`).
+
+**`external_url` do Instagram**: o adapter passou a buscar o `permalink` logo depois do
+`media_publish`. Era a única rede que publicava sem link (Facebook, Pinterest e YouTube montam a URL
+a partir do id; o Instagram usa um shortcode que a API não deriva). Essa busca **nunca lança**: nesse
+ponto o post já saiu, e deixar um erro subir faria o poller republicar — o pior desfecho possível
+(princípio 6).
 
 Posts criados antes do seletor não têm `options.format`; o adapter cai na regra antiga
 (`as_story`, e vídeo = Reel).
@@ -162,7 +226,7 @@ e `/privacy`, que são acessados por quem não tem como apresentar credencial.
 | Método | Rota | Papel |
 | --- | --- | --- |
 | GET | `/api/accounts` | contas conectadas (nunca devolve token) |
-| GET | `/api/summary` | o Painel: destinos por status, o que travou, e os 5 próximos a sair. Existe no servidor porque `/api/posts` é filtrada e paginada — um painel não pode mudar de número por causa de um filtro ligado noutra tela, nem contar "publicados" até o teto da página |
+| GET | `/api/summary` | o Painel: destinos por status, o que travou, os 5 próximos a sair e os Reels de teste esperando decisão. Existe no servidor porque `/api/posts` é filtrada e paginada — um painel não pode mudar de número por causa de um filtro ligado noutra tela, nem contar "publicados" até o teto da página |
 | GET | `/api/state` | contas + agenda + pilares + resumo numa resposta só — é o que o poll do dashboard chama. Composição dos quatro handlers acima, não uma quinta query: requisição é o recurso contado do plano grátis do Workers, e o poll era quem mais gastava (4 por ciclo) |
 | GET | `/api/connect/:rede` | 302 pro consentimento, com nonce CSRF em cookie |
 | GET | `/api/posts` | agenda, com filtro de status/plataforma |

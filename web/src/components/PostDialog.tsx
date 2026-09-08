@@ -5,7 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { MoreHorizontal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { Post, Target } from '@/lib/types';
-import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
+import { PLATFORM_LABELS, STATUS_META, igFormatOf, igTrialOf } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
 import { cancelTarget, deleteTarget, queueTarget, reactivateTarget } from '@/lib/api';
 import { requestPrefill, requestEdit } from '@/lib/composer-bus';
@@ -13,14 +13,6 @@ import { useScheduler } from '@/store';
 import { PostPreview } from './PostPreview';
 import { PlatformAvatar } from './PlatformAvatar';
 import { InlineAlert } from '@/components/ui/inline-alert';
-
-// Formato gravado no target. Posts anteriores ao seletor de formato não têm `format` — vale o
-// `as_story` antigo e, na falta dele, a regra de então (vídeo virava Reel).
-function igFormatOf(options: Record<string, unknown> | undefined): string | undefined {
-  const format = options?.format;
-  if (typeof format === 'string') return format;
-  return options?.as_story ? 'story' : undefined;
-}
 
 export interface DialogSelection {
   post: Post;
@@ -84,6 +76,25 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                   </div>
                 )}
 
+                {/* REEL DE TESTE. Sem isto, a pendência do Painel abriria um post que parece
+                    qualquer outro — e o passo que falta (abrir pra todo mundo) acontece FORA daqui,
+                    dentro do app do Instagram, porque a API não expõe a graduação. Dizer isso é o
+                    que evita a pessoa procurar no ATENTA um botão que não pode existir. */}
+                {igTrialOf(target.options) && target.status === 'published' && (
+                  <InlineAlert tone="info">
+                    <p className="font-semibold">Reel de teste</p>
+                    <p>
+                      Está saindo só pra quem não te segue
+                      {target.published_at ? ` desde ${fmtDateTime(target.published_at)}` : ''}, e por isso não
+                      aparece no seu perfil nem na grade.
+                    </p>
+                    <p>
+                      {igTrialOf(target.options) === 'SS_PERFORMANCE'
+                        ? 'O próprio Instagram abre pra todo mundo se o desempenho justificar — não há nada a fazer aqui.'
+                        : 'Abrir pra todo mundo é um passo dentro do app do Instagram: a API não expõe essa ação. Lá também ficam os números do teste comparados aos seus Reels de sempre.'}
+                    </p>
+                  </InlineAlert>
+                )}
                 {target.status === 'published' && target.external_url && (
                   <a href={target.external_url} target="_blank" rel="noopener noreferrer" className="inline-block text-sm font-medium text-accent-foreground underline">
                     ver post publicado ↗

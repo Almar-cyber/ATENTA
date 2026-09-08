@@ -54,9 +54,11 @@ sempre as classes utilitárias semânticas — nunca hex solto:
 - Links/ênfase: `text-accent-foreground` (roxo legível — amarelo como texto não tem contraste)
 - Raio base `--radius` (**1rem**) e derivados `rounded-md/lg/xl/2xl`
 - Fonte: Geist (variável `--font-sans`), já aplicada no `body`
-- Logo: `web/public/atenta-wordmark.png` (sticker roxo com traço amarelo, pra fundo claro) no header;
-  `atenta-wordmark-onpurple.png` (traço branco) pra superfície colorida; `atenta-icon.svg` no favicon.
-  **PNG, não SVG, no wordmark** — o SVG deformava o "A" e o "N" em alguns renderizadores.
+- Logo: `web/public/atenta-logoetipo.png` (sticker roxo com traço amarelo, pra fundo claro) no
+  header a partir de `sm` e na tela de entrar; `atenta-wordmark-onpurple.png` (traço branco) pra
+  superfície colorida; `atenta-icon.svg` no favicon **e como selo do header no celular**, onde o
+  logotipo deitado não cabe. **PNG, não SVG, no wordmark** — o SVG deformava o "A" e o "N" em alguns
+  renderizadores; a ressalva é das LETRAS, o selo é só path e vale em SVG.
 
 **Segunda exceção — cores dos pilares de conteúdo.** `TAG_COLORS` (`src/lib/tags.ts`) tem seis tons que não significam nada no sistema; só precisam ser distinguíveis entre si. O banco guarda a CHAVE ('roxo'), nunca o hex, então mudar a paleta é editar um arquivo.
 
@@ -72,7 +74,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `PostComposer` | Formulário de criação, aberto num **modal amplo em split** (form à esquerda, preview ao vivo à direita) pelo botão "Novo post". Campos em **cascata**: só mostra Contas de destino no início; o resto (legenda, quando, mídia) aparece após escolher ≥1 conta, e os específicos são gated por rede (Título só YouTube, board só Pinterest). O **formato** (`FormatPicker`) vem logo depois das contas, antes da mídia. |
 | `MediaCropDialog` | Recorte com arrastar: a imagem entra em "cover" no quadro, a pessoa arrasta/aproxima e escolhe entre 4:5, 1:1 e 1.91:1 (as proporções que a API da Meta publica). Devolve um `File` novo — o original não é enviado. Abre sozinho quando uma foto fora da faixa entra na fila com Instagram/Facebook selecionados, e manualmente pelo ✂ no tile. |
 | `MediaQueueGrid` | Grade de thumbnails da fila de mídia do composer — arrastar reordena (mesmo padrão de DnD do `GridPlanner`), hover revela recortar/trocar/remover. O **tile pontilhado no fim** é quem abre o seletor de arquivos (`onAdd`); o `<input type=file>` fica escondido, porque cru ele comia uma linha inteira do formulário. Trocar substitui só aquele slot (mesma posição), sem desmontar a ordem dos outros. |
-| `FormatPicker` | Escolha do formato dentro da rede (Post/Reel/Story no Instagram, Vídeo/Short no YouTube). Vem **antes da mídia** no composer: é o formato que define o que a rede aceita e, no Instagram, o `media_type` do container. Os formatos ficam em `PLATFORM_FORMATS` (`lib/platforms.ts`) — não hard-code plataforma no componente. |
+| `FormatPicker` | Escolha do formato dentro da rede (Post/Reel/Story no Instagram, Vídeo/Short no YouTube). Vem **antes da mídia** no composer: é o formato que define o que a rede aceita e, no Instagram, o `media_type` do container. Os formatos ficam em `PLATFORM_FORMATS` (`lib/platforms.ts`) — não hard-code plataforma no componente. **O Reel de teste NÃO entra aqui**: ele não muda o `media_type` (é o mesmo container de Reel com um `trial_params` a mais), e o critério pra ser formato é justamente esse. Ele mora em "Ajustes por rede", como um `Select` ("Quem vê primeiro") ao lado dos da mesma natureza — a privacidade do TikTok e o "Quem pode ver" do YouTube. |
 | `AccountPicker` | Seletor de contas de destino do composer — chips (`ToggleGroup` multi-seleção do shadcn) em vez de lista de checkbox; conta inativa fica desabilitada com `Tooltip` explicando o motivo. |
 | `PostPreview` | Card que imita o formato de cada rede — a proporção vem do **formato** escolhido, não do arquivo. Vídeo tem play (com som e controles); com capa escolhida, a capa é o que aparece parado e o play toca o vídeo por baixo. Reusado no composer e no dialog. |
 | `HomeView` | **Painel** — a tela inicial. Três grades de cards: *Precisa de você* (pendências acionáveis, cada uma leva à Agenda já filtrada), *Sai a seguir* (próximos posts com a capa em destaque) e *Como foi* (números + link pro Insights). A conta de pendências fica em `@/lib/pendencias` (`construirPendencias`), reusada pelo `NotificationsBell` — ver abaixo. |
@@ -81,10 +83,10 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `ListView` | Lista agrupada por dia, thumbnail real, badge de status, ações inline. |
 | `WeekView` | Vista "Semana": grade horas × 7 dias, cada post na sua hora agendada; clique em slot vazio pré-preenche data/hora. |
 | `CalendarView` | Vista "Mês": grade mensal; chip por post (cor = plataforma, tracejado = rascunho, ⚠ = falhou). Clique em dia vazio pré-preenche a data. |
-| `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer — **à esquerda**, com o `IdeaSidebar` ocupando o resto da largura. Três espécies de tile: **agendado**, **publicado** (âncoras; a capa cai pro feed real quando a nossa cópia já foi apagada pelo purge de 30 dias) e **ideia com arte**. A matemática de reordenação fica em `src/lib/gridOrder.ts`, fora do componente — e agora tem teste (`test/gridOrder.test.ts`). |
+| `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer — **à esquerda**, com o `IdeaSidebar` ocupando o resto da largura. Três espécies de tile: **agendado**, **publicado** (âncoras; a capa cai pro feed real quando a nossa cópia já foi apagada pelo purge de 30 dias) e **ideia com arte**. **Story não entra** — ele nunca aparece no perfil, e um Story publicado virava âncora imóvel no meio do feed planejado. **Reel de teste só entra quando o feed real confirma**: enquanto está em teste ele não está no perfil, e a graduação acontece sem nos avisar — o feed é a única autoridade sobre isso. Fora da janela que a API do feed devolve, a grade MOSTRA: esconder um post que existe é o erro pior. Só renderiza: a montagem da grade fica em `src/lib/gridTiles.ts` e a matemática de reordenação em `src/lib/gridOrder.ts`, ambas fora do componente e ambas com teste (`test/gridTiles.test.ts`, `test/gridOrder.test.ts`) — são as duas partes que erram em silêncio. |
 | `IdeaSidebar` | A lista de **ideias** ao lado da grade: um post que ainda não tem data. Campo rápido (Enter cria), card com capa/texto, e as ações **anexar arte**, **Agendar** (abre o compositor com o que a ideia tem) e **Remover**. Ideia só de texto **não** entra na grade — a grade mostra como o feed vai ficar, e um quadrado cinza atrapalha essa leitura. Agrupada por pilar (não filtrada): um FILTRO esconde o desbalanço — você vê "viagem" e nunca fica sabendo que "depoimento" está zerado. Agrupar mostra os dois, com todo pilar aparecendo mesmo em 0 posts; é a linha vazia que revela o buraco. |
 | `PostHoverCard` | Cartão que aparece ao passar o mouse num chip do calendário (Mês e Semana): thumbnail da peça na proporção do formato, legenda/título, conta, horário e status. Substitui o `title=` do navegador — o chip só cabe o nome da conta, e é a imagem que faz reconhecer o post. |
-| `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). |
+| `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). Num **Reel de teste** publicado, mostra um `InlineAlert tone="info"` dizendo que ele está saindo só pra quem não segue, desde quando, e que abrir pra todo mundo é um passo dentro do app do Instagram — a API não expõe a graduação. Sem essa linha a pendência do Painel abriria um post idêntico a qualquer outro, e a pessoa procuraria aqui um botão que não pode existir. |
 | `ConnectionsView` | Tela "Conexões" (botão no header): grid de cards por rede com as contas conectadas + status e botão "Conectar" que navega pra `/api/connect/:rede` (OAuth). Várias contas por rede aparecem como linhas separadas. |
 | `LegendaIA` | Botão "Sugerir legenda" ao lado do rótulo do campo. **O campo de legenda É o briefing**: a pessoa escreve uma linha do que quer dizer e gera, em vez de preencher um segundo campo com a mesma coisa. Por isso o botão nasce desabilitado, com o motivo no `Tooltip` (princípio 3: o aviso diz o que fazer). A sugestão SUBSTITUI o rascunho, então o texto anterior fica guardado e o botão vira "Desfazer a sugestão" (mesmo padrão do `GridPlanner`). O rodapé do popover diz se o histórico entrou; é o que explica por que a sugestão melhora conforme a pessoa publica. |
 | `UsoIA` | Quanto sobrou da cota diária de IA. **Só aparece nas últimas 5**: mostrar "20 de 20" em toda geração transforma uma funcionalidade generosa numa medida, e aviso que aparece sempre é aviso que ninguém lê no dia em que importa (mesma régua do ponto vermelho do `NotificationsBell`). Sempre com o teto junto ("restam 4 de 20"), porque número solto não tem escala. Componente próprio e não uma linha dentro do `LegendaIA`: a IA não para na legenda, e o segundo consumidor da cota tem que herdar esta régua em vez de inventar outra. |
@@ -100,6 +102,11 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   quatro), pausado enquanto a aba está oculta e disparado na hora ao voltar — requisição é o recurso
   contado do plano grátis do Workers, e a aba de fundo era quem mais gastava. Componentes chamam
   `reload()` após mutações.
+- **Pendência que abre UM post**: `PainelDestino` tem, além de `agenda`/`conexoes`/`insights`, o
+  `{ tipo: 'post' }` — usado pelo Reel de teste. Filtrar a Agenda por "published" devolveria tudo que
+  já saiu e o teste sumiria no meio; abrir o post leva direto ao que explica o estado e ao link. Em
+  `App.tsx`, `abrirPost` é declarado **antes** de `irPara`: aquele depende deste, e `const` não é
+  içado — invertido, a lista de dependências lê na zona morta temporal e derruba o render.
 - **Comunicação composer ⇄ views**: bus pub-sub minúsculo (`src/lib/composer-bus.ts`) —
   `requestPrefill` (duplicar), `requestEdit` (editar o post inteiro), `requestPrefillDate` (clicar
   num dia/slot vazio) e `requestPrefillMedia` (agendar uma prévia do grid — só a mídia). O modal do
@@ -117,10 +124,31 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
     da pílula de abas (`TabsList` é h-8)**, então a fileira do topo fica alinhada.
   - `size="sm"` (h-7): **ações terciárias inline** numa linha de lista (Duplicar/Cancelar/Excluir).
   Regra: se está na mesma fileira das abas, é `default` (h-8) — não misture `sm`/`lg` ali.
+- **Navegação: aberta onde cabe, num menu onde não cabe.** Os três destinos (Painel, Agenda,
+  Insights) aparecem de dois jeitos, com o corte em `lg` (1024px). **A partir de `lg`**, três
+  `Button size="lg"` visíveis ao lado do logo — ali eles cabem na mesma fileira das ações e não
+  custam altura nenhuma, e navegação visível é melhor que escondida sempre que couber. **Abaixo de
+  `lg`**, um `DropdownMenu` colado no logo: é exatamente onde os três não cabiam ao lado das ações e
+  desciam pra uma **fileira própria** — 44px mais o respiro, tirados do conteúdo em toda tela, o
+  tempo todo, por uma navegação que se usa uma vez a cada visita (medido: 124→68px a 360, 192→76 a
+  640, 136→76 de 768 a 1023). **O gatilho do menu carrega a tela atual** (ícone + nome,
+  `SCREEN_META` no `App.tsx`), não só o ☰: é o que substitui a régua de "onde você está" que o botão
+  aceso dá de graça. Em Conexões o gatilho diz "Conexões" e nenhum item acende — ela continua não
+  sendo um dos três.
+- **Uma fileira em toda largura**: o cabeçalho quebrar em duas devolve o problema que o menu
+  resolveu, então o que entra nele tem que caber — **de 360 a 1920, com 1 conta ou com 6**. As três
+  válvulas, na ordem em que cedem: o wordmark vira o **selo quadrado** (`atenta-icon.svg`) abaixo de
+  `sm` — o logotipo deitado come 145px dos ~336 de uma tela de 360; o **rótulo do gatilho** some
+  abaixo de `md`; e os **avatares de conta** só aparecem em `xl` (são o item mais elástico da
+  fileira — crescem a cada conta conectada — e por isso os primeiros a quebrar a linha: eram os
+  ~115px que estouravam entre 640 e ~830px com o menu, e os que sobravam em 1024 com a navegação
+  aberta de volta ao lado). Nenhum caminho se perde: Conexões está no menu da conta, nos estados
+  vazios e na pendência do Painel; "precisa reautenticar" é o sino.
+  Use `atenta-icon.svg` e **não** `atenta-icon-256.png` — esse PNG está cortado no repositório.
 - **Responsivo dos controles do topo**: header e barra usam `px-3 sm:px-6` (aproveita a lateral no
-  mobile). No mobile os CTAs do header dividem a linha (`flex-1`), os avatares de conta somem
-  (`hidden sm:flex`) e o botão de Filtros vira **só ícone** (`hidden sm:inline` no rótulo). Os
-  filtros moram num popover (`FilterMenu`), não soltos na barra.
+  mobile). No mobile o "Novo post" vira **só o "+"** (`hidden sm:inline` no rótulo) e o botão de
+  Filtros vira **só ícone** pela mesma regra. Os filtros moram num popover (`FilterMenu`), não
+  soltos na barra.
 - **Card quadrado, não faixa**: numa tela larga, um card de largura total vira uma faixa com o texto
   num canto e o resto vazio — o olho atravessa a tela pra ligar duas pontas que cabiam num palmo.
   Grade de cards altos resolve os dois lados: ocupa a largura em colunas e abre espaço pra

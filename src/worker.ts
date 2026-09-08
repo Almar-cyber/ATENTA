@@ -464,6 +464,25 @@ async function insertPostMetrics(env: Env, target: PostTarget, snap: PostMetrics
 
 // Step 0 — unconditional token-health scan. Runs every invocation, independent of whether
 // anything is due, so a quiet platform can't silently sail past its refresh window.
+//
+// DESCONECTAR É DECISÃO CARA, e por muito tempo esta função a tomava por qualquer motivo: um
+// `catch` só, e QUALQUER falha da renovação virava `needs_reauth`. Como o cron roda de minuto em
+// minuto e a janela de renovação dura minutos (YouTube) ou horas (TikTok), bastava UM tropeço —
+// um 500 do Google, um 429 da TikTok, uma conexão que caiu — pra derrubar uma conta cujo
+// refresh_token estava perfeitamente vivo. A pessoa reconectava na mão sem nada ter quebrado.
+// (Era esse o sintoma de "YouTube e TikTok ficam desconectando".)
+//
+// Agora quem decide é o `classifyError` do adapter, com a régua: só desconecta quando a recusa é
+// DEFINITIVA — a plataforma disse não ao refresh_token ('auth'), ou a resposta é um 4xx que não
+// muda tentando de novo ('permanent'), ou a rede simplesmente não tem renovação automática
+// (LinkedIn e Meta, que marcam o erro com `no_refresh_mechanism`). Passageiro ('retryable',
+// 'quota') não desconecta: a conta segue ativa e a próxima varredura tenta de novo, daqui a um
+// minuto.
+//
+// O risco do outro lado é conhecido e menor: se a plataforma ficar fora do ar até o token expirar,
+// a conta continua 'active' com um token vencido — e aí quem marca é a falha na publicação
+// (handleFailure, mais abaixo), que também classifica. Ninguém fica sem aviso; o que muda é que o
+// aviso passa a exigir uma recusa de verdade.
 async function stepTokenHealthScan(env: Env): Promise<void> {
   const { results } = await env.DB.prepare(`select * from accounts where status = 'active'`).all<any>();
   for (const row of results ?? []) {
@@ -473,13 +492,21 @@ async function stepTokenHealthScan(env: Env): Promise<void> {
     try {
       await adapter.ensureFreshToken(account, env);
     } catch (err) {
-      console.error(`[token-refresh] ${account.platform}/${account.display_name} failed:`, err);
+      const classe = adapter.classifyError(err);
+      if (classe === 'retryable' || classe === 'quota' || classe === 'ambiguous') {
+        console.error(
+          `[token-refresh] ${account.platform}/${account.display_name} falhou por agora (${classe}), conta segue ativa:`,
+          err
+        );
+        continue;
+      }
+      console.error(`[token-refresh] ${account.platform}/${account.display_name} failed (${classe}):`, err);
       await env.DB.prepare(`update accounts set status = 'needs_reauth', updated_at = ? where id = ?`)
         .bind(nowIso(), account.id)
         .run();
       await notify(
         env,
-        `🔑 ${account.platform} (${account.display_name}) precisa de reauth — rode o CLI de auth dessa plataforma. Nada será publicado nela até lá.`
+        `🔑 ${account.platform} (${account.display_name}) precisa de reauth — reconecte em Conexões. Nada será publicado nela até lá.`
       );
     }
   }

@@ -266,3 +266,76 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
 export function findFormat(platform: Platform, id: string | undefined): PostFormat | undefined {
   return PLATFORM_FORMATS[platform]?.find((f) => f.id === id);
 }
+
+/**
+ * Reel de TESTE do Instagram: sai só pra quem NÃO segue a conta, pra você medir o desempenho antes
+ * de mostrar aos seguidores. Depois ele "gradua" — vira Reel normal, entra no feed de quem segue e
+ * aparece no perfil.
+ *
+ * NÃO é um formato à parte, e sim uma opção do Reel: na API é o mesmo container
+ * (`media_type=REELS`) com um `trial_params` a mais. O critério do design.md pra ser formato é
+ * mudar o `media_type`, e este não muda.
+ *
+ * Espelho do cliente, como todo o resto deste arquivo — a autoridade é o `validate()` do adapter.
+ */
+export const INSTAGRAM_TRIAL_GRADUATIONS: { id: string; label: string; hint: string }[] = [
+  { id: '', label: 'Todo mundo', hint: 'Reel normal: sai pra quem te segue e pro perfil na hora.' },
+  {
+    id: 'MANUAL',
+    label: 'Teste — eu abro depois',
+    hint: 'Só quem não te segue vê. Você decide, dentro do app do Instagram, quando abrir pra todo mundo.',
+  },
+  {
+    id: 'SS_PERFORMANCE',
+    label: 'Teste — abre sozinho se render',
+    hint: 'Só quem não te segue vê. O Instagram abre pra todo mundo sozinho se o desempenho justificar.',
+  },
+];
+
+/**
+ * O que se sabe sobre quem pode publicar Reel de teste — e o quanto se sabe.
+ *
+ * CERTO: precisa de conta **profissional** (Criador ou Empresa) e de perfil **público**. Conta
+ * pessoal não tem o recurso.
+ *
+ * RELATADO, NÃO DOCUMENTADO: um mínimo de ~1.000 seguidores e um teto diário de testes. Os dois
+ * aparecem em várias fontes do setor, atribuídos a um AMA do Instagram, mas **a Meta não publica
+ * nenhum dos dois** — e os números de teto que circulam divergem entre si. Por isso o compositor
+ * cita a faixa como relato, e não como regra: um aviso categórico que estiver errado é pior que um
+ * aviso honesto, porque manda a pessoa desistir de algo que ela poderia fazer.
+ *
+ * Quem decide de fato é a Meta, na publicação — não temos a contagem de seguidores deste lado pra
+ * recusar antes.
+ */
+export const INSTAGRAM_TRIAL_MIN_FOLLOWERS = 1000;
+
+/**
+ * A graduação gravada num destino, ou `undefined` quando o Reel é comum.
+ *
+ * Vale pra qualquer formato porque a leitura é literal: quem decide se a combinação é legal é o
+ * `validate()` do adapter, não este espelho.
+ */
+export function igTrialOf(options: Record<string, unknown> | undefined | null): string | undefined {
+  const value = options?.trial_graduation;
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/**
+ * O formato gravado num destino do Instagram, ou `undefined` quando não dá pra saber.
+ *
+ * Posts criados antes do seletor de formato não têm `options.format` — neles vale o
+ * `options.as_story` antigo. A regra mais antiga ainda (vídeo virava Reel) depende da mídia e por
+ * isso NÃO entra aqui: quem precisa dela decide no lugar em que tem o arquivo à mão, e a autoridade
+ * continua sendo o `igFormat()` do adapter no Worker.
+ *
+ * Vive aqui, e não em cada tela, porque três já liam esse campo com fallbacks ligeiramente
+ * diferentes — e um deles (a grade) simplesmente não lia, que foi como um Story foi parar no meio
+ * do feed.
+ */
+export function igFormatOf(
+  options: Record<string, unknown> | undefined | null
+): 'post' | 'reel' | 'story' | undefined {
+  const format = options?.format;
+  if (format === 'post' || format === 'reel' || format === 'story') return format;
+  return options?.as_story ? 'story' : undefined;
+}
