@@ -199,9 +199,19 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   fade+slide de 150ms (evite `AnimatePresence mode="wait"` numa view que também sofre poll —
   já causou um freeze real, ver `App.tsx`: prefira remount-and-fade via `key`); itens da fila de
   mídia com `layout`.
-- **Drag-and-drop nativo**: `GridPlanner` e `MediaQueueGrid` usam o mesmo padrão — HTML5
-  `draggable`/`onDragStart`/`onDragOver`(`preventDefault`)/`onDrop`, sem lib externa. Reaproveite
-  esse padrão em vez de introduzir uma dependência de DnD nova.
+- **Drag-and-drop: duas metades, uma lib nenhuma.** `GridPlanner` e `MediaQueueGrid` usam o mesmo
+  par. No **ponteiro**, HTML5 `draggable`/`onDragStart`/`onDragOver`(`preventDefault`)/`onDrop`. No
+  **toque**, `usePressDrag` (`src/lib/usePressDrag.ts`) — porque navegador de celular **não emite
+  `dragstart` a partir do dedo**, em nenhum deles: a grade dizia "arraste para reordenar" e no
+  telefone não reordenava nada. Reaproveite esse par em vez de introduzir uma dependência de DnD.
+  O gesto do toque é **pressionar e segurar** (320ms parado) antes de arrastar, e isso não é
+  enfeite: pra a página não rolar junto é preciso `preventDefault()` no `touchmove`, e isso não
+  desfaz uma rolagem já começada — a espera garante que o `preventDefault` já esteja posto antes de
+  qualquer rolagem existir. `touch-action: none` nos tiles resolveria o scroll e mataria a rolagem
+  da grade, que ocupa a tela inteira no celular. Duas consequências a manter: a peça na mão e o
+  destino sob o dedo precisam de **estado visual** (não há imagem de arraste no toque), e o clique
+  que o navegador dispara ao soltar precisa ser engolido (`consumiuClique`), senão terminar um
+  arraste abre o detalhe da peça.
 - **`useMediaUrl`** (`src/lib/useMediaUrl.ts`): resolve um `QueuedMedia` pra URL exibível (object
   URL pro `File` ainda não enviado, com revoke no cleanup; `public_url` pro que já foi upload).
   Compartilhado por `PostPreview` e `MediaQueueGrid` — não duplicar essa lógica.

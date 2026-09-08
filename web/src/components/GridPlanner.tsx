@@ -21,6 +21,7 @@ import {
 import type { FeedItem } from '@/lib/api';
 import { videoPosterUrl } from '@/lib/useMediaUrl';
 import { planGridOrder, moveItem } from '@/lib/gridOrder';
+import { usePressDrag } from '@/lib/usePressDrag';
 import { buildTiles } from '@/lib/gridTiles';
 import type { Tile } from '@/lib/gridTiles';
 import type { Movable } from '@/lib/gridOrder';
@@ -145,19 +146,33 @@ export function GridPlanner({
     }
   }
 
+  // O QUE ACONTECE AO SOLTAR — um só, pros dois gestos: o drag nativo do HTML (ponteiro) e o
+  // pressionar-e-arrastar do toque (`usePressDrag`). Eles diferem só em COMO chegam aqui.
+  const mover = useCallback(
+    (fromKey: string, toKey: string) => {
+      if (!fromKey || fromKey === toKey) return;
+      const from = movableTiles.findIndex((t) => t.key === fromKey);
+      const to = movableTiles.findIndex((t) => t.key === toKey);
+      // Silêncio aqui parecia "o arrastar não funciona" — o motivo real é sempre uma peça publicada
+      // na jogada (o horário dela já passou, não dá pra redistribuir). Diz isso em vez de no-op.
+      if (from === -1 || to === -1) {
+        toast.error('O que já foi publicado é âncora e não muda de lugar — arraste entre agendados e ideias.');
+        return;
+      }
+      applyArrangement(moveItem(movable, from, to), movable, 'Ordem atualizada.');
+    },
+    // `applyArrangement` fica de fora de propósito: ela é redeclarada a cada render e só fecha
+    // sobre `previews`/`reload`, que não mudam o resultado de um arraste em andamento. Entrar aqui
+    // faria esta função trocar de identidade toda hora, sem ganho nenhum.
+    [movableTiles, movable]
+  );
+
+  const toque = usePressDrag(mover);
+
   function onDrop(toKey: string) {
     const fromKey = dragKey.current;
     dragKey.current = null;
-    if (!fromKey || fromKey === toKey) return;
-    const from = movableTiles.findIndex((t) => t.key === fromKey);
-    const to = movableTiles.findIndex((t) => t.key === toKey);
-    // Silêncio aqui parecia "o arrastar não funciona" — o motivo real é sempre uma peça publicada
-    // na jogada (o horário dela já passou, não dá pra redistribuir). Diz isso em vez de no-op.
-    if (from === -1 || to === -1) {
-      toast.error('O que já foi publicado é âncora e não muda de lugar — arraste entre agendados e ideias.');
-      return;
-    }
-    applyArrangement(moveItem(movable, from, to), movable, 'Ordem atualizada.');
+    if (fromKey) mover(fromKey, toKey);
   }
 
   async function onAddPreviews(files: FileList | null) {
@@ -224,15 +239,26 @@ export function GridPlanner({
     });
   }
 
-  const dragProps = (tile: Tile) =>
-    tile.movable
+  const dragProps = (tile: Tile) => ({
+    ...toque.itemProps(tile.key, tile.movable),
+    ...(tile.movable
       ? {
           draggable: true,
           onDragStart: () => (dragKey.current = tile.key),
           onDragOver: (e: DragEvent) => e.preventDefault(),
           onDrop: () => onDrop(tile.key),
         }
-      : { onDragOver: (e: React.DragEvent) => e.preventDefault(), onDrop: () => onDrop(tile.key) };
+      : { onDragOver: (e: React.DragEvent) => e.preventDefault(), onDrop: () => onDrop(tile.key) }),
+  });
+
+  // O gesto de toque não tem imagem de arraste como o do desktop, então o estado tem que aparecer
+  // na própria peça: a que está na mão apaga e encolhe, a que vai receber ganha o contorno.
+  const dragClasses = (tile: Tile) =>
+    toque.pegou === tile.key
+      ? 'scale-95 opacity-50'
+      : toque.pegou && toque.sobre === tile.key
+        ? 'outline outline-2 outline-offset-[-2px] outline-brand'
+        : '';
 
   return (
     <Card className="h-full">
@@ -300,7 +326,7 @@ export function GridPlanner({
           </PopoverTrigger>
           <PopoverContent align="start" className="w-72 space-y-2 text-xs text-muted-foreground">
             <p>
-              <span className="font-medium text-foreground">Arraste para reordenar.</span> Os posts agendados só trocam
+              <span className="font-medium text-foreground">Pressione e arraste para reordenar.</span> Os posts agendados só trocam
               entre si os horários que já têm — nenhuma data nova é inventada.
             </p>
             <p>As ideias entram no meio sem ocupar horário nenhum.</p>
@@ -317,7 +343,7 @@ export function GridPlanner({
         />
       </div>
 
-      <div className="grid max-w-md grid-cols-3 gap-0.5">
+      <div ref={toque.containerRef} className="grid max-w-md grid-cols-3 gap-0.5">
         {tiles.map((tile) => {
           if (tile.kind === 'preview') {
             const { preview } = tile;
@@ -326,7 +352,7 @@ export function GridPlanner({
                 layout
                 key={tile.key}
                 {...dragProps(tile)}
-                className="group relative aspect-[3/4] cursor-grab overflow-hidden border-2 border-dashed border-brand bg-muted active:cursor-grabbing"
+                className={`group relative aspect-[3/4] cursor-grab overflow-hidden border-2 border-dashed border-brand bg-muted transition-transform active:cursor-grabbing ${dragClasses(tile)}`}
               >
                 {preview.public_url ? (
                   isVideoMime(preview.mime_type) ? (
@@ -375,7 +401,7 @@ export function GridPlanner({
                 rel="noopener noreferrer"
                 title={item.caption ?? 'Post publicado no Instagram'}
                 {...dragProps(tile)}
-                className="relative block aspect-[3/4] overflow-hidden bg-muted"
+                className={`relative block aspect-[3/4] overflow-hidden bg-muted transition-transform ${dragClasses(tile)}`}
               >
                 {item.thumbnail_url ? (
                   <img src={item.thumbnail_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
@@ -399,10 +425,12 @@ export function GridPlanner({
               layout
               key={tile.key}
               {...dragProps(tile)}
-              onClick={() => onOpen({ post, target })}
-              className={`group relative aspect-[3/4] overflow-hidden bg-muted ${
+              // O navegador dispara um clique logo depois de soltar o dedo; sem esta guarda,
+              // terminar um arraste abriria o detalhe da peça que acabou de ser movida.
+              onClick={() => !toque.consumiuClique() && onOpen({ post, target })}
+              className={`group relative aspect-[3/4] overflow-hidden bg-muted transition-transform ${
                 published ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
-              }`}
+              } ${dragClasses(tile)}`}
             >
               {/* Ordem de queda: nossa cópia → capa do feed → glyph. O meio existe porque a nossa
                   cópia some depois de 30 dias (purge), e sem ele todo post com mais de um mês era
