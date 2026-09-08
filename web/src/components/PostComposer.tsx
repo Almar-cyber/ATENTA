@@ -28,6 +28,7 @@ import {
   PLATFORM_VIDEO_LIMITS,
   YOUTUBE_LONG_VIDEO_WARN_SECONDS,
   findFormat,
+  igFormatOf,
   isFeedRatioOk,
   isVideoMime,
 } from '@/lib/platforms';
@@ -52,14 +53,6 @@ function defaultDraftSlot(): string {
   d.setHours(9, 0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`;
-}
-
-// Formato gravado num target já existente (editar/duplicar). Posts anteriores ao seletor não têm
-// `format` — aí vale o `as_story` antigo e, na falta dele, a regra de então: vídeo era Reel.
-function igFormatOf(options: Record<string, unknown> | undefined): string {
-  const format = options?.format;
-  if (format === 'post' || format === 'reel' || format === 'story') return format;
-  return options?.as_story ? 'story' : 'post';
 }
 
 // Intervalo entre os Stories de uma sequência. O poller varre a cada 10min e publica em lote; sem
@@ -142,7 +135,7 @@ export function PostComposer({
       setPinBoard((target.options?.board_id as string) ?? '');
       setTiktokPrivacy((target.options?.privacy_level as string) ?? '');
       setTagId(post.tag?.id ?? null);
-      setFormats((f) => ({ ...f, instagram: igFormatOf(target.options) }));
+      setFormats((f) => ({ ...f, instagram: igFormatOf(target.options) ?? 'post' }));
       setFormatTouched(true);
       setQueue(
         (target.media ?? []).map((m) => ({
@@ -189,7 +182,10 @@ export function PostComposer({
       setPinBoard((post.targets.find((t) => t.platform === 'pinterest')?.options?.board_id as string) ?? '');
       setTiktokPrivacy((post.targets.find((t) => t.platform === 'tiktok')?.options?.privacy_level as string) ?? '');
       setTagId(post.tag?.id ?? null);
-      setFormats((f) => ({ ...f, instagram: igFormatOf(post.targets.find((t) => t.platform === 'instagram')?.options) }));
+      setFormats((f) => ({
+        ...f,
+        instagram: igFormatOf(post.targets.find((t) => t.platform === 'instagram')?.options) ?? 'post',
+      }));
       setFormatTouched(true);
       setQueue(
         (post.targets[0]?.media ?? []).map((m) => ({

@@ -83,7 +83,7 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
 | `ListView` | Lista agrupada por dia, thumbnail real, badge de status, ações inline. |
 | `WeekView` | Vista "Semana": grade horas × 7 dias, cada post na sua hora agendada; clique em slot vazio pré-preenche data/hora. |
 | `CalendarView` | Vista "Mês": grade mensal; chip por post (cor = plataforma, tracejado = rascunho, ⚠ = falhou). Clique em dia vazio pré-preenche a data. |
-| `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer — **à esquerda**, com o `IdeaSidebar` ocupando o resto da largura. Três espécies de tile: **agendado**, **publicado** (âncoras; a capa cai pro feed real quando a nossa cópia já foi apagada pelo purge de 30 dias) e **ideia com arte**. A matemática de reordenação fica em `src/lib/gridOrder.ts`, fora do componente — e agora tem teste (`test/gridOrder.test.ts`). |
+| `GridPlanner` | Grade 3-colunas do Instagram, arrastável (HTML5 DnD + `layout` do motion), com Desfazer — **à esquerda**, com o `IdeaSidebar` ocupando o resto da largura. Três espécies de tile: **agendado**, **publicado** (âncoras; a capa cai pro feed real quando a nossa cópia já foi apagada pelo purge de 30 dias) e **ideia com arte**. **Story não entra** — ele nunca aparece no perfil, e um Story publicado virava âncora imóvel no meio do feed planejado. Só renderiza: a montagem da grade fica em `src/lib/gridTiles.ts` e a matemática de reordenação em `src/lib/gridOrder.ts`, ambas fora do componente e ambas com teste (`test/gridTiles.test.ts`, `test/gridOrder.test.ts`) — são as duas partes que erram em silêncio. |
 | `IdeaSidebar` | A lista de **ideias** ao lado da grade: um post que ainda não tem data. Campo rápido (Enter cria), card com capa/texto, e as ações **anexar arte**, **Agendar** (abre o compositor com o que a ideia tem) e **Remover**. Ideia só de texto **não** entra na grade — a grade mostra como o feed vai ficar, e um quadrado cinza atrapalha essa leitura. Agrupada por pilar (não filtrada): um FILTRO esconde o desbalanço — você vê "viagem" e nunca fica sabendo que "depoimento" está zerado. Agrupar mostra os dois, com todo pilar aparecendo mesmo em 0 posts; é a linha vazia que revela o buraco. |
 | `PostHoverCard` | Cartão que aparece ao passar o mouse num chip do calendário (Mês e Semana): thumbnail da peça na proporção do formato, legenda/título, conta, horário e status. Substitui o `title=` do navegador — o chip só cabe o nome da conta, e é a imagem que faz reconhecer o post. |
 | `PostDialog` | Detalhe do post em **split** (dados/ações à esquerda, preview "Como vai ficar" à direita). |
@@ -119,21 +119,26 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
     da pílula de abas (`TabsList` é h-8)**, então a fileira do topo fica alinhada.
   - `size="sm"` (h-7): **ações terciárias inline** numa linha de lista (Duplicar/Cancelar/Excluir).
   Regra: se está na mesma fileira das abas, é `default` (h-8) — não misture `sm`/`lg` ali.
-- **Navegação num menu, ao lado do logo**: os três destinos (Painel, Agenda, Insights) moram num
-  `DropdownMenu` colado no logo, não em três botões soltos. Motivo é espaço vertical: soltos, eles
-  não cabiam ao lado do logo e das ações abaixo de ~1024px e desciam pra uma **fileira própria** —
-  44px mais o respiro, tirados do conteúdo em toda tela, o tempo todo, por uma navegação que se usa
-  uma vez a cada visita. Medido no cabeçalho: 124→68px a 360, 192→76 a 640, 136→76 de 768 a 1023.
-  **O gatilho carrega a tela atual** (ícone + nome, `SCREEN_META` no `App.tsx`), não só o ☰: é o que
-  substitui a régua de "onde você está" que o botão aceso dava de graça. Estando em Conexões o
-  gatilho diz "Conexões" e nenhum item do menu acende — ela continua não sendo um dos três.
+- **Navegação: aberta onde cabe, num menu onde não cabe.** Os três destinos (Painel, Agenda,
+  Insights) aparecem de dois jeitos, com o corte em `lg` (1024px). **A partir de `lg`**, três
+  `Button size="lg"` visíveis ao lado do logo — ali eles cabem na mesma fileira das ações e não
+  custam altura nenhuma, e navegação visível é melhor que escondida sempre que couber. **Abaixo de
+  `lg`**, um `DropdownMenu` colado no logo: é exatamente onde os três não cabiam ao lado das ações e
+  desciam pra uma **fileira própria** — 44px mais o respiro, tirados do conteúdo em toda tela, o
+  tempo todo, por uma navegação que se usa uma vez a cada visita (medido: 124→68px a 360, 192→76 a
+  640, 136→76 de 768 a 1023). **O gatilho do menu carrega a tela atual** (ícone + nome,
+  `SCREEN_META` no `App.tsx`), não só o ☰: é o que substitui a régua de "onde você está" que o botão
+  aceso dá de graça. Em Conexões o gatilho diz "Conexões" e nenhum item acende — ela continua não
+  sendo um dos três.
 - **Uma fileira em toda largura**: o cabeçalho quebrar em duas devolve o problema que o menu
-  resolveu, então o que entra nele tem que caber. As três válvulas, na ordem em que cedem:
-  o wordmark vira o **selo quadrado** (`atenta-icon.svg`) abaixo de `sm` — o logotipo deitado come
-  145px dos ~336 de uma tela de 360; o **rótulo do gatilho** some abaixo de `md`; e os **avatares de
-  conta** só aparecem em `lg` (são o item mais elástico da fileira — crescem a cada conta — e eram
-  os ~115px que quebravam a linha entre 640 e ~830px). Nenhum caminho se perde: Conexões está no
-  menu da conta, nos estados vazios e na pendência do Painel; "precisa reautenticar" é o sino.
+  resolveu, então o que entra nele tem que caber — **de 360 a 1920, com 1 conta ou com 6**. As três
+  válvulas, na ordem em que cedem: o wordmark vira o **selo quadrado** (`atenta-icon.svg`) abaixo de
+  `sm` — o logotipo deitado come 145px dos ~336 de uma tela de 360; o **rótulo do gatilho** some
+  abaixo de `md`; e os **avatares de conta** só aparecem em `xl` (são o item mais elástico da
+  fileira — crescem a cada conta conectada — e por isso os primeiros a quebrar a linha: eram os
+  ~115px que estouravam entre 640 e ~830px com o menu, e os que sobravam em 1024 com a navegação
+  aberta de volta ao lado). Nenhum caminho se perde: Conexões está no menu da conta, nos estados
+  vazios e na pendência do Painel; "precisa reautenticar" é o sino.
   Use `atenta-icon.svg` e **não** `atenta-icon-256.png` — esse PNG está cortado no repositório.
 - **Responsivo dos controles do topo**: header e barra usam `px-3 sm:px-6` (aproveita a lateral no
   mobile). No mobile o "Novo post" vira **só o "+"** (`hidden sm:inline` no rótulo) e o botão de

@@ -51,16 +51,17 @@ const SCREEN_META: Record<Screen, { label: string; icon: typeof LayoutDashboard 
 };
 
 /**
- * Os três destinos do app, agora dentro do menu ao lado do logo.
+ * Os três destinos do app. Aparecem de dois jeitos, e o corte é `lg` (1024px):
  *
- * Antes eram três botões soltos no cabeçalho. Numa janela abaixo de ~1024px eles não cabiam ao lado
- * do logo e das ações, então desciam pra UMA FILEIRA PRÓPRIA — 44px de altura mais o respiro, tirados
- * do conteúdo em toda tela, o tempo todo, para uma navegação que se usa uma vez a cada visita. Um
- * gatilho só devolve essa faixa e vale em qualquer largura, sem a navegação mudar de lugar conforme
- * a janela.
+ * - **A partir de `lg`**: três botões visíveis ao lado do logo, como sempre foram. Ali eles cabem
+ *   na mesma fileira das ações, então não custam altura nenhuma — e navegação visível é melhor que
+ *   navegação escondida sempre que couber.
+ * - **Abaixo de `lg`**: um menu ao lado do logo. É onde os três botões NÃO cabiam ao lado das ações
+ *   e desciam pra uma fileira própria — 44px mais o respiro, tirados do conteúdo em toda tela, o
+ *   tempo todo, por uma navegação que se usa uma vez a cada visita.
  *
- * O gatilho NOMEIA a tela atual em vez de ser só o ☰. É o que faz o menu não perder a régua de "onde
- * você está" que os três botões davam de graça pelo botão aceso: some a lista, fica o rótulo.
+ * O gatilho do menu NOMEIA a tela atual em vez de ser só o ☰. É o que faz o menu não perder a régua
+ * de "onde você está" que o botão aceso dá de graça: some a lista, fica o rótulo.
  */
 const NAV: Screen[] = ['home', 'scheduler', 'insights'];
 
@@ -106,51 +107,76 @@ function Header({
             Abaixo de 768px fica só o ☰: ali a largura é o recurso escasso, e é ela que decide se o
             cabeçalho cabe numa fileira; a tela abaixo já se apresenta de qualquer forma (o
             "Painel"/"Insights"/"Conexões" do ViewHeader, o "Posts agendados" da Agenda). */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="lg"
-              variant="outline"
-              aria-label={`Menu de navegação — você está em ${SCREEN_META[screen].label}`}
-              className="px-3 md:px-5"
-            >
-              <Menu className="size-4" />
-              <span className="hidden md:inline">{SCREEN_META[screen].label}</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56">
-            {NAV.map((id) => {
-              // Conexões não acende nenhum dos três de propósito: ela é ajuste de conta, chega pelo
-              // menu do avatar, e acender a Agenda ali diria que você está num lugar onde não está.
-              // (Estando nela, quem diz isso é o rótulo do gatilho.)
-              const { label, icon: Icon } = SCREEN_META[id];
-              const ativo = screen === id;
-              return (
-                <DropdownMenuItem
-                  key={id}
-                  aria-current={ativo ? 'page' : undefined}
-                  onSelect={() => onNavigate(id)}
-                  className={ativo ? 'bg-muted font-semibold' : undefined}
-                >
-                  <Icon className="size-4" />
-                  {label}
-                  {ativo && <Check className="ml-auto size-4" />}
-                </DropdownMenuItem>
-              );
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="lg:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="lg"
+                variant="outline"
+                aria-label={`Menu de navegação — você está em ${SCREEN_META[screen].label}`}
+                className="px-3 md:px-5"
+              >
+                <Menu className="size-4" />
+                <span className="hidden md:inline">{SCREEN_META[screen].label}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              {NAV.map((id) => {
+                const { label, icon: Icon } = SCREEN_META[id];
+                const ativo = screen === id;
+                return (
+                  <DropdownMenuItem
+                    key={id}
+                    aria-current={ativo ? 'page' : undefined}
+                    onSelect={() => onNavigate(id)}
+                    className={ativo ? 'bg-muted font-semibold' : undefined}
+                  >
+                    <Icon className="size-4" />
+                    {label}
+                    {ativo && <Check className="ml-auto size-4" />}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {/* A mesma navegação aberta, a partir de `lg`. `size="lg"` e não a pílula de abas:
+            web/design.md proíbe misturar a `TabsList` (h-8) com os botões (h-11) na mesma fileira. */}
+        <nav className="hidden items-center gap-1 lg:flex">
+          {NAV.map((id) => {
+            // Conexões não acende nenhum dos três de propósito: ela é ajuste de conta, chega pelo
+            // menu do avatar, e acender a Agenda ali diria que você está num lugar onde não está.
+            // (Abaixo de `lg`, onde não há botão pra acender, quem diz isso é o rótulo do gatilho.)
+            const { label, icon: Icon } = SCREEN_META[id];
+            const ativo = screen === id;
+            return (
+              <Button
+                key={id}
+                size="lg"
+                variant={ativo ? 'default' : 'ghost'}
+                aria-current={ativo ? 'page' : undefined}
+                onClick={() => onNavigate(id)}
+                className="px-5"
+              >
+                <Icon className="size-4" />
+                {label}
+              </Button>
+            );
+          })}
+        </nav>
       </div>
       <div className="flex items-center justify-end gap-3 sm:ml-auto">
-        {/* Avatares só no desktop LARGO (antes era `sm:`): eles são o item mais elástico da fileira
-            — crescem a cada conta conectada — e eram os ~115px que faziam o cabeçalho quebrar em
-            duas fileiras entre 640 e ~830px, desfazendo o espaço que o menu acabou de devolver.
-            Some sem perda de caminho: quem quer Conexões chega pelo menu da conta, pelos estados
-            vazios e pela pendência do Painel, e "conta precisa reautenticar" já é o sino. */}
+        {/* Avatares só a partir de `xl` (antes era `sm:`): eles são o item mais ELÁSTICO da fileira
+            — crescem a cada conta conectada — e por isso são os primeiros a fazer o cabeçalho
+            quebrar em duas fileiras, que é o que este cabeçalho existe pra evitar. Mediram os
+            ~115px que quebravam a linha entre 640 e ~830px com o menu, e os que sobravam em 1024
+            com a navegação aberta de volta ao lado. Some sem perda de caminho: quem quer Conexões
+            chega pelo menu da conta, pelos estados vazios e pela pendência do Painel, e "conta
+            precisa reautenticar" já é o sino. */}
         <button
           type="button"
           onClick={onOpenConnections}
-          className="hidden flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted lg:flex"
+          className="hidden flex-wrap items-center gap-1.5 rounded-full p-1 transition-colors hover:bg-muted xl:flex"
           title="Gerenciar conexões"
         >
           {accounts.length === 0 ? (

@@ -266,3 +266,23 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
 export function findFormat(platform: Platform, id: string | undefined): PostFormat | undefined {
   return PLATFORM_FORMATS[platform]?.find((f) => f.id === id);
 }
+
+/**
+ * O formato gravado num destino do Instagram, ou `undefined` quando não dá pra saber.
+ *
+ * Posts criados antes do seletor de formato não têm `options.format` — neles vale o
+ * `options.as_story` antigo. A regra mais antiga ainda (vídeo virava Reel) depende da mídia e por
+ * isso NÃO entra aqui: quem precisa dela decide no lugar em que tem o arquivo à mão, e a autoridade
+ * continua sendo o `igFormat()` do adapter no Worker.
+ *
+ * Vive aqui, e não em cada tela, porque três já liam esse campo com fallbacks ligeiramente
+ * diferentes — e um deles (a grade) simplesmente não lia, que foi como um Story foi parar no meio
+ * do feed.
+ */
+export function igFormatOf(
+  options: Record<string, unknown> | undefined | null
+): 'post' | 'reel' | 'story' | undefined {
+  const format = options?.format;
+  if (format === 'post' || format === 'reel' || format === 'story') return format;
+  return options?.as_story ? 'story' : undefined;
+}

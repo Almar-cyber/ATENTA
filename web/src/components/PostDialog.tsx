@@ -5,7 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { MoreHorizontal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { Post, Target } from '@/lib/types';
-import { PLATFORM_LABELS, STATUS_META } from '@/lib/platforms';
+import { PLATFORM_LABELS, STATUS_META, igFormatOf } from '@/lib/platforms';
 import { fmtDateTime } from '@/lib/format';
 import { cancelTarget, deleteTarget, queueTarget, reactivateTarget } from '@/lib/api';
 import { requestPrefill, requestEdit } from '@/lib/composer-bus';
@@ -13,14 +13,6 @@ import { useScheduler } from '@/store';
 import { PostPreview } from './PostPreview';
 import { PlatformAvatar } from './PlatformAvatar';
 import { InlineAlert } from '@/components/ui/inline-alert';
-
-// Formato gravado no target. Posts anteriores ao seletor de formato não têm `format` — vale o
-// `as_story` antigo e, na falta dele, a regra de então (vídeo virava Reel).
-function igFormatOf(options: Record<string, unknown> | undefined): string | undefined {
-  const format = options?.format;
-  if (typeof format === 'string') return format;
-  return options?.as_story ? 'story' : undefined;
-}
 
 export interface DialogSelection {
   post: Post;

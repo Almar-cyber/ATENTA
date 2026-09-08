@@ -48,7 +48,7 @@ promessa de "falhar na criação, não na publicação".
 | --- | --- | --- |
 | Compositor com campos em cascata e pré-visualização por rede | `web/src/components/PostComposer.tsx`, `PostPreview.tsx` | ✅ |
 | Recorte 4:5 / 1:1 / 1.91:1 pra faixa que a Meta aceita | `MediaCropDialog.tsx` | ✅ |
-| Grade 3 colunas arrastável, com permutação de horários | `GridPlanner.tsx`, `web/src/lib/gridOrder.ts` | ✅ com teste |
+| Grade 3 colunas arrastável, com permutação de horários | `GridPlanner.tsx`, `web/src/lib/gridOrder.ts`, `gridTiles.ts` | ✅ com teste |
 | Ideias (post sem data), com pilar e arte opcional | `IdeaSidebar.tsx`, migrações 0003 e 0013 | ✅ |
 | Pilares de conteúdo | `TagPicker.tsx`, migração 0014 | ✅ |
 | Agenda em lista, semana e mês | `ListView` / `WeekView` / `CalendarView` | ✅ |
@@ -169,6 +169,7 @@ e, adiante, 2FA.
 | Meta usa só a primeira Página | `handleMetaCallback` em `src/worker.ts` | se `/me/accounts` devolver mais de uma Página concedida, as outras são ignoradas |
 | **Worker duplicado publicando da mesma fila** | conta Cloudflare | existe um segundo Worker chamado `social-scheduler`, criado em 18/08/2026 pelos deploys da branch `main`. Ele não atende domínio nenhum, mas tem Cron Trigger de 1 em 1 minuto e aponta pro MESMO D1, então vem publicando da fila com o código antigo. Não duplica post (o claim é atômico), mas decide QUEM publica por corrida. Apagar: `npx wrangler delete --name social-scheduler` |
 | Popover de sugestão cobre o compositor | `LegendaIA.tsx` | com o modal curto, o popover abre pra cima e tapa mídia e formato. Não impede o uso |
+| ~~Story ocupava quadrado na grade do Instagram~~ | `web/src/lib/gridTiles.ts` | ✅ corrigido — a montagem da grade filtrava por rede e por status, nunca por formato, então um Story publicado virava âncora imóvel no meio do feed planejado (e um agendado entrava na permutação de horários do arrastar). Story nunca aparece no perfil. Regressão coberta em `test/gridTiles.test.ts` |
 
 ---
 
