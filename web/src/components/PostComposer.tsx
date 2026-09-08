@@ -984,12 +984,17 @@ export function PostComposer({
                 </p>
                 {/* Não dá pra recusar antes de enviar: a contagem de seguidores não está aqui, e
                     inventar um bloqueio com dado que não temos seria pior que avisar. Quem recusa
-                    de fato é o Instagram, na publicação. */}
+                    de fato é o Instagram, na publicação.
+                    O texto separa o que é CERTO (conta profissional e pública) do que é RELATO
+                    (o piso de seguidores e o teto diário) — ver INSTAGRAM_TRIAL_MIN_FOLLOWERS. Dar
+                    o relato como regra faria a pessoa desistir de algo que ela talvez possa fazer,
+                    que é o oposto do que um aviso serve pra fazer. */}
                 {igTrial && (
                   <p className="text-xs text-muted-foreground">
-                    O Instagram só aceita Reel de teste em conta profissional com{' '}
-                    {INSTAGRAM_TRIAL_MIN_FOLLOWERS.toLocaleString('pt-BR')} seguidores ou mais. Enquanto estiver em
-                    teste ele não aparece no seu perfil — some da grade até graduar.
+                    Precisa de conta profissional (Criador ou Empresa) e perfil público. Há relatos de um mínimo de{' '}
+                    ~{INSTAGRAM_TRIAL_MIN_FOLLOWERS.toLocaleString('pt-BR')} seguidores e de um teto diário de testes,
+                    mas a Meta não documenta nenhum dos dois. Enquanto estiver em teste ele não aparece no seu perfil —
+                    some da grade até graduar.
                   </p>
                 )}
               </div>

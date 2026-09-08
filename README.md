@@ -314,8 +314,10 @@ diferença real de API, não só de preview:
 **Reel de teste**: escolhendo Reel, aparece "Quem vê primeiro" nos ajustes por rede. *Teste* publica
 só pra quem **não segue** a conta, pra você medir antes de mostrar aos seguidores; depois ele gradua
 (você abre dentro do app, ou o Instagram abre sozinho se render). Enquanto está em teste ele não
-aparece no perfil — e por isso some da grade até graduar. Exige conta profissional com 1.000
-seguidores; abaixo disso quem recusa é a Meta, na publicação.
+aparece no perfil — e por isso some da grade até graduar. Exige **conta profissional** (Criador ou
+Empresa) e **perfil público**; há relatos de um mínimo de ~1.000 seguidores e de um teto diário de
+testes, mas a Meta não documenta nenhum dos dois. Quem recusa, se for o caso, é o Instagram na
+publicação — a contagem de seguidores não está do nosso lado pra checar antes.
 
 **Abrir pra todo mundo depois do teste é no app do Instagram** — a API não tem endpoint pra isso, e
 é lá também que ficam os números do teste comparados aos seus Reels de sempre. O que o ATENTA faz é

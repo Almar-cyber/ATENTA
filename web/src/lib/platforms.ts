@@ -292,7 +292,21 @@ export const INSTAGRAM_TRIAL_GRADUATIONS: { id: string; label: string; hint: str
   },
 ];
 
-/** Mínimo de seguidores que o Instagram exige pra aceitar Reel de teste. */
+/**
+ * O que se sabe sobre quem pode publicar Reel de teste — e o quanto se sabe.
+ *
+ * CERTO: precisa de conta **profissional** (Criador ou Empresa) e de perfil **público**. Conta
+ * pessoal não tem o recurso.
+ *
+ * RELATADO, NÃO DOCUMENTADO: um mínimo de ~1.000 seguidores e um teto diário de testes. Os dois
+ * aparecem em várias fontes do setor, atribuídos a um AMA do Instagram, mas **a Meta não publica
+ * nenhum dos dois** — e os números de teto que circulam divergem entre si. Por isso o compositor
+ * cita a faixa como relato, e não como regra: um aviso categórico que estiver errado é pior que um
+ * aviso honesto, porque manda a pessoa desistir de algo que ela poderia fazer.
+ *
+ * Quem decide de fato é a Meta, na publicação — não temos a contagem de seguidores deste lado pra
+ * recusar antes.
+ */
 export const INSTAGRAM_TRIAL_MIN_FOLLOWERS = 1000;
 
 /**
