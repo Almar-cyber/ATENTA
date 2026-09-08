@@ -221,7 +221,7 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'post',
       label: 'Post',
-      hint: 'Feed. Foto, carrossel de até 10, ou vídeo — sem capa própria.',
+      hint: 'Feed. Foto, carrossel até 10, ou vídeo.',
       shape: 'square',
       recommended: { width: 1080, height: 1350, ratio: '4:5' },
       media: 'any',
@@ -232,8 +232,8 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'reel',
       label: 'Reel',
-      hint: 'Vertical, um vídeo só, entra na aba de Reels. Aceita capa.',
-      soAqui: 'dá pra testar antes só com quem não segue a conta',
+      hint: 'Vertical, um vídeo. Aceita capa.',
+      soAqui: 'testar antes com quem não segue',
       shape: 'story',
       recommended: { width: 1080, height: 1920, ratio: '9:16' },
       media: 'video',
@@ -243,7 +243,7 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'story',
       label: 'Story',
-      hint: 'Some em 24h. Um arquivo, até 60s, e a legenda não aparece.',
+      hint: 'Some em 24h. Um arquivo, até 60s, sem legenda.',
       shape: 'story',
       recommended: { width: 1080, height: 1920, ratio: '9:16' },
       media: 'any',
@@ -291,16 +291,16 @@ export function findFormat(platform: Platform, id: string | undefined): PostForm
  * Espelho do cliente, como todo o resto deste arquivo — a autoridade é o `validate()` do adapter.
  */
 export const INSTAGRAM_TRIAL_GRADUATIONS: { id: string; label: string; hint: string }[] = [
-  { id: '', label: 'Todo mundo', hint: 'Reel normal: sai pra quem te segue e pro perfil na hora.' },
+  { id: '', label: 'Todo mundo', hint: 'Sai pra todo mundo na hora.' },
   {
     id: 'MANUAL',
     label: 'Teste — eu abro depois',
-    hint: 'Só quem não te segue vê. Você decide, dentro do app do Instagram, quando abrir pra todo mundo.',
+    hint: 'Só quem não te segue vê. Você abre pra todos depois, no app do Instagram.',
   },
   {
     id: 'SS_PERFORMANCE',
     label: 'Teste — abre sozinho se render',
-    hint: 'Só quem não te segue vê. O Instagram abre pra todo mundo sozinho se o desempenho justificar.',
+    hint: 'Só quem não te segue vê. O Instagram abre sozinho se render.',
   },
 ];
 
