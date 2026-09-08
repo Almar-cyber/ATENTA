@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { motion } from 'motion/react';
-import { CalendarPlus, ImagePlus, ImageIcon, Layers, Loader2, PenLine, X } from 'lucide-react';
+import { CalendarPlus, HelpCircle, ImagePlus, ImageIcon, Layers, Loader2, PenLine, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { GridPreview, Post } from '@/lib/types';
 import { ALLOWED_MIME_TYPES, isVideoMime } from '@/lib/platforms';
@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ViewHeader } from '@/components/ui/view-header';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { DialogSelection } from './PostDialog';
 
@@ -237,7 +238,7 @@ export function GridPlanner({
     <Card className="h-full">
       <ViewHeader
         title="Planejar"
-        description="Como o perfil do Instagram vai ficar — e as ideias que ainda não têm data."
+        description="A grade do perfil, e as ideias sem data."
         actions={
           igAccounts.length > 1 && (
             <Select value={igAccount?.id ?? ''} onValueChange={setContaId}>
@@ -286,6 +287,26 @@ export function GridPlanner({
         <Button size="sm" variant="ghost" disabled={!undo} onClick={() => undo && applyArrangement(undo, null, 'Ordem anterior restaurada.')}>
           Desfazer
         </Button>
+        {/* AS REGRAS DA GRADE FICAM AQUI DENTRO, e não num parágrafo fixo. Eram quatro linhas de
+            texto acima da grade — no celular, quase uma tela inteira gasta, toda visita, por uma
+            explicação que se lê UMA vez. Mesma régua do ponto vermelho do sino e do UsoIA: aviso
+            que aparece sempre é aviso que ninguém lê no dia em que importa. O que ele explicava
+            continua explicado, a um toque de distância. */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button size="sm" variant="ghost" aria-label="Como esta grade funciona">
+              <HelpCircle className="size-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72 space-y-2 text-xs text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Arraste para reordenar.</span> Os posts agendados só trocam
+              entre si os horários que já têm — nenhuma data nova é inventada.
+            </p>
+            <p>As ideias entram no meio sem ocupar horário nenhum.</p>
+            <p>A grade do perfil corta tudo em 3:4. No feed, o post mantém a proporção original.</p>
+          </PopoverContent>
+        </Popover>
         <input
           ref={fileRef}
           type="file"
@@ -295,11 +316,6 @@ export function GridPlanner({
           onChange={(e) => onAddPreviews(e.target.files)}
         />
       </div>
-
-      <p className="mb-3 max-w-md text-xs text-muted-foreground">
-        Arraste para reordenar: os posts agendados só trocam entre si os horários que já têm; as ideias entram no meio
-        sem ocupar horário nenhum. A grade do perfil corta tudo em 3:4 — no feed, o post mantém a proporção original.
-      </p>
 
       <div className="grid max-w-md grid-cols-3 gap-0.5">
         {tiles.map((tile) => {
