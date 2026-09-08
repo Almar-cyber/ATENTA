@@ -49,10 +49,15 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-2xl">
+          {/* NO CELULAR ROLA O MODAL INTEIRO; no desktop cada coluna rola por dentro. Empilhado,
+              as duas colunas tinham scroll próprio e a de baixo era `shrink-0` — o que passasse de
+              88vh ficava CORTADO, sem jeito de alcançar: o rodapé da pré-visualização sumia atrás
+              da borda e girar o aparelho não ajudava (a orientação costuma estar travada). Mesmo
+              padrão que o `PostComposer` já usa. */}
         {post && target && status && (
-          <div className="flex max-h-[88vh] flex-col md:flex-row">
+          <div className="flex max-h-[88vh] flex-col overflow-y-auto md:flex-row md:overflow-hidden">
             {/* Left: details + actions */}
-            <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-w-0 flex-col md:min-h-0 md:flex-1">
               <DialogHeader className="border-b px-5 py-4">
                 <DialogTitle className="flex flex-wrap items-center gap-2">
                   <PlatformAvatar platform={target.platform} size="sm" />
@@ -63,7 +68,7 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
                 </DialogTitle>
               </DialogHeader>
 
-              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              <div className="space-y-4 px-5 py-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
                 <div className="text-sm">
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quando</div>
                   <div className="mt-0.5">{fmtDateTime(post.scheduled_for)}</div>
@@ -176,7 +181,7 @@ export function PostDialog({ selection, onClose }: { selection: DialogSelection 
             {/* Right: preview */}
             <div className="flex shrink-0 flex-col border-t bg-muted/30 px-5 py-4 md:w-80 md:border-l md:border-t-0">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Como vai ficar</div>
-              <div className="flex flex-1 items-start justify-center overflow-y-auto">
+              <div className="flex flex-1 items-start justify-center md:overflow-y-auto">
                 <PostPreview
                   input={{
                     platform: target.platform,

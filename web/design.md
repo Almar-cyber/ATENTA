@@ -116,6 +116,12 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   vertical longo; limite a altura de mídia/preview (`PostPreview` cabe em ~340px de altura — pela
   largura, ver "Aspects do preview" — e mostra faixa
   "sem mídia" em vez de estourar formatos verticais). Ver `PostDialog` e `PostComposer`.
+  **Quem rola muda com o breakpoint, e errar isso CORTA conteúdo.** Empilhado (abaixo de `md`) quem
+  rola é o modal INTEIRO — `overflow-y-auto md:overflow-hidden` no envelope, e as colunas com
+  `md:flex-1 md:overflow-y-auto` em vez de scroll próprio desde o celular. Duas colunas com scroll
+  próprio dentro de um envelope `max-h-[88vh]` que não rola deixam o excedente da de baixo
+  inalcançável: no `PostDialog` o rodapé da pré-visualização ficava atrás da borda, e girar o
+  aparelho não salva (a orientação costuma estar travada).
 - **Padrão de tamanho de botão** — três níveis, e nada fora deles:
   - `size="lg"` (h-11, uppercase): **CTA primário** de fluxo — "Novo post", "Agendar post", "Usar
     este recorte". Um por contexto; o secundário ao lado fica `variant="outline"`.
