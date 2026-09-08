@@ -128,7 +128,10 @@ pontinho, a borda-esquerda de chips/tiles, o avatar do preview) — nunca como c
   Insights) aparecem de dois jeitos, com o corte em `lg` (1024px). **A partir de `lg`**, três
   `Button size="lg"` visíveis ao lado do logo — ali eles cabem na mesma fileira das ações e não
   custam altura nenhuma, e navegação visível é melhor que escondida sempre que couber. **Abaixo de
-  `lg`**, um `DropdownMenu` colado no logo: é exatamente onde os três não cabiam ao lado das ações e
+  `lg`**, um `DropdownMenu` **no canto esquerdo, com o logo à direita dele** — o ☰ é o que se usa e
+  o logo é identidade, não controle, então quem fica no canto que o polegar alcança primeiro é o
+  controle; o inverso punha um alvo não-clicável na melhor posição da barra. É exatamente onde os
+  três não cabiam ao lado das ações e
   desciam pra uma **fileira própria** — 44px mais o respiro, tirados do conteúdo em toda tela, o
   tempo todo, por uma navegação que se usa uma vez a cada visita (medido: 124→68px a 360, 192→76 a
   640, 136→76 de 768 a 1023). **O gatilho do menu carrega a tela atual** (ícone + nome,

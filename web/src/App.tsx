@@ -89,20 +89,11 @@ function Header({
   const [avatarAberto, setAvatarAberto] = useState(false);
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 px-3 pb-2 pt-4 sm:gap-4 sm:px-6 sm:pt-6">
-      {/* Logo e navegação viram um bloco só: o menu fica colado no logo, no canto em que a mão e o
-          olho já procuram "onde estou / pra onde vou". */}
+      {/* O MENU VEM PRIMEIRO, e o logo à direita dele. O ☰ é o que se usa; o logo é identidade,
+          não controle. Deixar o controle no canto que o polegar alcança primeiro, e a marca logo ao
+          lado, é a ordem que a mão pede — o inverso punha um alvo não-clicável na melhor posição da
+          barra. A partir de `lg` o ☰ some e sobra logo + navegação, como sempre foi. */}
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-        {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores.
-            No celular entra o SELO quadrado no lugar do logotipo deitado: o logotipo sozinho come
-            145px dos ~336px de uma tela de 360, e com o menu ao lado o cabeçalho voltaria a quebrar
-            em duas fileiras — que é justamente o que este menu existe pra desfazer. É a mesma marca,
-            a mesma que o aparelho já mostra no ícone do app. Aqui o SVG vale (a ressalva do
-            web/design.md é sobre o WORDMARK, cujas letras deformavam): o selo é só path, sem texto.
-            Não use `atenta-icon-256.png` — esse arquivo está cortado, o glifo sai pela metade. */}
-        <button type="button" onClick={() => onNavigate('home')} aria-label="Ir para o Painel" className="shrink-0 cursor-pointer">
-          <img src="/atenta-icon.svg" alt="ATENTA!" className="h-10 w-auto sm:hidden" />
-          <img src="/atenta-logoetipo.png" alt="ATENTA!" className="hidden h-10 w-auto sm:block" />
-        </button>
         {/* O gatilho carrega a tela atual (ícone + nome), não só o ☰ — ver o comentário de NAV.
             Abaixo de 768px fica só o ☰: ali a largura é o recurso escasso, e é ela que decide se o
             cabeçalho cabe numa fileira; a tela abaixo já se apresenta de qualquer forma (o
@@ -140,6 +131,17 @@ function Header({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        {/* PNG, não SVG: o SVG do wordmark deformava o "A" e o "N" em alguns renderizadores.
+            No celular entra o SELO quadrado no lugar do logotipo deitado: o logotipo sozinho come
+            145px dos ~336px de uma tela de 360, e com o menu ao lado o cabeçalho voltaria a quebrar
+            em duas fileiras — que é justamente o que este menu existe pra desfazer. É a mesma marca,
+            a mesma que o aparelho já mostra no ícone do app. Aqui o SVG vale (a ressalva do
+            web/design.md é sobre o WORDMARK, cujas letras deformavam): o selo é só path, sem texto.
+            Não use `atenta-icon-256.png` — esse arquivo está cortado, o glifo sai pela metade. */}
+        <button type="button" onClick={() => onNavigate('home')} aria-label="Ir para o Painel" className="shrink-0 cursor-pointer">
+          <img src="/atenta-icon.svg" alt="ATENTA!" className="h-10 w-auto sm:hidden" />
+          <img src="/atenta-logoetipo.png" alt="ATENTA!" className="hidden h-10 w-auto sm:block" />
+        </button>
         {/* A mesma navegação aberta, a partir de `lg`. `size="lg"` e não a pílula de abas:
             web/design.md proíbe misturar a `TabsList` (h-8) com os botões (h-11) na mesma fileira. */}
         <nav className="hidden items-center gap-1 lg:flex">
