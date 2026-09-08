@@ -23,6 +23,9 @@ export function FormatPicker({
   const formats = PLATFORM_FORMATS[platform];
   if (!formats) return null;
   const current = formats.find((f) => f.id === value) ?? formats[0];
+  // O que existe só noutro formato, dito a quem está justamente no formato errado pra usá-lo — e
+  // que some assim que ele é escolhido, porque aí o ajuste de verdade aparece logo abaixo.
+  const outro = formats.find((f) => f.soAqui && f.id !== current.id);
 
   return (
     <div className="space-y-1.5">
@@ -37,7 +40,17 @@ export function FormatPicker({
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
-      <p className="text-xs text-muted-foreground">{current.hint}</p>
+      <p className="text-xs text-muted-foreground">
+        {current.hint}
+        {outro && (
+          <>
+            {' '}
+            <span className="text-accent-foreground">
+              Só em {outro.label}: {outro.soAqui}.
+            </span>
+          </>
+        )}
+      </p>
     </div>
   );
 }
