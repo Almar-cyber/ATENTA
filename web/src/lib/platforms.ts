@@ -203,17 +203,6 @@ export interface PostFormat {
    * voz e a pré-visualização mostra o recorte que a rede vai aplicar.
    */
   seguirArquivo?: boolean;
-  /**
-   * O que só existe NESTE formato, dito a quem escolheu OUTRO.
-   *
-   * Existe por um relato: a pessoa procurou o Reel de teste tendo escolhido Post, não achou, e
-   * concluiu que o app não tinha. Não tinha mesmo — a Meta só aceita `trial_params` em container de
-   * Reel —, mas nada na tela dizia isso, e um campo que some sem explicação parece defeito.
-   *
-   * Fica no DADO e não no `FormatPicker`: o componente não conhece plataforma (web/design.md), e
-   * assim a próxima rede que tiver uma capacidade presa a um formato só preenche esta linha.
-   */
-  soAqui?: string;
 }
 
 export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
@@ -232,8 +221,10 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'reel',
       label: 'Reel',
-      hint: 'Vertical, um vídeo. Aceita capa.',
-      soAqui: 'testar antes com quem não segue',
+      // A última frase é o convite pro Reel de teste, e ela mora AQUI e não na dica do Post: quem
+      // vai testar é quem já cogitou um Reel. Dito no Post, seria texto fixo na tela de todo mundo
+      // que agenda uma foto — pela ausência de um campo que aquela pessoa não estava procurando.
+      hint: 'Vertical, um vídeo. Aceita capa. Dá pra testar o engajamento com quem não segue.',
       shape: 'story',
       recommended: { width: 1080, height: 1920, ratio: '9:16' },
       media: 'video',
