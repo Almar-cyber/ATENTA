@@ -577,6 +577,57 @@ describe('end-to-end auth classification', () => {
     expect(row.status).toBe('queued');
     expect(row.attempt_count).toBe(0);
   });
+
+  // REEL DE TESTE: a Meta pode recusar a elegibilidade (conta, seguidores — ela não publica o
+  // critério) no MESMO formato genérico de token que um `OAuthException` de verdade. Antes deste
+  // guard, isso desconectaria uma conta perfeitamente viva e entraria em loop (erro de auth não
+  // gasta tentativa — volta pra fila e repete a mesma recusa no minuto seguinte). Roda pelo mesmo
+  // cron real que o caso acima, com o adapter de verdade — não o fake.
+  it('OAuthException sem código conhecido num Reel de teste falha o destino sem desconectar a conta', async () => {
+    const accountId = await insertAccount({ platform: 'instagram', external_account_id: 'ig-user-1' });
+    const targetId = await insertPost({
+      accountId,
+      platform: 'instagram',
+      body: 'legenda do teste',
+      options: { format: 'reel', trial_graduation: 'MANUAL' },
+    });
+
+    const { encryptJSON } = await import('../src/lib/crypto.js');
+    const { ciphertext, iv } = await encryptJSON({ access_token: 'tok' }, env.TOKEN_ENCRYPTION_KEY);
+    await env.DB.prepare(`update accounts set token_ciphertext = ?, token_iv = ? where id = ?`)
+      .bind(ciphertext, iv, accountId)
+      .run();
+
+    await env.DB.prepare(
+      `insert into media_assets (id, storage_key, public_url, mime_type, size_bytes, duration_seconds, width, height)
+       values ('md-reel', 'k-reel', 'https://scheduler-media.omangue.co/k-reel', 'video/mp4', 1000, 12, 1080, 1920)`
+    ).run();
+    await env.DB.prepare(`insert into post_target_media (post_target_id, media_asset_id, position) values (?, 'md-reel', 0)`)
+      .bind(targetId)
+      .run();
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: { message: 'Invalid parameter', type: 'OAuthException', code: 100 } }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch;
+
+    try {
+      await runPoller();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    // A conta segue ativa — é o ponto inteiro do guard.
+    expect(await getAccountStatus(accountId)).toBe('active');
+    const row = await getTarget(targetId);
+    expect(row.status).toBe('failed');
+    // E a mensagem que a pessoa lê é a do teste recusado, não "reconecte a conta" — que seria falso
+    // aqui, já que a conta não foi tocada.
+    expect(row.last_error).toContain('Reel de teste');
+    expect(row.last_error).not.toContain('Reconecte');
+  });
 });
 
 // A cadência de recheck de quem está em 'processing'. Sem ela o poller reconsulta todo destino em

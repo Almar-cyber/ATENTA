@@ -78,5 +78,12 @@ export interface PlatformAdapter {
   publish(target: PostTarget, media: MediaAsset[], account: Account, env: Env): Promise<PublishResult>;
   /** For async platforms; reads/writes adapter_state. */
   checkStatus(target: PostTarget, account: Account, env: Env): Promise<PublishResult>;
-  classifyError(err: unknown): ErrorClass;
+  /**
+   * `target` só chega aqui quando o erro veio de uma publicação de verdade (worker.ts,
+   * handlePublishError) — a varredura de saúde de token (stepTokenHealthScan) não tem destino
+   * nenhum pra passar, e a maioria dos adapters não precisa dele. Existe pro Instagram: um Reel de
+   * teste recusado pela elegibilidade da conta chega com o MESMO código genérico que um token
+   * revogado, e só o `target` diz que era um teste.
+   */
+  classifyError(err: unknown, target?: PostTarget): ErrorClass;
 }

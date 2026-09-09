@@ -1,4 +1,5 @@
 import { adapters } from './adapters/index.js';
+import { igTrialGraduation } from './adapters/instagram.js';
 import { handleApiRequest, handlePublicApiRequest } from './api.js';
 import { hashesDasPaginasLegais, renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from './legalPages.js';
 import { hashesDaLanding, renderLandingPage } from './landingPage.js';
@@ -699,7 +700,7 @@ async function applyPublishResult(env: Env, target: PostTarget, result: PublishR
 }
 
 async function handlePublishError(env: Env, target: PostTarget, adapter: PlatformAdapter, err: unknown): Promise<void> {
-  const errorClass = adapter.classifyError(err);
+  const errorClass = adapter.classifyError(err, target);
   const message = err instanceof Error ? err.message : String(err);
   await handleFailure(env, target, errorClass, message);
 }
@@ -716,7 +717,22 @@ async function handleFailure(env: Env, target: PostTarget, errorClass: ErrorClas
   //
   // A mensagem técnica não se perde nos casos traduzidos: ela continua indo pro notify() e pro log
   // do Worker, que é onde se depura.
-  const amigavel = mensagemAmigavel(message);
+  //
+  // Reel de teste recusado: `errorClass` só chega 'permanent' aqui quando classifyError() do
+  // Instagram já decidiu que o `OAuthException` não tinha um código conhecido (não é throttling
+  // nem token morto de verdade — ver o comentário lá) NUM destino com trial_graduation. Combinar os
+  // dois de novo aqui é só pra decidir a MENSAGEM, e tem que casar com a classe: sem este caso, a
+  // regra genérica de OAuthException mais abaixo em TRADUCOES diria "reconecte a conta", o que
+  // seria falso — a conta não foi tocada, é por isso que a classe já chegou 'permanent'.
+  const igTesteRecusado =
+    target.platform === 'instagram' &&
+    errorClass === 'permanent' &&
+    Boolean(igTrialGraduation(target.options)) &&
+    /OAuthException/i.test(message);
+
+  const amigavel = igTesteRecusado
+    ? 'O Instagram recusou este Reel de teste — a rede não publica o critério de elegibilidade, então pode ser a conta, os seguidores ou outro motivo que não dá pra saber daqui. A conexão continua normal. Publique como Reel comum (sem teste) e tente de novo.'
+    : mensagemAmigavel(message);
   const paraPessoa = amigavel ?? message;
   if (amigavel) console.error(`[publish] ${target.platform}/${target.id}: ${message}`);
 

@@ -113,6 +113,16 @@ Regras que valem a pena não esquecer:
   códigos vira `retryable` e uma recusa definitiva custa cinco tentativas e uma hora. A tabela de
   códigos é consultada ANTES do status, e é ela que impede um caso perigoso — a Meta responde
   limite de requisição como `OAuthException` com HTTP 400, e sem a tabela ele viraria `permanent`.
+- **Reel de teste: recusa de elegibilidade não pode virar reauth.** `classifyError()` recebe o
+  `target` (opcional na interface — só a publicação de verdade tem um pra passar; a varredura de
+  saúde de token não). No Instagram, quando o destino é um Reel de teste (`trial_graduation`) e a
+  recusa vem como `OAuthException` sem um código já conhecido (nem throttling 4/17/32/613, nem
+  token morto 190), o adapter rebaixa de `auth` pra `permanent`: a Meta não publica o critério de
+  elegibilidade pro teste, então essa recusa pode ser a conta não ser elegível, não o token — e
+  `auth` desconectaria uma conta viva e, como erro de auth não gasta tentativa, entraria em loop
+  (volta pra fila, repete a mesma recusa no minuto seguinte). Throttling e token realmente morto
+  continuam `auth` mesmo num teste. Nunca exercitado contra a API real — é a melhor hipótese dada a
+  ambiguidade do formato de erro, não uma certeza (ver funcionalidades.md §1, Reel de teste).
 - **Recheck com cadência**: quem está em `processing` não é reconsultado a cada tique. `updated_at`
   é congelado na entrada (nunca bumpado por um recheck), então ele é a idade do processamento, e
   `next_check_after` diz quando perguntar de novo: sem espera nos 5 primeiros minutos, 5min até os
