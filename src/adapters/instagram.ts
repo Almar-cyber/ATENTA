@@ -1,5 +1,5 @@
 import type { MediaAsset, PlatformAdapter } from '../lib/types.js';
-import { apiError, classifyByKnownCodes } from '../lib/errors.js';
+import { ApiError, apiError, classifyByKnownCodes } from '../lib/errors.js';
 import { fetchWithRetry } from '../lib/http.js';
 import { getAccountTokens } from '../lib/tokens.js';
 import { checkDuration } from '../lib/videoLimits.js';
@@ -71,6 +71,28 @@ const TRIAL_GRADUATIONS: IgTrialGraduation[] = ['MANUAL', 'SS_PERFORMANCE'];
 export function igTrialGraduation(rawOptions: unknown): string | undefined {
   const value = (rawOptions as { trial_graduation?: unknown } | null | undefined)?.trial_graduation;
   return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+// Códigos de `OAuthException` cujo significado já é conhecido: 4/17/32/613 são throttling, 190 é
+// token inválido/revogado de verdade. Usado só pelo guard do Reel de teste em classifyError() —
+// esses dois continuam 'auth' mesmo num Reel de teste; só o código FORA desta lista (ou ausente) é
+// tratado como possível recusa de elegibilidade.
+const KNOWN_AUTH_ERROR_CODES = new Set([4, 17, 32, 613, 190]);
+
+/**
+ * O código numérico que a Meta manda em `error.code`, direto do corpo — diferente do `code` que
+ * `classifyByKnownCodes` usa (que prioriza `error.type`, então normalmente lê "OAuthException" e
+ * nunca chega a olhar o número). Só existe pra alimentar o guard acima; `extractCodeFromBody` de
+ * `errors.ts` não serve aqui porque teria que ignorar `type` de propósito.
+ */
+function metaErrorCode(err: unknown): number | undefined {
+  if (!(err instanceof ApiError) || !err.body) return undefined;
+  try {
+    const parsed = JSON.parse(err.body) as { error?: { code?: unknown } };
+    return typeof parsed.error?.code === 'number' ? parsed.error.code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export const instagramAdapter: PlatformAdapter = {
@@ -263,13 +285,36 @@ export const instagramAdapter: PlatformAdapter = {
    *
    * Se aparecer na prática um 4xx transitório, o conserto é acrescentar o `type` dele a esta
    * tabela — não devolver tudo pro 'retryable'.
+   *
+   * REEL DE TESTE: a recusa por ELEGIBILIDADE (conta, seguidores — a Meta não publica o critério,
+   * ver design.md §4) pode chegar no mesmo `type` genérico de erro de token, `OAuthException`, que
+   * `validate()` não tem como prever de antemão. Tratar isso como 'auth' sem mais nada já causou
+   * dano num caso parecido: foi assim que o TikTok mandava reconectar uma conta perfeitamente viva
+   * (ver a tradução `unaudited_client_can_only_post_to_private_accounts` em errors.ts). Aqui o
+   * estrago seria maior — 'auth' desconecta a conta E, como erro de auth não gasta tentativa, o
+   * destino volta pra fila e repete a mesma recusa no minuto seguinte: loop.
+   *
+   * MAS `type: OAuthException` sozinho não basta pra decidir: é o mesmo `type` que a Meta usa pro
+   * throttling (código 4/17/32/613 — ver o teste "limite de requisição" acima) e pro token
+   * REALMENTE morto (código 190). Os dois têm cara conhecida no corpo, e continuam 'auth' mesmo
+   * num Reel de teste — baixar throttling pra 'permanent' pararia de tentar um post que ia dar
+   * certo na próxima janela, e baixar um 190 de verdade deixaria a conta marcada 'active' com o
+   * token morto. Só o CÓDIGO NÃO RECONHECIDO (nem throttling, nem 190) é que rebaixamos pra
+   * 'permanent' quando o destino é um Reel de teste — é a melhor hipótese que dá pra ter sem saber
+   * o formato real da recusa de elegibilidade (nunca publicado contra a API real, ver
+   * funcionalidades.md).
    */
-  classifyError(err) {
-    return classifyByKnownCodes(err, {
+  classifyError(err, target) {
+    const classe = classifyByKnownCodes(err, {
       no_refresh_mechanism: 'auth',
       OAuthException: 'auth',
       '190': 'auth',
     });
+    if (classe === 'auth' && target && igTrialGraduation(target.options)) {
+      const codigo = metaErrorCode(err);
+      if (codigo === undefined || !KNOWN_AUTH_ERROR_CODES.has(codigo)) return 'permanent';
+    }
+    return classe;
   },
 };
 

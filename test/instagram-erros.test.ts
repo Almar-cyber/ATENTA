@@ -61,7 +61,7 @@ const destino: PostTarget = {
 };
 
 /** Tenta publicar contra uma Meta que responde o que o caso pedir, e devolve a classe do erro. */
-async function classeDoErro(status: number, corpo: unknown): Promise<string> {
+async function classeDoErro(status: number, corpo: unknown, alvo: PostTarget = destino): Promise<string> {
   await resetDb();
   await env.DB.prepare(
     `insert into accounts (id, platform, display_name, external_account_id, status, extra)
@@ -79,9 +79,9 @@ async function classeDoErro(status: number, corpo: unknown): Promise<string> {
   globalThis.fetch = (async () =>
     new Response(JSON.stringify(corpo), { status, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
   try {
-    await instagramAdapter.publish(destino, [video], conta, env as never);
+    await instagramAdapter.publish(alvo, [video], conta, env as never);
   } catch (err) {
-    return instagramAdapter.classifyError(err);
+    return instagramAdapter.classifyError(err, alvo);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -150,5 +150,50 @@ describe('recusa da Meta no container do Instagram', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+// REEL DE TESTE: a recusa por ELEGIBILIDADE (conta, seguidores — a Meta não publica o critério)
+// pode chegar no MESMO `type` genérico de erro de token, `OAuthException`. Tratar isso como 'auth'
+// sem mais nada desconectaria uma conta perfeitamente viva e, como erro de auth não gasta
+// tentativa, o destino voltaria pra fila pra repetir a mesma recusa no minuto seguinte — loop.
+// classifyError() só rebaixa pra 'permanent' quando (a) SABE que era um teste
+// (`target.options.trial_graduation`) E (b) o código dentro do erro não é um dos dois já
+// conhecidos (throttling 4/17/32/613, token morto 190) — esses continuam 'auth' mesmo em teste,
+// porque baixá-los pra 'permanent' esconderia um throttling passageiro ou uma conta com token
+// realmente morto.
+const destinoTeste: PostTarget = { ...destino, options: { format: 'reel', trial_graduation: 'MANUAL' } };
+
+describe('Reel de teste recusado pela Meta', () => {
+  it('OAuthException sem código conhecido, num Reel de teste, vira permanent — melhor hipótese sem saber o formato real da recusa', async () => {
+    const classe = await classeDoErro(
+      400,
+      { error: { message: 'Invalid parameter', type: 'OAuthException', code: 100 } },
+      destinoTeste
+    );
+    expect(classe).toBe('permanent');
+  });
+
+  it('o mesmo corpo, mas sem trial_graduation no destino, continua indo pra auth', async () => {
+    const classe = await classeDoErro(400, { error: { message: 'Invalid parameter', type: 'OAuthException', code: 100 } }, destino);
+    expect(classe).toBe('auth');
+  });
+
+  it('token REALMENTE morto (código 190) continua auth mesmo num Reel de teste — não esconde reauth de verdade', async () => {
+    const classe = await classeDoErro(
+      401,
+      { error: { message: 'Invalid OAuth access token', type: 'OAuthException', code: 190 } },
+      destinoTeste
+    );
+    expect(classe).toBe('auth');
+  });
+
+  it('limite de requisição num Reel de teste continua auth — não é elegibilidade, é throttling', async () => {
+    const classe = await classeDoErro(
+      400,
+      { error: { message: 'Application request limit reached', type: 'OAuthException', code: 4 } },
+      destinoTeste
+    );
+    expect(classe).toBe('auth');
   });
 });
