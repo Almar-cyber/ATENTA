@@ -29,7 +29,6 @@ import {
   YOUTUBE_LONG_VIDEO_WARN_SECONDS,
   findFormat,
   INSTAGRAM_TRIAL_GRADUATIONS,
-  INSTAGRAM_TRIAL_MIN_FOLLOWERS,
   igFormatOf,
   igTrialOf,
   isFeedRatioOk,
@@ -987,20 +986,6 @@ export function PostComposer({
                 <p className="text-xs text-muted-foreground">
                   {(INSTAGRAM_TRIAL_GRADUATIONS.find((g) => g.id === igTrial) ?? INSTAGRAM_TRIAL_GRADUATIONS[0]).hint}
                 </p>
-                {/* Não dá pra recusar antes de enviar: a contagem de seguidores não está aqui, e
-                    inventar um bloqueio com dado que não temos seria pior que avisar. Quem recusa
-                    de fato é o Instagram, na publicação.
-                    O texto separa o que é CERTO (conta profissional e pública) do que é RELATO
-                    (o piso de seguidores e o teto diário) — ver INSTAGRAM_TRIAL_MIN_FOLLOWERS. Dar
-                    o relato como regra faria a pessoa desistir de algo que ela talvez possa fazer,
-                    que é o oposto do que um aviso serve pra fazer. */}
-                {igTrial && (
-                  <p className="text-xs text-muted-foreground">
-                    Precisa de conta profissional e perfil público. Há relatos, não confirmados pela Meta, de um piso
-                    de ~{INSTAGRAM_TRIAL_MIN_FOLLOWERS.toLocaleString('pt-BR')} seguidores e de um teto diário. Em
-                    teste, não aparece no seu perfil.
-                  </p>
-                )}
               </div>
             )}
 

@@ -289,37 +289,33 @@ export function findFormat(platform: Platform, id: string | undefined): PostForm
  * mudar o `media_type`, e este não muda.
  *
  * Espelho do cliente, como todo o resto deste arquivo — a autoridade é o `validate()` do adapter.
+ *
+ * POR QUE NÃO HÁ AVISO DE EXIGÊNCIA JUNTO DESTA LISTA. Havia um, com duas partes, e as duas caíram:
+ *
+ * - "precisa de conta profissional" — garantido pela CONEXÃO, não pelo compositor. A conta do
+ *   Instagram é descoberta em `page?fields=instagram_business_account` (src/worker.ts), campo que
+ *   só existe para conta Business ou Criador ligada a uma Página. Conta pessoal não conecta, então
+ *   toda conta no seletor já cumpre isso — avisar era repetir uma condição já resolvida.
+ * - "piso de ~1.000 seguidores" — a Meta não publica piso nenhum (o anúncio dela diz só "eligible
+ *   creators"), e as fontes de terceiros DIVERGEM entre si, de 200 a 1.000. Escrever um dos dois
+ *   números dava a ele uma precisão que ele não tem, e mandava desistir quem talvez pudesse.
+ *
+ * Sobrou o que é consequência do teste, não requisito dele: sai só pra quem não segue, e não
+ * aparece no perfil enquanto durar. Quem recusa, se for o caso, é o Instagram na publicação.
  */
 export const INSTAGRAM_TRIAL_GRADUATIONS: { id: string; label: string; hint: string }[] = [
   { id: '', label: 'Todo mundo', hint: 'Sai pra todo mundo na hora.' },
   {
     id: 'MANUAL',
     label: 'Teste — eu abro depois',
-    hint: 'Só quem não te segue vê. Você abre pra todos depois, no app do Instagram.',
+    hint: 'Só quem não te segue vê, e ele não aparece no seu perfil. Você abre pra todos depois, no app do Instagram.',
   },
   {
     id: 'SS_PERFORMANCE',
     label: 'Teste — abre sozinho se render',
-    hint: 'Só quem não te segue vê. O Instagram abre sozinho se render.',
+    hint: 'Só quem não te segue vê, e ele não aparece no seu perfil. O Instagram abre sozinho se render.',
   },
 ];
-
-/**
- * O que se sabe sobre quem pode publicar Reel de teste — e o quanto se sabe.
- *
- * CERTO: precisa de conta **profissional** (Criador ou Empresa) e de perfil **público**. Conta
- * pessoal não tem o recurso.
- *
- * RELATADO, NÃO DOCUMENTADO: um mínimo de ~1.000 seguidores e um teto diário de testes. Os dois
- * aparecem em várias fontes do setor, atribuídos a um AMA do Instagram, mas **a Meta não publica
- * nenhum dos dois** — e os números de teto que circulam divergem entre si. Por isso o compositor
- * cita a faixa como relato, e não como regra: um aviso categórico que estiver errado é pior que um
- * aviso honesto, porque manda a pessoa desistir de algo que ela poderia fazer.
- *
- * Quem decide de fato é a Meta, na publicação — não temos a contagem de seguidores deste lado pra
- * recusar antes.
- */
-export const INSTAGRAM_TRIAL_MIN_FOLLOWERS = 1000;
 
 /**
  * A graduação gravada num destino, ou `undefined` quando o Reel é comum.
