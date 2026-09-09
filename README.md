@@ -326,9 +326,10 @@ Story não têm modo de teste, nem no app nem na API (o `trial_params` só é ac
 só pra quem **não segue** a conta, pra você medir antes de mostrar aos seguidores; depois ele gradua
 (você abre dentro do app, ou o Instagram abre sozinho se render). Enquanto está em teste ele não
 aparece no perfil — e por isso some da grade até graduar. Exige **conta profissional** (Criador ou
-Empresa) e **perfil público**; há relatos de um mínimo de ~1.000 seguidores e de um teto diário de
-testes, mas a Meta não documenta nenhum dos dois. Quem recusa, se for o caso, é o Instagram na
-publicação — a contagem de seguidores não está do nosso lado pra checar antes.
+Empresa), o que **toda conta conectada já é**: o vínculo vem de `instagram_business_account`, que só
+existe pra Business/Criador ligada a uma Página. Circula também um piso de seguidores, mas a Meta não
+publica nenhum e as fontes divergem entre si (de 200 a 1.000) — por isso o compositor não cita
+número. Quem recusa, se for o caso, é o Instagram na publicação.
 
 **Abrir pra todo mundo depois do teste é no app do Instagram** — a API não tem endpoint pra isso, e
 é lá também que ficam os números do teste comparados aos seus Reels de sempre. O que o ATENTA faz é

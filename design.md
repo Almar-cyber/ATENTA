@@ -150,13 +150,17 @@ Reel e não um quarto formato: o critério pra ser formato, aqui, é mudar o `me
 
 Três consequências que não são óbvias:
 
-1. **Exige conta profissional (Criador ou Empresa) e perfil público** — isso é firme. Um mínimo de
-   ~1.000 seguidores e um teto diário de testes são **relatados e não documentados**: aparecem em
-   várias fontes do setor, atribuídas a um AMA do Instagram, mas a Meta não publica nenhum dos dois,
-   e os tetos que circulam divergem. O compositor separa as duas coisas de propósito — dar relato
-   como regra faz a pessoa desistir de algo que talvez possa fazer. De um jeito ou de outro não dá
-   pra recusar na criação (a contagem não está do nosso lado), então ele **avisa** em vez de
-   bloquear; quem recusa de fato é a Meta, na publicação.
+1. **Exige conta profissional (Criador ou Empresa), e isso já está garantido antes do compositor.**
+   A conta do Instagram é descoberta em `page?fields=instagram_business_account`
+   (`handleMetaCallback`), campo que só existe pra conta Business ou Criador ligada a uma Página —
+   conta pessoal não conecta. Toda conta no seletor já cumpre a exigência, então o compositor não a
+   repete.
+   Um **piso de seguidores** é outra história: a Meta não publica nenhum (o anúncio dela fala só em
+   "eligible creators") e as fontes de terceiros divergem entre si, de 200 a 1.000. Citar um dos
+   números dava a ele uma precisão que ele não tem e mandava desistir quem talvez pudesse — por isso
+   o compositor não cita. Quem recusa, se for o caso, é a Meta na publicação; a contagem existe do
+   nosso lado (`account_metrics.followers`, coletada em `src/metrics/instagram.ts`), mas sem um
+   critério confiável pra comparar ela não decide nada.
 2. **Enquanto está em teste ele não aparece no perfil.** Some da grade do Instagram até graduar; ver
    `web/src/lib/gridTiles.ts`, que usa o feed real como autoridade sobre o que está no perfil.
 3. **A graduação não nos avisa.** Acontece dentro do app (MANUAL) ou sozinha (SS_PERFORMANCE), sem
