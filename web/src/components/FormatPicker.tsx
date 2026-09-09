@@ -37,7 +37,9 @@ export function FormatPicker({
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
-      <p className="text-xs text-muted-foreground">{current.hint}</p>
+      {/* Sem dica, sem linha: a maioria dos formatos não tem nada a dizer que a validação não
+          diga melhor, na hora do erro. Ver o comentário de `hint` em PLATFORM_FORMATS. */}
+      {current.hint && <p className="text-xs text-muted-foreground">{current.hint}</p>}
     </div>
   );
 }

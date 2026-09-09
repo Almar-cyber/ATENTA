@@ -319,7 +319,10 @@ diferença real de API, não só de preview:
 | **Reel** | `REELS` | um vídeo, vertical | imagem própria (`cover_url`) ou frame |
 | **Story** | `STORIES` | um arquivo, até 60s | — |
 
-**Reel de teste**: escolhendo Reel, aparece "Quem vê primeiro" nos ajustes por rede. *Teste* publica
+**Reel de teste**: escolhendo Reel, a dica do formato já convida ("dá pra testar o engajamento com
+quem não segue") e o **"Quem vê primeiro"** aparece nos ajustes por rede. **É só do Reel** — Post e
+Story não têm modo de teste, nem no app nem na API (o `trial_params` só é aceito em container
+`media_type=REELS`). *Teste* publica
 só pra quem **não segue** a conta, pra você medir antes de mostrar aos seguidores; depois ele gradua
 (você abre dentro do app, ou o Instagram abre sozinho se render). Enquanto está em teste ele não
 aparece no perfil — e por isso some da grade até graduar. Exige **conta profissional** (Criador ou

@@ -187,7 +187,19 @@ export function isFeedRatioOk(width?: number | null, height?: number | null): bo
 export interface PostFormat {
   id: string;
   label: string;
-  hint: string;
+  /**
+   * A dica sob o seletor — e ela NÃO descreve o formato.
+   *
+   * Descrever ("um vídeo só", "carrossel até 10", "até 60s") era repetir o que a validação já cobra
+   * na hora certa, com o texto certo: "Anexe um arquivo", "Deixe um arquivo só — Reel não aceita
+   * carrossel", "Corte o vídeo para no máximo 1min". Aviso que aparece antes de haver problema é
+   * texto que a pessoa aprende a pular, e ela já sabe que precisa anexar alguma coisa.
+   *
+   * Sobra só o que a validação NUNCA vai dizer, porque não é erro: uma possibilidade que a pessoa
+   * não descobriria (o Reel de teste) ou uma ressalva sobre o que a escolha não faz (o Short, que o
+   * YouTube classifica sozinho). Formato sem nada disso fica sem dica.
+   */
+  hint?: string;
   shape: PreviewShape;
   recommended: MediaSpec;
   /** Vídeo obrigatório, imagem proibida, ou tanto faz. */
@@ -210,7 +222,6 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'post',
       label: 'Post',
-      hint: 'Feed. Foto, carrossel de até 10, ou vídeo — sem capa própria.',
       shape: 'square',
       recommended: { width: 1080, height: 1350, ratio: '4:5' },
       media: 'any',
@@ -221,7 +232,10 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'reel',
       label: 'Reel',
-      hint: 'Vertical, um vídeo só, entra na aba de Reels. Aceita capa.',
+      // A última frase é o convite pro Reel de teste, e ela mora AQUI e não na dica do Post: quem
+      // vai testar é quem já cogitou um Reel. Dito no Post, seria texto fixo na tela de todo mundo
+      // que agenda uma foto — pela ausência de um campo que aquela pessoa não estava procurando.
+      hint: 'Dá pra testar o engajamento com quem não segue.',
       shape: 'story',
       recommended: { width: 1080, height: 1920, ratio: '9:16' },
       media: 'video',
@@ -231,7 +245,6 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'story',
       label: 'Story',
-      hint: 'Some em 24h. Um arquivo, até 60s, e a legenda não aparece.',
       shape: 'story',
       recommended: { width: 1080, height: 1920, ratio: '9:16' },
       media: 'any',
@@ -243,7 +256,6 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'video',
       label: 'Vídeo',
-      hint: 'Horizontal, sem limite de duração.',
       shape: 'wide',
       recommended: { width: 1920, height: 1080, ratio: '16:9' },
       media: 'video',
@@ -253,7 +265,7 @@ export const PLATFORM_FORMATS: Partial<Record<Platform, PostFormat[]>> = {
     {
       id: 'short',
       label: 'Short',
-      hint: 'Vertical e até 3min. O YouTube classifica sozinho — aqui é só a previsão.',
+      hint: 'Quem classifica é o YouTube (vertical, até 3min) — aqui é só a previsão.',
       shape: 'story',
       recommended: { width: 1080, height: 1920, ratio: '9:16' },
       media: 'video',
@@ -279,16 +291,16 @@ export function findFormat(platform: Platform, id: string | undefined): PostForm
  * Espelho do cliente, como todo o resto deste arquivo — a autoridade é o `validate()` do adapter.
  */
 export const INSTAGRAM_TRIAL_GRADUATIONS: { id: string; label: string; hint: string }[] = [
-  { id: '', label: 'Todo mundo', hint: 'Reel normal: sai pra quem te segue e pro perfil na hora.' },
+  { id: '', label: 'Todo mundo', hint: 'Sai pra todo mundo na hora.' },
   {
     id: 'MANUAL',
     label: 'Teste — eu abro depois',
-    hint: 'Só quem não te segue vê. Você decide, dentro do app do Instagram, quando abrir pra todo mundo.',
+    hint: 'Só quem não te segue vê. Você abre pra todos depois, no app do Instagram.',
   },
   {
     id: 'SS_PERFORMANCE',
     label: 'Teste — abre sozinho se render',
-    hint: 'Só quem não te segue vê. O Instagram abre pra todo mundo sozinho se o desempenho justificar.',
+    hint: 'Só quem não te segue vê. O Instagram abre sozinho se render.',
   },
 ];
 

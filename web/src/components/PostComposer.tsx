@@ -768,9 +768,15 @@ export function PostComposer({
             onCrop={requestCrop}
             onAdd={() => fileRef.current?.click()}
           />
-          <p className="text-xs text-muted-foreground">
-            {queue.length > 1 ? 'Arraste pra reordenar. ' : '2+ imagens viram carrossel. '}JPEG, PNG, MP4 ou MOV.
-          </p>
+          {/* Com a fila VAZIA não há dica: o tile pontilhado e o "Anexe um arquivo" já dizem o que
+              fazer, e uma terceira linha em volta de uma caixa vazia é só ruído. A regra do
+              carrossel entra quando ela passa a valer alguma coisa — com um arquivo dentro, que é
+              quando anexar mais um é a próxima ação possível. */}
+          {queue.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {queue.length > 1 ? 'Segure e arraste pra reordenar.' : '2+ arquivos viram carrossel.'}
+            </p>
+          )}
           <ComposerHints hints={hints} field="media" />
         </div>
 
@@ -788,7 +794,7 @@ export function PostComposer({
                   onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Capa para {coverImageNetworks.join(' e ')} — no Instagram é a capa do Reel. É ela que aparece na pré-visualização.
+                  Capa para {coverImageNetworks.join(' e ')} — é ela que aparece na pré-visualização.
                 </p>
                 {coverFile && (
                   <div className="flex items-center gap-2">
@@ -822,8 +828,7 @@ export function PostComposer({
                   placeholder="ex.: 2.5"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Segundo do vídeo usado como capa em {coverFrameNetworks.join(' e ')} — essas redes não
-                  aceitam imagem própria.
+                  Segundo do vídeo que vira capa em {coverFrameNetworks.join(' e ')} — elas não aceitam imagem própria.
                 </p>
               </>
             )}
@@ -991,10 +996,9 @@ export function PostComposer({
                     que é o oposto do que um aviso serve pra fazer. */}
                 {igTrial && (
                   <p className="text-xs text-muted-foreground">
-                    Precisa de conta profissional (Criador ou Empresa) e perfil público. Há relatos de um mínimo de{' '}
-                    ~{INSTAGRAM_TRIAL_MIN_FOLLOWERS.toLocaleString('pt-BR')} seguidores e de um teto diário de testes,
-                    mas a Meta não documenta nenhum dos dois. Enquanto estiver em teste ele não aparece no seu perfil —
-                    some da grade até graduar.
+                    Precisa de conta profissional e perfil público. Há relatos, não confirmados pela Meta, de um piso
+                    de ~{INSTAGRAM_TRIAL_MIN_FOLLOWERS.toLocaleString('pt-BR')} seguidores e de um teto diário. Em
+                    teste, não aparece no seu perfil.
                   </p>
                 )}
               </div>
